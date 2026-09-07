@@ -177,6 +177,22 @@
 > session: its wall is the FRESH gear revolve's Stage-0 emission (4,004
 > asymmetric edges, 579 improper contacts on the post-overlay B) — the R0053
 > family one layer further, PROBE row (`docs/yang_tail_triage.md`).
+>
+> **2026-09-07 (night) — R0049 CONVERTED ⇒ 280C/0W/26E/4EE/0T NEW
+> CANONICAL; R0019 advances a wall.** R0049's I6 `NonManifoldInput`
+> backstop was a ROUNDING PLEAT: the exact arrangement's two slivers (an
+> 89.1° cone of the tilted rectangle revolve, a gear-flank plane) share
+> the curve edge and have apexes one exact point apart up to rounding
+> (4e-19 … 9e-19 at band 1e-12); the bit-exact curved-input weld fused the
+> apexes and the pair became one triple with opposite windings — the
+> F0082 `s194` zero-area-flap class reaching the backstop before Stage 4.
+> Fix: I6.6 `cancel_subresolution_pleats` (spec
+> `yang_146_collapsed_wedge_dedup.md` §7) — an exactly-two opposite-winding
+> pair pairwise within the KV10 rounding band cancels under the membrane
+> rule, lockstep + orphan compaction; everything else (a4 adversary,
+> same-winding, ≥3 copies) stays loud, the curved weld stays bit-exact.
+> One category move, one detail move (R0019: the same backstop, now a
+> kernel-v2 ring-reject at 318 s). The `NonManifoldInput` family is EMPTY.
 
 The kernel rewrite is **live in the app**. The legacy `crates/kernel/` is
 DELETED; the app, feature-engine, and all tests run on `kernel-v2` through the

@@ -174,3 +174,46 @@ Corpus (release assay, 312):
   (the §4 edge-level shadow, expected and loud) + the F0090 flake. The
   P3a gate-ON regression set shrank {F0016, F0084, F0085} → {F0084}.
 - 0 WRONG in both gate states — ratchet holds.
+
+## 7. I6.6 — sub-resolution pleat cancellation (2026-09-07, SHIPPED always-on)
+
+**Measured (R0049 op 2, `revolve(rectangle)` 192° − `extrude(gear)`, model
+scale 4.3e-3, Stage 0 off).** The I6 backstop STOPped `NonManifoldInput`
+on the compact triple `[63, 66, 87]` carried by TWO surviving triangles —
+`orig_t 139` raw `[92, 70, 75]` (A face 2, a Cone of half-angle 89.1°) and
+`orig_t 2802` raw `[75, 92, 93]` (B face 198, a gear-flank Plane) — with
+OPPOSITE windings (`i6-wedge-dedup: REJECT(winding)`). All three compact
+vertices lie within 4e-19 … 9e-19 of one point (KV10 rounding band
+`TAU_WORK·(1+scale)` = 1.0e-12); the weld fused la-verts 70 and 93 (bit-
+identical after rounding) and left 75, 92 distinct. Anatomy: the exact
+arrangement's two slivers — one per operand — share the intersection-curve
+edge (92,75) and have apexes 70 (on A) / 93 (on B) that are one exact point
+up to rounding: a ROUNDING PLEAT, the F0082 `s194` zero-area-flap class
+(`collapse_subtauwork_mesh_edges`, Stage 4) whose apex twins happened to
+round identically, so it reached the I6 backstop before Stage 4 could
+collapse it. The ledger had read the row as "~97-run fragmentation,
+inconclusive".
+
+**Rule.** At the I6 guard (`cancel_subresolution_pleats`), a duplicate
+group of EXACTLY two triangles with OPPOSITE cyclic windings whose three
+vertices are pairwise within the rounding band is cancelled — both dropped
+— under the membrane rule (`yang_collapse_membrane_cancellation` I1: the six
+directed edges are three mutual-reverse pairs; every remaining pairing count
+is unchanged). `tris`/`orig_tri` filter in lockstep; vertices the
+cancellation orphans are compacted out and the welded→compact `remap`
+re-keyed. Same-winding pairs, ≥3-copy groups and any pair with a separation
+beyond the band (the a4 adversary's macroscopic coincident faces) keep the
+loud `NonManifoldInput`. The curved-input weld stays bit-exact (the KV9
+lens-tip contract §2 is untouched): the exception admits only a pair that
+already carries no f64 geometry.
+
+**Why this is the structural answer and not a band.** The band is the KV10
+ROUNDING band — the same constant the all-planar weld, Stage 0's
+`sub_resolution_contract` and Stage 4's `s194` collapse use — six orders
+below `MIN_FEATURE_SIZE`; nothing a model can express qualifies. The
+cancellation removes structure that has NO f64 image (Hobby snap-rounding
+at f64 resolution), exactly as those three siblings do at their sites.
+
+Pins (`tests_unit/i6_subres_pleat.rs`): cancel + lockstep + compaction +
+remap re-key; macroscopic opposite pair loud; sub-band same-winding loud;
+third copy loud; clean set byte-identical.

@@ -372,6 +372,113 @@ fn output_improper_count(brep: &BRep) -> usize {
 /// exposes a latent Stage-4 relocation gap that rim-snap closes (the
 /// `n2_junction_cluster::i1` oracle is RED with this arm alone and GREEN with
 /// both). The two must stay on together.
+/// I6 coincident-triple guard with the I6.6 sub-resolution pleat exception.
+///
+/// Scans the compacted kept set for two surviving triangles on the SAME
+/// vertex triple. A valid exact arrangement never emits such a pair — except
+/// as the rounding image of a pleat: two slivers (one per operand) sharing an
+/// intersection-curve edge whose apexes are ONE exact point within the
+/// rounding band, so the bit-exact weld fuses them and the pair becomes one
+/// triple with OPPOSITE windings (R0049 op 2, cone × gear-flank plane: all
+/// three vertices within 9e-19 at model scale 4e-3, band 1e-12). Such a
+/// pair has no f64 image and is a zero-volume fin: dropping BOTH preserves
+/// every directed-edge pairing (spec `yang_collapse_membrane_cancellation`
+/// I1). The test is the KV10 rounding band `TAU_WORK·(1 + scale)` on all
+/// three pairwise separations — six orders below `MIN_FEATURE_SIZE`, so no
+/// model feature can qualify; the a4 adversary (macroscopic coincident faces)
+/// and same-winding or ≥3-copy groups stay LOUD (P9).
+///
+/// `tris` and `orig_tri` are filtered in lockstep (the 2026-09-07 membrane
+/// lesson); vertices left unreferenced by a cancellation are compacted out
+/// and `remap` (welded → compact) re-keyed, so the kept submesh carries no
+/// dangling vertex. Returns the number of triangles cancelled, or the two
+/// compact indices of a pair that must stay loud.
+pub(crate) fn cancel_subresolution_pleats(
+    verts: &mut Vec<Point3>,
+    tris: &mut Vec<[u32; 3]>,
+    orig_tri: &mut Vec<usize>,
+    remap: &mut [Option<u32>],
+) -> Result<usize, (usize, usize)> {
+    use std::collections::{BTreeSet, HashMap};
+    debug_assert_eq!(tris.len(), orig_tri.len());
+    let winding_key = |tri: [u32; 3]| -> [u32; 3] {
+        let k = (0..3).min_by_key(|&i| tri[i]).expect("3 verts");
+        [tri[k], tri[(k + 1) % 3], tri[(k + 2) % 3]]
+    };
+    let sub_band = |sorted: [u32; 3]| -> bool {
+        let pts = sorted.map(|v| verts[v as usize].as_array());
+        (0..3).all(|i| {
+            let (p, q) = (pts[i], pts[(i + 1) % 3]);
+            let band = cad_primitives::TAU_WORK
+                * (1.0 + p.iter().chain(q.iter()).fold(0.0f64, |m, c| m.max(c.abs())));
+            (0..3).all(|k| (p[k] - q[k]).abs() <= band)
+        })
+    };
+    let mut seen: HashMap<[u32; 3], usize> = HashMap::with_capacity(tris.len());
+    let mut cancel: BTreeSet<usize> = BTreeSet::new();
+    for (ci, t) in tris.iter().enumerate() {
+        let mut sorted = *t;
+        sorted.sort_unstable();
+        if let Some(&prev_ci) = seen.get(&sorted) {
+            let opposite = winding_key(tris[prev_ci]) != winding_key(*t);
+            // A third copy on an already-cancelled triple is a ≥3 group:
+            // never silently paired (`seen` keeps the first copy so it is
+            // found here).
+            if opposite && !cancel.contains(&prev_ci) && sub_band(sorted) {
+                if std::env::var_os("NONMANIFOLD_SITE_PROBE").is_some() {
+                    eprintln!(
+                        "NONMANIFOLD_SITE_PROBE i6.6-subres-pleat: CANCEL compact {prev_ci} {:?} \
+                         + compact {ci} {:?} (opposite winding, all separations within the \
+                         rounding band)",
+                        tris[prev_ci], t
+                    );
+                }
+                cancel.insert(prev_ci);
+                cancel.insert(ci);
+                continue;
+            }
+            return Err((prev_ci, ci));
+        }
+        seen.insert(sorted, ci);
+    }
+    if cancel.is_empty() {
+        return Ok(0);
+    }
+    let keep: Vec<usize> = (0..tris.len()).filter(|t| !cancel.contains(t)).collect();
+    *tris = keep.iter().map(|&t| tris[t]).collect();
+    *orig_tri = keep.iter().map(|&t| orig_tri[t]).collect();
+    // Compact out any vertex the cancellation left unreferenced.
+    let mut used = vec![false; verts.len()];
+    for t in tris.iter() {
+        for &v in t {
+            used[v as usize] = true;
+        }
+    }
+    if used.iter().any(|&u| !u) {
+        let mut new_index = vec![u32::MAX; verts.len()];
+        let mut new_verts: Vec<Point3> = Vec::with_capacity(verts.len());
+        for (i, &u) in used.iter().enumerate() {
+            if u {
+                new_index[i] = new_verts.len() as u32;
+                new_verts.push(verts[i]);
+            }
+        }
+        for t in tris.iter_mut() {
+            for v in t.iter_mut() {
+                *v = new_index[*v as usize];
+            }
+        }
+        for slot in remap.iter_mut() {
+            if let Some(c) = *slot {
+                let n = new_index[c as usize];
+                *slot = if n == u32::MAX { None } else { Some(n) };
+            }
+        }
+        *verts = new_verts;
+    }
+    Ok(cancel.len())
+}
+
 pub fn boolean(
     a: &BRep,
     b: &BRep,
@@ -1733,13 +1840,26 @@ fn boolean_once(
     // a4 fixture's two tris over bit-exact-coincident vertices. A valid
     // arrangement has no such pair; reject it. (Compact indices are 1:1 with
     // welded indices, so a sorted-index key suffices.)
-    {
-        use std::collections::HashMap;
-        let mut seen: HashMap<[u32; 3], usize> = HashMap::with_capacity(compact_tris.len());
-        for (ci, t) in compact_tris.iter().enumerate() {
-            let mut sorted = *t;
-            sorted.sort_unstable();
-            if let Some(&prev_ci) = seen.get(&sorted) {
+    //
+    // (I6.6, 2026-09-07) One exception, band-scoped: an exactly-two,
+    // OPPOSITE-winding pair whose three vertices are pairwise within the
+    // KV10 rounding band is a SUB-RESOLUTION PLEAT — the F0082/s194 zero-area
+    // flap class whose apex twins happened to round bit-identically (R0049:
+    // an A-cone sliver and a B-plane sliver sharing an edge, apexes 4e-19
+    // apart, welded onto one triple with opposite windings). It has no f64
+    // image and cancels under the membrane rule (spec
+    // `yang_collapse_membrane_cancellation`); see
+    // `cancel_subresolution_pleats`. Everything else stays loud.
+    if let Err((prev_ci, ci)) = cancel_subresolution_pleats(
+        &mut compact_verts,
+        &mut compact_tris,
+        &mut orig_tri,
+        &mut remap,
+    ) {
+        let mut sorted = compact_tris[ci];
+        sorted.sort_unstable();
+        {
+            {
                 if std::env::var_os("NONMANIFOLD_SITE_PROBE").is_some() {
                     eprintln!(
                         "NONMANIFOLD_SITE_PROBE i6-coincident-tris: verts {:?} coords {:?} {:?} {:?}",
@@ -1811,7 +1931,6 @@ fn boolean_once(
                 }
                 return Err(YangError::NonManifoldInput);
             }
-            seen.insert(sorted, ci);
         }
     }
     // (#146 inc-3b probe, print-only) Edge-over-use provenance: scan the

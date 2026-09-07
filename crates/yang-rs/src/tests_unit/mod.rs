@@ -13,6 +13,7 @@ mod boolean_functional;
 mod construction_stage1;
 mod i13_junction_overrun;
 mod i5_seam_density;
+mod i6_subres_pleat;
 mod kv14_chord_sided_band;
 mod m4_substitute;
 mod m5_case_iii;
@@ -58,6 +59,8 @@ pub(crate) use attribution::*;
 pub(crate) use boolean_functional::*;
 #[allow(unused_imports)]
 pub(crate) use construction_stage1::*;
+#[allow(unused_imports)]
+pub(crate) use i6_subres_pleat::*;
 #[allow(unused_imports)]
 pub(crate) use m4_substitute::*;
 #[allow(unused_imports)]

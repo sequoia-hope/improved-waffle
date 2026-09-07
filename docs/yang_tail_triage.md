@@ -92,6 +92,56 @@ now STOPs at Stage 6 `reassembled output would be non-2-manifold`, 189.5
 s — the non-2-manifold INPUT-after-overlay family is down to R0019/R0049).
 
 
+## 2026-09-07 (night) — R0049 CONVERTED: the I6 `NonManifoldInput` backstop was a ROUNDING PLEAT (two sub-band slivers sharing a curve edge, apexes welded bit-identically); I6.6 band-scoped membrane cancellation landed; R0019 advances a wall; NEW CANONICAL 280C / 0W / 26E / 4EE / 0T
+
+Picked as the fastest member (1.2 s) of the family R0081's 209 s wall
+belongs to. Probed with `NONMANIFOLD_SITE_PROBE` + `YANG_INPUT_SELFX_PROBE`
++ `YANG_STAGE0_DUMP_DIR`: op 2 (`revolve(rectangle)` 192° − `extrude(gear)`,
+scale 4.3e-3) has NO coplanar pair (Stage 0 off), both operand meshes are
+conformal and self-contact free — so the wall is NOT the R0053/R0081
+Stage-0 emission class and not the ledger's "~97-run fragmentation". It is
+the post-weld I6 coincident-triple backstop (`boolean.rs`, the a4 adversary
+contract): compact triple `[63, 66, 87]` carried by `orig_t 139` raw
+`[92, 70, 75]` (A face 2, a **Cone of half-angle 89.1°** — the tilted
+rectangle's near-flat side) and `orig_t 2802` raw `[75, 92, 93]` (B face
+198, a gear-flank Plane) with OPPOSITE windings (`i6-wedge-dedup:
+REJECT(winding)`). All three compact vertices are within **4e-19 … 9e-19**
+of one point (band `TAU_WORK·(1+scale)` = 1.0e-12, six orders above); the
+bit-exact curved-input weld fused la-verts 70 ↔ 93 (identical after
+rounding) and left 75, 92 distinct. Anatomy: the exact arrangement's two
+slivers — one per operand — share the intersection-curve edge (92,75) and
+their apexes are ONE exact point up to rounding: the **F0082 `s194`
+zero-area-flap class** whose apex twins rounded identically, reaching the
+I6 backstop before Stage 4's `collapse_subtauwork_mesh_edges` could cancel
+it.
+
+**Fix (always-on): I6.6 sub-resolution pleat cancellation**
+(`cancel_subresolution_pleats`, spec `yang_146_collapsed_wedge_dedup.md`
+§7). At the I6 guard, a duplicate group of EXACTLY two triangles with
+OPPOSITE windings whose three vertices are pairwise within the KV10
+rounding band cancels — both dropped — under the membrane rule
+(`yang_collapse_membrane_cancellation` I1, edge-pairing preserved);
+`tris`/`orig_tri` filter in lockstep, orphaned vertices are compacted out
+and the welded→compact `remap` re-keyed. Same-winding pairs, ≥3-copy
+groups and any macroscopic pair (the a4 adversary) keep the loud
+`NonManifoldInput`; the curved-input weld stays bit-exact (KV9 lens-tip
+contract untouched). 5 pins (`tests_unit/i6_subres_pleat.rs`). R0049: TWO
+pleats cancelled ⇒ **SUPPORTED_CORRECT, 2.7 s**. yang-rs 1324 green,
+clippy `--all-targets` clean.
+
+**Corpus (release, 8 jobs, 600 s; wall 725.9 s, F0085 314.4 s, R0044
+282.7 s, R0019 317.9 s): 280C / 0W / 26E / 4EE / 0T — NEW CANONICAL.** One
+category move (R0049 ERROR → CORRECT) and ONE detail move: **R0019** —
+whose row had carried "operand A is a 2-vertex/3-face revolve-primitive
+B-Rep the yang input gate cannot accept (KV6/scope)" since 2026-07-17 — was
+in fact STOPping at this same I6 backstop (its `input B-Rep is not
+2-manifold` text is the backstop's `NonManifoldInput`), i.e. a second
+pleat customer; it now clears the boolean and STOPs one crate later at
+kernel-v2 `TessellationFailed { face: FaceId(649), reason: "ring rejected
+by CDT (degenerate/self-intersecting)" }` (317.9 s, was 161 s) — the
+developable / planar ring-reject family (R0100 kin). Its row is
+re-vehicled below. The `NonManifoldInput` family is now EMPTY.
+
 ## 2026-09-07 (evening) — R0051 CONVERTED: its Stage-6 `s6-planar-loop-nonplanar` STOP was a Stage-4 PLUMBING defect — `remove_doubled_membranes` filtered `mesh.tris` but not the attribution vector; NEW CANONICAL 279C / 0W / 27E / 4EE / 0T
 
 The row below carried `SUSPECTED #146 Newell-normal class` since 2026-07-16 and
@@ -336,7 +386,7 @@ moved. The 30 ERROR rows are the ACTIVE rows below.
 | ~~R0032~~ | Stage-4 LRR v32 | probe 2026-07-18: `YANG_TORUS_STOP site=pair_newton_none` — **torus×Cone** implicit-pair Newton non-convergence (torus R=45.6/r=30.4 × cone half-angle 1.19 rad); sibling verts with cone partners relocate fine — v32's specific pair diverges | CONFIRMED (#171 pass 2) | P3b/M5-residual (torus×cone pair Newton) **2026-08-19: NOT a Newton limitation** — the torus×cone divergence was the cone step overshoot (α=1.19 rad, ratio −1.7 = 1−sec α; `YANG_PAIR_NEWTON_TRACE`) → FIXED. NOW: Stage-6 `reassembled output would be non-2-manifold` (unprobed) **2026-08-24: that wall PEELED by the §4.5.3 pair-chain sweep (N59) — out-of-order pair-relocated vertices; the chain now advances to the recognized curved partial-patch NotSupported boundary (FaceId 593) ⇒ UNSUPPORTED(curved-profile), a loud capability boundary** **2026-09-04: KV14 Slice F-3 (torus DISK re-entry) LANDED — FaceId 593's lone 57-chord loop tessellates through the UV-CDT disk branch; R0032 now STOPs in the Stage-4 torus block at `gt2_partners` v7 (a union-arrangement vertex with MORE than two partner surfaces on the torus; v67 `triple_newton_none` recorded first) ⇒ ERROR (LRR), the corner-junction family** **2026-09-07: that `gt2_partners` wall had been measured on a CRACKED Stage-1 input — the 2026-09-05 rim density moved the case (unledgered) to `face 3: partial-cone arc chains have mismatched sample counts (4 vs 3)`, a chord-sided cone band `[A,L,L,L,A,L,L,L]` the partial-strip arm dispatched on without counting edges (see the 2026-09-07 section). FIXED (strip = the 4-edge pairable wall; else the chart CDT). NOW: Stage 6 `reassembled output would be non-2-manifold` — `s4-shell-euler` double cover, PROBE row in the 2026-09-07 section (the #146 corner-junction family)** **2026-09-07 (later): CONVERTED — that Stage-6 double cover was the Stage-2 resolution of a Stage-1 self-intersection of the re-entering body (torus skin 0.62 over a buried tooth tip, chord sag 0.63); the Stage-1 self-contact guard refines face 0 (one round) ⇒ SUPPORTED_CORRECT; canonical 278C/0W/28E/4EE/0T** |
 | ~~R0035~~ | ~~Stage-4 LRR v194~~ | ~~v194 is `ellipse=true + surface_pair=true + endpoint` — Ellipse endpoint also on `SurfacePair{Cylinder×Cylinder}` → surface-pair endpoint-mix STOP, R0044 class~~ **FLIPPED CORRECT 2026-07-28 (triple-block wiring):** v194/v195 have exactly 3 incident surfaces `{cyl_A, cyl_B, plane_B}` — the increment-5 conic triple junction, which had simply never counted `vert_surface_pair` as a curve-bearing map | — | ~~P3-junction~~ DONE |
 | ~~R0047~~ | ~~Stage-4 LRR (u32::MAX)~~ reassembled output non-2-manifold (Stage 6) | **FLIPPED CORRECT 2026-08-19 (c10820b8); reconciled 2026-09-04 from the committed results.json history** ~~probe 2026-07-17: `site=split_max_passes` — same class as R0009~~ **RE-DIAGNOSED + LAYER PEELED 2026-08-19:** the R0009 absolute-floor class exactly (2.09e-4 scale; 5168 healthy-triangle unzips in 62 s before the cap). Post-fix zero unzip actions; advances to a Stage-6 reassembly non-2-manifold wall (unprobed) | CONFIRMED (2026-08-19) | Reassembly non-2-manifold family (was P3-§4.5.2) |
-| R0049 | ~~non-2-manifold (reassembly)~~ ring rejected by CDT (FaceId 575) | ~~probe 2026-07-17: `s6-planar-loop-nonplanar` face 134 vert 337 off-plane 1.449e-6 (band 1.0e-7) — the F0064 class (N51)~~ **DRIFTED 2026-07-29:** now fails as a ring-reject on a **developable** patch (FaceId 575, `tessellate_developable_patch` — not planar). 214 origin nodes, 0 arc samples, folds at idx 1/45/46 (144.2°, 180.0°, 176.6°). **NOT counted as seam-class:** the ring breaks into **~97 adjacency runs**, so ~45% of ring indices are seams and "fold near seam" carries no information. The **fragmentation itself** is the signal — a boundary shattered into ~97 micro-chains against different neighbour faces, which reads as the near-coincident-surface incidence family (R0050/R0053 kin) and is consistent with the old `s6-planar-loop-nonplanar` diagnosis. **CAVEAT: the run-splitting heuristic (twin-id delta > 12 or sign change) is crude and may over-fragment on irregular id allocation — verify the 97 before building on it** | PARTIAL (builder + fragmentation measured 2026-07-29; mint unconfirmed) | Stage-2/3 incidence (near-coincident surfaces) — was P3a-#146 |
+| ~~R0049~~ | ~~non-2-manifold (reassembly)~~ ~~ring rejected by CDT (FaceId 575)~~ **FLIPPED CORRECT 2026-09-07 (night): the live wall was the I6 `NonManifoldInput` backstop on a ROUNDING PLEAT (two sub-band slivers, cone × gear-flank plane, apexes welded bit-identically) — never fragmentation; I6.6 band-scoped membrane cancellation** | (history: ~~probe 2026-07-17: `s6-planar-loop-nonplanar` face 134 vert 337 off-plane 1.449e-6 (band 1.0e-7) — the F0064 class (N51)~~ **DRIFTED 2026-07-29:** now fails as a ring-reject on a **developable** patch (FaceId 575, `tessellate_developable_patch` — not planar). 214 origin nodes, 0 arc samples, folds at idx 1/45/46 (144.2°, 180.0°, 176.6°). **NOT counted as seam-class:** the ring breaks into **~97 adjacency runs**, so ~45% of ring indices are seams and "fold near seam" carries no information. The **fragmentation itself** is the signal — a boundary shattered into ~97 micro-chains against different neighbour faces, which reads as the near-coincident-surface incidence family (R0050/R0053 kin) and is consistent with the old `s6-planar-loop-nonplanar` diagnosis. **CAVEAT: the run-splitting heuristic (twin-id delta > 12 or sign change) is crude and may over-fragment on irregular id allocation — verify the 97 before building on it** | PARTIAL (builder + fragmentation measured 2026-07-29; mint unconfirmed) | Stage-2/3 incidence (near-coincident surfaces) — was P3a-#146) | CONFIRMED (i6-coincident-tris probe) | DONE |
 | R0050 | Stage-4 LRR v58 | probe 2026-07-18: `YANG_TORUS_STOP site=gt2_partners` with **partners=[] (EMPTY)** — v58 (and v362 on the sibling torus) sit on torus intersection edges whose incidence records only ONE distinct surface (the base torus itself); the model has two near-identical revolve tori (R=3.95/r=2.63 vs R=3.78/r=2.52) — a Stage-2/3 **incidence gap between near-coincident revolve surfaces** (no partner to relocate onto). #131/N28 theory refuted | CONFIRMED (#171 pass 2) | P3a-#146 / Stage-2/3 incidence (near-coincident surfaces) |
 | ~~R0063~~ | Stage-4 LRR (u32::MAX) | **FLIPPED CORRECT 2026-07-30 (1a9cee36); reconciled 2026-09-04 from the committed results.json history** probe 2026-07-17: `site=split_max_passes` — same class as R0009 (the #145 zigzag residual resolves into the split-budget class) | CONFIRMED (#171 sweep) | P3-§4.5.2 |
 | R0077 | Stage-4 LRR v3 | probe 2026-07-18: `YANG_TORUS_STOP site=pair_newton_none` — torus×plane implicit-pair Newton non-convergence at extreme scale (torus R=2051/r=1367, coords ~2700; the op's other two torus verts converge with rho ≈ 2e-13). Same class as R0025 | CONFIRMED (#171 pass 2) | P3b-#137 (torus∩plane relocation family) |
@@ -826,7 +876,7 @@ Two dead ends, closed by measurement (do not re-walk them):
 | C0046 | NonManifoldVertex(17) | probe 2026-07-18: **0D corner contact BY DESIGN** (gen_complexity.rs: two boxes sharing exactly one vertex, "legitimately non-manifold, loud rejection acceptable"); kernel-v2 `validate.rs` vertex-fan check rejects the union output — the DESIRED posture, same as C0107/C0108 | CONFIRMED (#171 pass 2, by construction) | none (scope boundary; sign-off candidate) |
 | ~~C0048~~ | azimuth-merge rims mismatched (66 vs 69) | **FLIPPED CORRECT 2026-07-31 (2d88ef4a); reconciled 2026-09-04 from the committed results.json history** M8 rim-crossing/uniform-sample merge (#143 landed; residual = #144 snap-rounding) | CONFIRMED (#144) | M8 |
 | ~~C0075~~ | ~~InvalidBooleanOutput (undirected edge ≠ 2 directed)~~ **CONVERTED 2026-08-19** | ~~probe 2026-07-18: two overlapping 12-tooth gear extrudes, union, BY CONSTRUCTION — the known non-convex gear-profile capability tail~~ **The real wall was the Stage-0 split collector's exact-collinearity test dropping rounding-perturbed boundary subdivisions (4 splits on this case) → T-junctions → the unpaired-edge reject. With the identity fix the union completes and measures χ=−2 — the two interleaved gears enclose TWO through-pockets (genus 2; independently derived); the authored `euler_target: 2` was the wrong one and is corrected + pinned.** | CONVERTED | SUPPORTED_CORRECT |
-| R0019 | input B-Rep not 2-manifold | probe 2026-07-17 REFUTES the chained-defect suspicion: the FIRST boolean (`op=Subtract a: 2v/3f`) rejects — operand A is a 2-vertex/3-face revolve-primitive B-Rep the yang input gate cannot accept (primitive topology vocabulary, KV6-class) | CONFIRMED (#171 sweep) | KV6/scope |
+| R0019 | ~~input B-Rep not 2-manifold~~ kernel-v2 `TessellationFailed` FaceId(649) ring rejected by CDT (317.9 s) | ~~probe 2026-07-17 … 2-vertex/3-face revolve-primitive B-Rep the yang input gate cannot accept (KV6-class)~~ **RE-DIAGNOSED 2026-09-07 (night): the live `input B-Rep is not 2-manifold` text was the I6 `NonManifoldInput` backstop on a rounding pleat (the R0049 class); cleared by I6.6, now a developable/planar ring-reject one crate later (R0100 kin)** | ~~CONFIRMED~~ PROBE (next wall unprobed) | ~~KV6/scope~~ CDT ring-reject family |
 | ~~R0053~~ | patch flood-fill LabelMismatch {seed 2, tri 3890} | **FLIPPED CORRECT 2026-09-03 (edd1bb57); reconciled 2026-09-04 from the committed results.json history** probe 2026-07-18 (new `CHERCHI_PATCH_PROBE`): the flood from a seed labeled `[InputId(0)]` reaches tri 3890 labeled `[InputId(1)]` after 956 triangles — **genuinely DISJOINT single labels** (not the L2a compatible coplanar-sheet case). An A-only region floods into a B-only region across 2-incident MANIFOLD edges ⇒ the A×B intersection curve is missing/unsplit there — a Stage-2 arrangement incidence gap (revolve×revolve op, kin to R0050's empty-partner signature) | CONFIRMED (#171 pass 2) | Stage-2/3 arrangement incidence (near-coincident revolve surfaces, R0050 kin) **2026-08-19: DRIFTED long before this date** — the live wall was the pure surface-pair pair-Newton at `:6097` (cyl×cone, ratio −2.6 cone overshoot) → FIXED with R0032/R0044. NOW: Stage-6 `reassembled output would be non-2-manifold` (unprobed) |
 
 ### Capability / scope (4)
