@@ -138,6 +138,7 @@ fn a_spike_under_a_rim_chord_is_reported_with_a_demand_by_one_pass() {
     let (verts, edges, faces) = spike_band();
     let mut n_used = None;
     let empty = std::collections::BTreeMap::new();
+    let no_demands = std::collections::BTreeMap::new();
     let got = stage1_tessellate_once(
         &verts,
         &edges,
@@ -145,6 +146,7 @@ fn a_spike_under_a_rim_chord_is_reported_with_a_demand_by_one_pass() {
         &empty,
         &empty,
         &empty,
+        &no_demands,
         None,
         &mut n_used,
     );

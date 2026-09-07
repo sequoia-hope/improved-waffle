@@ -1130,6 +1130,21 @@ fn boolean_once(
                     }
                 }
             }
+            // Edge → owning faces (every loop of every face), so a loop edge
+            // whose second owner is missing / unexpected self-localizes.
+            let mut edge_owners: std::collections::BTreeMap<u32, Vec<u32>> =
+                std::collections::BTreeMap::new();
+            if !involved.is_empty() {
+                for (fj, face) in brep.faces().iter().enumerate() {
+                    for &e in face
+                        .outer_loop
+                        .iter()
+                        .chain(face.inner_loops.iter().flatten())
+                    {
+                        edge_owners.entry(e).or_default().push(fj as u32);
+                    }
+                }
+            }
             for &fi in &involved {
                 let Some(f) = brep.faces().get(fi as usize) else {
                     continue;
@@ -1152,6 +1167,27 @@ fn boolean_once(
                     eprintln!(
                         "YANG_INPUT_SELFX {tag} face {fi} loop {li}: {}",
                         pts.join(" ")
+                    );
+                    // 2026-09-07 (R0032 Stage-6 provenance): the same loop as
+                    // EDGES — id, curve kind, start→end, owning faces — so a
+                    // chord that is not a torus∩cone sample, a closed edge, or
+                    // a single-owner edge reads directly off the print.
+                    let es: Vec<String> = lp
+                        .iter()
+                        .map(|&e| match brep.edges().get(e as usize) {
+                            Some(edge) => format!(
+                                "e{e}:{}:v{}->v{}:own{:?}",
+                                crate::stage5_output_refine::curve_kind(&edge.curve),
+                                edge.start,
+                                edge.end,
+                                edge_owners.get(&e).cloned().unwrap_or_default()
+                            ),
+                            None => format!("e{e}:MISSING"),
+                        })
+                        .collect();
+                    eprintln!(
+                        "YANG_INPUT_SELFX {tag} face {fi} loop {li} edges: {}",
+                        es.join(" ")
                     );
                 }
             }

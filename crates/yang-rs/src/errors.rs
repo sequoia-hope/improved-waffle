@@ -79,6 +79,23 @@ pub enum YangError {
         crossings: usize,
         demand_n: Option<usize>,
     },
+    /// Stage-1 operand SELF-CONTACT (2026-09-07, spec
+    /// `yang_stage1_self_contact_guard`; Yang §4.1.1 / §4.2.1 Case IV inside
+    /// one operand): the operand's own mesh has `pairs` improper triangle
+    /// contacts (`unresolved` more the exact classifier deferred) — a face's
+    /// chord band reaches another face of the SAME solid (R0032: a 0.62-unit
+    /// torus skin over a buried gear-tooth tip, pierced by 12-unit torus
+    /// chords). The driver halves the dominant faces' chord bounds and
+    /// retries (`SELF_CONTACT_ROUNDS`); this is the LOUD stop after `rounds`
+    /// rounds — or immediately when no contact names a face with a density
+    /// channel (two planar faces: a genuine B-Rep self-intersection).
+    Stage1SelfContact {
+        face_a: usize,
+        face_b: usize,
+        pairs: usize,
+        unresolved: usize,
+        rounds: usize,
+    },
     /// PR-YR10 (Stage 4, §4.4.1 / §4.5): a relocation region around `vertex`
     /// could not be made valid. `reason` names the specific failure. A P9/P10
     /// LOUD stop — never a tolerance widening, silent snap, or fallback path.
@@ -312,6 +329,19 @@ impl fmt::Display for YangError {
                 "yang-rs: Stage-1 chart polygon of face {face} crosses itself {crossings} time(s) \
                  (rim segment demand {demand_n:?}): boundary sampling coarser than the face's \
                  feature size"
+            ),
+            Self::Stage1SelfContact {
+                face_a,
+                face_b,
+                pairs,
+                unresolved,
+                rounds,
+            } => write!(
+                f,
+                "yang-rs: Stage-1 mesh of one operand self-intersects: {pairs} improper triangle \
+                 contact(s) ({unresolved} unresolved; first between faces {face_a} and {face_b}) \
+                 after {rounds} refinement round(s): a face's chord band reaches another face of \
+                 the same solid"
             ),
             Self::Stage4RegionInvalid { vertex, reason } => {
                 write!(

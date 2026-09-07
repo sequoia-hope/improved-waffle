@@ -127,10 +127,37 @@
 > corner-junction double cover, the #146 family). Corpus (release, 8 jobs,
 > 600 s; wall 687.8 s, F0085 309.7 s): **277C/0W/29E/4EE/0T
 > category-identical**, two detail moves (R0032's wall advance; R0015 vertex
-> 84 → 82, its band now takes the chart path). Next increments, in order:
-> R0032's Stage-6 corner-junction double cover (the #146 family — probe the
-> two covering face sets first), and the OTHER in-plane section-conic
-> junction types.
+> 84 → 82, its band now takes the chart path).
+>
+> **2026-09-07 (later) — R0032 CONVERTED; the Stage-1 operand SELF-CONTACT
+> guard landed always-on.** The Stage-6 double cover was NOT a #146
+> corner-junction mint: `YANG_INPUT_SELFX_PROBE` showed the op-2 body's own
+> Stage-1 mesh has five improper triangle contacts (torus face 0's
+> corner-to-corner chord vs the cone 26 / 27 fans) and the arrangement
+> resolves that SELF-intersection into the double cover. B's B-Rep is valid
+> — measured, the gear-tooth rim is a buried tip 0.62 inside the torus and
+> face 0 a skin over it — but the skin is thinner than the torus patch's
+> chord sag (`torus_chord_bound` 0.76; the 12.4-unit chord dips 0.63): Yang
+> §4.2.1 Case IV inside one operand, §4.1.1's watertight-manifold contract
+> broken by the discretization. Guard (spec
+> `specs/yang_stage1_self_contact_guard.md`): after every Stage-1 pass the
+> arrangement's own exact tri–tri classification
+> (`cherchi_rs::detect_improper_contacts`) scans the operand; at a contact
+> point the true gap is exactly the sum of the two chord deviations, so the
+> dominant face HALVES its chord bound (a torus patch face per face, a
+> rim-sampled face via the shared N) and the pass re-runs (≤ 4 rounds), else
+> the typed `Stage1SelfContact`; coplanar planar pairs are left to Stage 0,
+> positional-twin adjacency and endpoint / T-junction touches are not
+> contacts (a re-entering lineage-less output samples its rims twice — the
+> `stage6_arc_orientation` pocket operand, caught by the rewrite tier).
+> R0032 needs one round (0.76 → 0.38 at N 118) ⇒ CORRECT in 76 s. Corpus
+> (release, 8 jobs, 600 s; wall 700.2 s, F0085 315.7 s): **278C/0W/28E/4EE/0T
+> NEW CANONICAL**, one category move, zero detail moves; the firing census
+> (`YANG_S1_SELF_CONTACT_LOG`, a second full run, same score) shows the
+> guard fires on R0032's op-3 body ONLY. Next increments, in order: the
+> OTHER in-plane section-conic junction types; the Stage-6 non-2-manifold
+> family's next row (run `YANG_INPUT_SELFX_PROBE` first — an operand
+> self-contact is a known producer of that wall).
 
 The kernel rewrite is **live in the app**. The legacy `crates/kernel/` is
 DELETED; the app, feature-engine, and all tests run on `kernel-v2` through the

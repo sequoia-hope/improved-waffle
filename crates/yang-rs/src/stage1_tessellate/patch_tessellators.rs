@@ -53,6 +53,7 @@ pub(crate) fn tessellate_torus_face(
     axis_dir: Vector3,
     major: f64,
     minor: f64,
+    chord_bound_override: Option<f64>,
     out_verts: &mut Vec<Point3>,
     sources: &mut Vec<TessellationSource>,
     out_tris: &mut Vec<[u32; 3]>,
@@ -79,7 +80,17 @@ pub(crate) fn tessellate_torus_face(
     // complement, declines there — typed, not guessed.
     if torus_face_takes_patch_path(f, edges, major, minor) {
         return tessellate_torus_band(
-            f_idx, f, edges, rim_rings, center, axis_dir, major, minor, out_verts, sources,
+            f_idx,
+            f,
+            edges,
+            rim_rings,
+            center,
+            axis_dir,
+            major,
+            minor,
+            chord_bound_override,
+            out_verts,
+            sources,
             out_tris,
         );
     }
@@ -1512,6 +1523,7 @@ pub(crate) fn tessellate_torus_band(
     axis_dir: Vector3,
     major: f64,
     minor: f64,
+    chord_bound_override: Option<f64>,
     out_verts: &mut Vec<Point3>,
     sources: &mut Vec<TessellationSource>,
     out_tris: &mut Vec<[u32; 3]>,
@@ -1550,7 +1562,14 @@ pub(crate) fn tessellate_torus_band(
     // budget (`torus_chord_bound`, the single source Stage 4's relocation
     // band reads back) sets the meridian spacing; the patch scales (u,v) to
     // arc-length so this is a true area cap.
-    let d_eps = torus_chord_bound(major, minor);
+    // The self-contact guard (`self_contact.rs`) may demand a TIGHTER
+    // per-face bound than the surface's own: a skin thinner than the chord
+    // sag. Never looser (the Stage-4 band that reads `torus_chord_bound`
+    // back stays a valid upper bound of this mesh's deviation).
+    let d_eps = {
+        let own = torus_chord_bound(major, minor);
+        chord_bound_override.map_or(own, |b| b.min(own))
+    };
     let dphi = (8.0 * d_eps / minor).sqrt().min(0.5);
     let n_seg = ((2.0 * std::f64::consts::PI / dphi).ceil() as u32).max(12);
     let seg = 2.0 * std::f64::consts::PI * minor / f64::from(n_seg);

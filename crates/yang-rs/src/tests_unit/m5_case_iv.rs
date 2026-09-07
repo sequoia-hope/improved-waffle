@@ -452,32 +452,102 @@ pub(crate) fn phantom_guard_far_pair_is_silent() {
     assert_eq!(phantom_min_rim_segments(&plate, &tool), None);
 }
 
-/// Build one B-Rep carrying TWO cylinders (a plate wall + a hole at
-/// `(hx, hy)` with radius `hr`).
+/// Build one VALID B-Rep carrying TWO cylinders: a plate wall (radius
+/// 1.2787, height 0.23) with a THROUGH-HOLE at `(hx, hy)` of radius `hr` —
+/// both caps carry the hole rim as an inner loop and the hole's lateral is
+/// a reversed cavity wall. (Until 2026-09-07 this overlaid a second whole
+/// cylinder inside the plate — two interpenetrating solids as one body,
+/// which the Stage-1 self-contact guard now stops loudly.)
 pub(crate) fn two_cyl_brep(hx: f64, hy: f64, hr: f64) -> BRep {
-    let plate = guard_cyl(0.0, 0.0, 1.2787008340600021, 0.23);
-    let tool = guard_cyl(hx, hy, hr, 0.23);
-    let mut verts = plate.vertices.clone();
-    let mut edges = plate.edges.clone();
-    let mut faces = plate.faces.clone();
-    let (vo, eo) = (verts.len() as u32, edges.len() as u32);
-    verts.extend(tool.vertices.iter().cloned());
-    for e in &tool.edges {
-        edges.push(BRepEdge {
-            start: e.start + vo,
-            end: e.end + vo,
-            curve: e.curve,
-        });
-    }
-    for f in &tool.faces {
-        faces.push(BRepFace {
-            surface: f.surface,
-            outer_loop: f.outer_loop.iter().map(|&e| e + eo).collect(),
+    let (rp, h) = (1.2787008340600021_f64, 0.23_f64);
+    let circ = |c: Point3, n: Vector3, r: f64| Curve::Circle {
+        center: c,
+        normal: n,
+        radius: r,
+    };
+    let (up, dn) = (Vector3::new(0.0, 0.0, 1.0), Vector3::new(0.0, 0.0, -1.0));
+    let verts = vec![
+        BRepVertex {
+            point: Point3::new(rp, 0.0, 0.0),
+        },
+        BRepVertex {
+            point: Point3::new(rp, 0.0, h),
+        },
+        BRepVertex {
+            point: Point3::new(hx + hr, hy, 0.0),
+        },
+        BRepVertex {
+            point: Point3::new(hx + hr, hy, h),
+        },
+    ];
+    let edges = vec![
+        BRepEdge {
+            start: 0,
+            end: 0,
+            curve: circ(Point3::new(0.0, 0.0, 0.0), dn, rp),
+        },
+        BRepEdge {
+            start: 1,
+            end: 1,
+            curve: circ(Point3::new(0.0, 0.0, h), up, rp),
+        },
+        BRepEdge {
+            start: 0,
+            end: 1,
+            curve: Curve::LineSegment,
+        },
+        // Hole rims wind opposite to the cap they pierce (a hole loop).
+        BRepEdge {
+            start: 2,
+            end: 2,
+            curve: circ(Point3::new(hx, hy, 0.0), up, hr),
+        },
+        BRepEdge {
+            start: 3,
+            end: 3,
+            curve: circ(Point3::new(hx, hy, h), dn, hr),
+        },
+        BRepEdge {
+            start: 2,
+            end: 3,
+            curve: Curve::LineSegment,
+        },
+    ];
+    let faces = vec![
+        BRepFace {
+            surface: Surface::Cylinder {
+                axis_point: Point3::new(0.0, 0.0, 0.0),
+                axis_dir: up,
+                radius: rp,
+            },
+            outer_loop: vec![0, 2, 1, 2],
             inner_loops: Vec::new(),
-            reversed: f.reversed,
-        });
-    }
-    BRep::new(verts, edges, faces).expect("combined solid")
+            reversed: false,
+        },
+        BRepFace {
+            surface: Surface::Plane { normal: dn, d: 0.0 },
+            outer_loop: vec![0],
+            inner_loops: vec![vec![3]],
+            reversed: false,
+        },
+        BRepFace {
+            surface: Surface::Plane { normal: up, d: -h },
+            outer_loop: vec![1],
+            inner_loops: vec![vec![4]],
+            reversed: false,
+        },
+        BRepFace {
+            surface: Surface::Cylinder {
+                axis_point: Point3::new(hx, hy, 0.0),
+                axis_dir: up,
+                radius: hr,
+            },
+            outer_loop: vec![3, 5, 4, 5],
+            inner_loops: Vec::new(),
+            reversed: true,
+        },
+    ];
+    BRep::new(verts, edges, faces).expect("plate with a through-hole")
 }
 
 /// INTRA-solid pair (the chained F0088 output: hole 4's lateral 0.0115
@@ -2440,11 +2510,16 @@ pub(crate) fn kv15b_i1b_adopts_surface_incidence_richer_junction_coordinates() {
             BRepVertex {
                 point: p(r1(1.5), 0.0, 0.5),
             },
+            // cone-2's frustum sits ABOVE cone-1's (z ∈ [1, 2]): the two
+            // SURFACES still meet at J (a surface property the collapse
+            // certifies), but the FACES never cross — B is a valid,
+            // self-contact-free surface carrier (the Stage-1 self-contact
+            // guard, 2026-09-07, stops a body whose faces cross each other).
             BRepVertex {
-                point: p(0.3 + r2(1.5), 0.1, -0.5),
+                point: p(0.3 + r2(3.0), 0.1, 1.0),
             },
             BRepVertex {
-                point: p(0.3 + r2(2.5), 0.1, 0.5),
+                point: p(0.3 + r2(4.0), 0.1, 2.0),
             },
         ];
         let circ = |c: Point3, n: Vector3, r: f64| Curve::Circle {
@@ -2471,12 +2546,12 @@ pub(crate) fn kv15b_i1b_adopts_surface_incidence_richer_junction_coordinates() {
             BRepEdge {
                 start: 2,
                 end: 2,
-                curve: circ(p(0.3, 0.1, -0.5), z, r2(1.5)),
+                curve: circ(p(0.3, 0.1, 1.0), z, r2(3.0)),
             },
             BRepEdge {
                 start: 3,
                 end: 3,
-                curve: circ(p(0.3, 0.1, 0.5), nz, r2(2.5)),
+                curve: circ(p(0.3, 0.1, 2.0), nz, r2(4.0)),
             },
             BRepEdge {
                 start: 2,

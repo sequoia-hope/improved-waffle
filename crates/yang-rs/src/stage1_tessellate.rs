@@ -231,8 +231,22 @@ pub(crate) fn stage1_tessellate_inner_overrides(
         std::env::var("YANG_S1_CHART_REFINE").as_deref(),
         Ok("0") | Ok("off")
     );
+    // Stage-1 operand self-contact guard (`self_contact.rs`, spec
+    // `yang_stage1_self_contact_guard`): every completed pass is scanned with
+    // the arrangement's own exact tri–tri classification; a contact between
+    // two of the operand's faces halves the dominant face's chord bound
+    // (torus patch: per face; rim-sampled faces: the shared N) and re-runs
+    // the pass, at most `SELF_CONTACT_ROUNDS` times. `YANG_S1_SELF_CONTACT=0`
+    // returns the pass unscanned (dev A/B — the pre-guard behaviour).
+    let guard_on = !matches!(
+        std::env::var("YANG_S1_SELF_CONTACT").as_deref(),
+        Ok("0") | Ok("off")
+    );
     let mut force = min_n_seg;
     let mut round = 0usize;
+    let mut contact_round = 0usize;
+    let mut face_chord_demands: std::collections::BTreeMap<u32, f64> =
+        std::collections::BTreeMap::new();
     loop {
         let mut n_used: Option<usize> = None;
         match stage1_tessellate_once(
@@ -242,6 +256,7 @@ pub(crate) fn stage1_tessellate_inner_overrides(
             rim_overrides,
             edge_overrides,
             face_overrides,
+            &face_chord_demands,
             force,
             &mut n_used,
         ) {
@@ -271,6 +286,66 @@ pub(crate) fn stage1_tessellate_inner_overrides(
                     }
                 }
             }
+            Ok(out) => {
+                if !guard_on {
+                    return Ok(out);
+                }
+                let Some(report) =
+                    scan_self_contacts(&out.0, edges, faces, n_used, &face_chord_demands)
+                else {
+                    return Ok(out);
+                };
+                let cur = n_used.unwrap_or(0);
+                let n_up = report.demand_n.filter(|&n| n > cur);
+                let refines = n_up.is_some() || !report.face_bounds.is_empty();
+                if refines && contact_round < SELF_CONTACT_ROUNDS {
+                    if std::env::var_os("YANG_SPLIT_PROBE").is_some() {
+                        eprintln!(
+                            "[stage1-self-contact] round {contact_round}: pairs={} unresolved={} \
+                             first={:?} N {cur} -> {:?} torus bounds {:?}",
+                            report.pairs, report.unresolved, report.first, n_up, report.face_bounds
+                        );
+                    }
+                    // Corpus census channel (the assay nulls child stderr):
+                    // `YANG_S1_SELF_CONTACT_LOG=<path>` appends one line per
+                    // refinement round, tagged with `ASSAY_CASE`.
+                    if let Some(path) = std::env::var_os("YANG_S1_SELF_CONTACT_LOG") {
+                        use std::io::Write;
+                        if let Ok(mut f) = std::fs::OpenOptions::new()
+                            .append(true)
+                            .create(true)
+                            .open(path)
+                        {
+                            let _ = writeln!(
+                                f,
+                                "{} round={contact_round} pairs={} unresolved={} first={:?} \
+                                 n={cur}->{:?} torus={:?}",
+                                std::env::var("ASSAY_CASE").unwrap_or_default(),
+                                report.pairs,
+                                report.unresolved,
+                                report.first,
+                                n_up,
+                                report.face_bounds
+                            );
+                        }
+                    }
+                    if let Some(n) = n_up {
+                        force = Some(force.map_or(n, |f| f.max(n)));
+                    }
+                    for (f, b) in &report.face_bounds {
+                        face_chord_demands.insert(*f, *b);
+                    }
+                    contact_round += 1;
+                } else {
+                    return Err(YangError::Stage1SelfContact {
+                        face_a: report.first.0,
+                        face_b: report.first.1,
+                        pairs: report.pairs,
+                        unresolved: report.unresolved,
+                        rounds: contact_round,
+                    });
+                }
+            }
             r => return r,
         }
     }
@@ -288,6 +363,7 @@ pub(crate) fn stage1_tessellate_once(
     rim_overrides: &std::collections::BTreeMap<u32, Vec<Point3>>,
     edge_overrides: &std::collections::BTreeMap<u32, Vec<Point3>>,
     face_overrides: &std::collections::BTreeMap<u32, Vec<Point3>>,
+    face_chord_demands: &std::collections::BTreeMap<u32, f64>,
     min_n_seg: Option<usize>,
     n_seg_out: &mut Option<usize>,
 ) -> Result<(Stage1Tess, std::collections::BTreeSet<u32>), YangError> {
@@ -1930,6 +2006,7 @@ pub(crate) fn stage1_tessellate_once(
                         axis_dir,
                         major_radius,
                         minor_radius,
+                        face_chord_demands.get(&(f_idx as u32)).copied(),
                         &mut out_verts,
                         &mut sources,
                         &mut out_tris,
@@ -1960,6 +2037,8 @@ mod loop_geometry;
 pub(crate) use loop_geometry::*;
 mod chart_crossing;
 pub(crate) use chart_crossing::*;
+mod self_contact;
+pub(crate) use self_contact::*;
 
 /// PR-KV6b-1: CDT tessellation of a planar face whose loops mix straight and
 /// `Curve::Circle` edges (annular sectors, holed circle caps, …). The
