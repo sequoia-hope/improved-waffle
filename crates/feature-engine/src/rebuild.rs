@@ -8,9 +8,10 @@ use uuid::Uuid;
 use waffle_types::kernel::units::TAU_WORK;
 
 use crate::resolve::{resolve_by_position, resolve_with_fallback};
+use crate::sources::SourceStore;
 use crate::types::{
     normalize_extrude_combine, BooleanOp, CombineMode, DepthMode, EngineError, Feature,
-    FeatureTree, Operation, PlaneDefinition, SecondDirection, TargetStrategy,
+    FeatureTree, ImportedBodyParams, Operation, PlaneDefinition, SecondDirection, TargetStrategy,
 };
 use modeling_ops::KernelBundle;
 use waffle_types::kernel::KernelIntrospect;
@@ -114,6 +115,7 @@ pub fn rebuild(
     kb: &mut dyn KernelBundle,
     from_index: usize,
     existing_results: &HashMap<Uuid, OpResult>,
+    sources: &SourceStore,
 ) -> RebuildState {
     let mut state = RebuildState {
         feature_results: HashMap::new(),
@@ -182,6 +184,7 @@ pub fn rebuild(
             &state.feature_results,
             tree,
             &state.consumed_features,
+            sources,
         ) {
             Ok(result) => {
                 for w in &result.diagnostics.warnings {
@@ -256,12 +259,47 @@ fn capture_face_pids(
 }
 
 /// Execute a single feature's operation.
+/// Resolve an ImportedBody feature's STEP text (v4 §2.3 resolution order):
+/// the document source store first (the file's `embed` or host-provided
+/// content, both registered by the host), then the legacy v3 inline blob.
+/// Neither ⇒ a loud `SourceUnavailable` — the feature errors, the document
+/// still loads.
+pub fn resolve_import_text(
+    params: &ImportedBodyParams,
+    sources: &SourceStore,
+) -> Result<String, String> {
+    if let Some(id) = params.source_id {
+        if let Some(text) = sources.text(id) {
+            return Ok(text);
+        }
+    }
+    if let Some(blob) = &params.blob {
+        let encoding = params
+            .blob_encoding
+            .as_deref()
+            .unwrap_or(step_import::STEP_BLOB_ENCODING);
+        return step_import::decode_step_blob(encoding, blob);
+    }
+    Err(match params.source_id {
+        Some(id) => format!(
+            "SourceUnavailable: source {id} ({}) has no content in this session — \
+             the document carries no embed for it and the host has not provided one",
+            params.file_name
+        ),
+        None => format!(
+            "SourceUnavailable: import {} has neither a source_id nor an inline payload",
+            params.file_name
+        ),
+    })
+}
+
 fn execute_feature(
     feature: &Feature,
     kb: &mut dyn KernelBundle,
     feature_results: &HashMap<Uuid, OpResult>,
     tree: &FeatureTree,
     already_consumed: &std::collections::HashSet<Uuid>,
+    sources: &SourceStore,
 ) -> Result<OpResult, EngineError> {
     match &feature.operation {
         Operation::Sketch { .. } => {
@@ -308,8 +346,7 @@ fn execute_feature(
                 feature_name: feature.name.clone(),
                 reason,
             };
-            let step_text =
-                step_import::decode_step_blob(&params.blob_encoding, &params.blob).map_err(fail)?;
+            let step_text = resolve_import_text(params, sources).map_err(fail)?;
             let parsed = step_import::parse_step_cached(&step_text, &params.file_name)
                 .map_err(|e| fail(e.to_string()))?;
             let mut data = (*parsed).clone();
@@ -2304,6 +2341,7 @@ mod tests {
             &results,
             &tree,
             &std::collections::HashSet::new(),
+            &SourceStore::new(),
         );
         assert!(result.is_ok(), "PointNormal datum plane should succeed");
         assert!(
@@ -2335,6 +2373,7 @@ mod tests {
             &results,
             &tree,
             &std::collections::HashSet::new(),
+            &SourceStore::new(),
         );
         assert!(result.is_ok(), "Offset from built-in should succeed");
 
@@ -2411,7 +2450,7 @@ mod tests {
         let (tree, extrude_id) = make_sketch_extrude_tree(sketch);
         let mut kb = waffle_types::kernel::MockKernel::new();
         let existing = HashMap::new();
-        let state = rebuild(&tree, &mut kb, 0, &existing);
+        let state = rebuild(&tree, &mut kb, 0, &existing, &SourceStore::new());
         (tree, extrude_id, state)
     }
 
@@ -2433,7 +2472,7 @@ mod tests {
         // Build the kernel fresh and re-resolve so we hold a live introspect.
         let mut kb = waffle_types::kernel::MockKernel::new();
         let existing = HashMap::new();
-        let state = rebuild(&tree, &mut kb, 0, &existing);
+        let state = rebuild(&tree, &mut kb, 0, &existing, &SourceStore::new());
         let extrude_result = state
             .feature_results
             .get(&extrude_id)
@@ -2557,7 +2596,7 @@ mod tests {
         // Re-run on a fresh kernel so the handle is live in `kb`.
         let mut kb = waffle_types::kernel::MockKernel::new();
         let existing = HashMap::new();
-        let state = rebuild(&_tree, &mut kb, 0, &existing);
+        let state = rebuild(&_tree, &mut kb, 0, &existing, &SourceStore::new());
         let handle = state
             .feature_results
             .get(&extrude_id)
@@ -2651,6 +2690,7 @@ mod tests {
             &results,
             &tree,
             &std::collections::HashSet::new(),
+            &SourceStore::new(),
         );
         assert!(result.is_err(), "Zero normal should fail");
         let err = result.unwrap_err().to_string();
@@ -2684,6 +2724,7 @@ mod tests {
             &results,
             &tree,
             &std::collections::HashSet::new(),
+            &SourceStore::new(),
         );
         assert!(result.is_err(), "Missing base plane should fail");
         let err = result.unwrap_err().to_string();
@@ -2800,7 +2841,7 @@ mod tests {
 
         let mut kb = waffle_types::kernel::MockKernel::new();
         let existing = HashMap::new();
-        let state = rebuild(&tree, &mut kb, 0, &existing);
+        let state = rebuild(&tree, &mut kb, 0, &existing, &SourceStore::new());
 
         // The extrude should succeed — profiles should have been recomputed from entities.
         // Currently this fails because solved_profiles is empty after deserialization.
@@ -2883,7 +2924,7 @@ mod tests {
 
         let mut kb = waffle_types::kernel::MockKernel::new();
         let existing = HashMap::new();
-        let state = rebuild(&tree, &mut kb, 0, &existing);
+        let state = rebuild(&tree, &mut kb, 0, &existing, &SourceStore::new());
 
         // The extrude should succeed — profiles should have been recomputed.
         // Currently this fails because solved_profiles is empty after deserialization.
@@ -2924,7 +2965,7 @@ mod tests {
 
         let mut kb = waffle_types::kernel::MockKernel::new();
         let existing = HashMap::new();
-        let state = rebuild(&tree, &mut kb, 0, &existing);
+        let state = rebuild(&tree, &mut kb, 0, &existing, &SourceStore::new());
 
         // Gear sketches should work because expand_gears() populates profiles.
         let extrude_failed = state.errors.iter().any(|(id, _)| *id == extrude_id);
@@ -2981,6 +3022,7 @@ mod tests {
             &results,
             &tree,
             &std::collections::HashSet::new(),
+            &SourceStore::new(),
         )
         .unwrap();
         results.insert(first_plane.id, r1);

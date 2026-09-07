@@ -33,8 +33,11 @@ fn import_step_message_creates_feature_and_body() {
     let Operation::ImportedBody { params } = &feature.operation else {
         panic!("expected ImportedBody feature");
     };
-    assert_eq!(params.blob_encoding, step_import::STEP_BLOB_ENCODING);
-    assert!(params.blob.len() < CUBE_STEP.len());
+    assert_eq!(
+        params.blob_encoding.as_deref(),
+        Some(step_import::STEP_BLOB_ENCODING)
+    );
+    assert!(params.blob.as_ref().expect("inline payload").len() < CUBE_STEP.len());
     assert_eq!(params.scale, 1.0);
 
     // No rebuild errors; the import produced a real body through kernel-v2.

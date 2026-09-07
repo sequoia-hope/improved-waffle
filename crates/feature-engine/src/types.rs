@@ -10,6 +10,34 @@ use waffle_types::{GeomRef, OutputKey, Sketch};
 /// the document; `#[serde(default)]` keeps older files (no field) loading.
 pub type BodyNames = HashMap<String, String>;
 
+/// Who or what created a feature (`specs/waffle_v4_document_model.md` §2.7).
+/// Absent from the table means `User`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum ProvenanceOrigin {
+    /// Authored interactively.
+    User,
+    /// Authored by a tool/model through the programmatic surface.
+    Agent { name: String },
+    /// Created by importing a source (e.g. the STEP body of `sources[i]`).
+    Import { source_id: Uuid },
+    /// Regenerated from a source by a named rule (e.g. a board outline from
+    /// a `.kicad_pcb`); read-only in the UI, replaced on re-sync.
+    Derived { source_id: Uuid, rule: String },
+}
+
+/// Provenance record for one feature.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Provenance {
+    pub origin: ProvenanceOrigin,
+    /// RFC 3339 timestamp; optional (the engine has no clock of its own).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<String>,
+}
+
+/// Feature id → provenance. Only non-`User` origins are worth recording.
+pub type ProvenanceTable = HashMap<Uuid, Provenance>;
+
 /// A named design variable (parameter) on the feature tree.
 ///
 /// `expression` is evaluated in mm-space (see `crate::expr`): bare numeric
@@ -60,6 +88,16 @@ pub struct FeatureTree {
     /// reference any parameter regardless of position.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub parameters: Vec<DesignParameter>,
+    /// Feature provenance (v4 §2.7): who/what created each feature. Keyed by
+    /// feature id; GC'd on feature delete (captured for undo) like
+    /// `body_names`. Absent ⇒ `User`.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub provenance: ProvenanceTable,
+    /// Unknown keys preserved across load → save (v4 §2.6). Tool-added
+    /// metadata should use an `x-` prefix so a future official field cannot
+    /// collide.
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
 impl FeatureTree {
@@ -69,6 +107,8 @@ impl FeatureTree {
             active_index: None,
             body_names: HashMap::new(),
             parameters: Vec::new(),
+            provenance: HashMap::new(),
+            extra: serde_json::Map::new(),
         }
     }
 
@@ -117,6 +157,36 @@ impl FeatureTree {
     /// Re-merge body-name overrides (used to undo a feature delete).
     pub fn restore_body_names(&mut self, names: BodyNames) {
         self.body_names.extend(names);
+    }
+
+    /// Record (or clear, with `None`) a feature's provenance. Returns the
+    /// previous record. No rebuild needed — provenance never affects geometry.
+    pub fn set_provenance(
+        &mut self,
+        feature_id: Uuid,
+        provenance: Option<Provenance>,
+    ) -> Option<Provenance> {
+        match provenance {
+            Some(p) => self.provenance.insert(feature_id, p),
+            None => self.provenance.remove(&feature_id),
+        }
+    }
+
+    pub fn provenance_of(&self, feature_id: Uuid) -> Option<&Provenance> {
+        self.provenance.get(&feature_id)
+    }
+
+    /// Remove and return a feature's provenance (feature delete; captured for
+    /// undo).
+    pub fn take_provenance(&mut self, feature_id: Uuid) -> Option<Provenance> {
+        self.provenance.remove(&feature_id)
+    }
+
+    /// Restore a provenance record captured by [`Self::take_provenance`].
+    pub fn restore_provenance(&mut self, feature_id: Uuid, provenance: Option<Provenance>) {
+        if let Some(p) = provenance {
+            self.provenance.insert(feature_id, p);
+        }
     }
 
     /// Return active features (up to active_index).
@@ -174,17 +244,33 @@ pub enum Operation {
 }
 
 /// Parameters for an imported (STEP) body feature — task #138,
-/// `docs/step_import_roadmap.md` §3.3. The source STEP text is embedded
-/// (compressed) so the `.waffle` file is self-contained; the import replays
-/// on every rebuild (a process-wide parse cache makes transform edits cheap).
+/// `docs/step_import_roadmap.md` §3.3; v4 `specs/waffle_v4_document_model.md`
+/// §2.11. Since v4 the STEP content lives in the document's `sources` table
+/// and reaches the engine through its [`crate::sources::SourceStore`]; the
+/// feature names its source by `source_id`. The v3 in-feature payload
+/// (`blob_encoding` + `blob`) is still accepted as a legacy read path and is
+/// what the single-tree API inlines for consumers that have no store. The
+/// import replays on every rebuild (a process-wide parse cache makes
+/// transform edits cheap).
+///
+/// Content resolution order at rebuild: the source store (embed or
+/// host-provided), then the legacy inline blob; neither ⇒ a loud
+/// `SourceUnavailable` feature error.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImportedBodyParams {
     /// Source file name (display + diagnostics), e.g. `minihexa.step`.
     pub file_name: String,
-    /// Payload encoding tag (`step_import::STEP_BLOB_ENCODING`).
-    pub blob_encoding: String,
-    /// The STEP text, encoded per `blob_encoding`.
-    pub blob: String,
+    /// v4: the `sources[]` entry holding the STEP content.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_id: Option<Uuid>,
+    /// Legacy (v3) payload encoding tag (`step_import::STEP_BLOB_ENCODING`).
+    /// Absent with a present `blob` ⇒ that default encoding.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blob_encoding: Option<String>,
+    /// Legacy (v3) inline STEP text, encoded per `blob_encoding`. v4 writers
+    /// lift it into `sources[].embed` and clear it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blob: Option<String>,
     /// Placement: translation in METERS, applied after rotation.
     #[serde(default)]
     pub translation_m: [f64; 3],
@@ -199,6 +285,39 @@ pub struct ImportedBodyParams {
 
 fn default_scale() -> f64 {
     1.0
+}
+
+impl ImportedBodyParams {
+    /// v4 shape: content by `source_id`, identity placement.
+    pub fn from_source(file_name: impl Into<String>, source_id: Uuid) -> Self {
+        Self {
+            file_name: file_name.into(),
+            source_id: Some(source_id),
+            blob_encoding: None,
+            blob: None,
+            translation_m: [0.0; 3],
+            rotation_deg: [0.0; 3],
+            scale: 1.0,
+        }
+    }
+
+    /// Legacy (v3) shape: the STEP text inline, identity placement.
+    pub fn embedded(file_name: impl Into<String>, step_text: &str) -> Self {
+        Self {
+            file_name: file_name.into(),
+            source_id: None,
+            blob_encoding: Some(step_import::STEP_BLOB_ENCODING.to_string()),
+            blob: Some(step_import::encode_step_blob(step_text)),
+            translation_m: [0.0; 3],
+            rotation_deg: [0.0; 3],
+            scale: 1.0,
+        }
+    }
+
+    /// Whether this feature still carries a legacy inline payload.
+    pub fn has_inline_blob(&self) -> bool {
+        self.blob.is_some()
+    }
 }
 
 /// Depth mode for extrude operations.

@@ -415,6 +415,7 @@ mod tests {
             active_index: None,
             body_names: Default::default(),
             parameters,
+            ..Default::default()
         }
     }
 

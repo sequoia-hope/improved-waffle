@@ -3838,7 +3838,7 @@ fn rebuild_carries_forward_existing_results() {
 
     // Rebuild from index 2, carrying forward s1 and e1 results
     let existing = engine.feature_results.clone();
-    let state = rebuild(&engine.tree, &mut kernel, 2, &existing);
+    let state = rebuild(&engine.tree, &mut kernel, 2, &existing, &engine.sources);
 
     assert!(state.feature_results.contains_key(&s1));
     assert!(state.feature_results.contains_key(&e1));

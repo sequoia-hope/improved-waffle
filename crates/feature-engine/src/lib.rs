@@ -4,6 +4,7 @@ pub mod preview_mesh;
 pub mod rebuild;
 pub mod resolve;
 pub mod share_a_face;
+pub mod sources;
 pub mod tree;
 pub mod types;
 pub mod undo;
@@ -13,7 +14,8 @@ use uuid::Uuid;
 
 use modeling_ops::{KernelBundle, OpResult};
 
-use crate::types::{EngineError, Feature, FeatureTree, Operation};
+use crate::sources::SourceStore;
+use crate::types::{EngineError, Feature, FeatureTree, Operation, Provenance};
 use crate::undo::{Command, UndoStack};
 use waffle_types::{Anchor, OutputKey};
 
@@ -40,6 +42,10 @@ pub struct Engine {
     /// boolean/merge consumes a target body that has a custom name, the result
     /// body inherits it. Recomputed on every rebuild and rename.
     inherited_body_names: HashMap<String, String>,
+    /// Content of the document's external sources (v4 `sources` table),
+    /// keyed by source id. Document-scoped: not part of the tree, not
+    /// undoable, survives tab switches. See [`crate::sources::SourceStore`].
+    pub sources: SourceStore,
     /// Undo/redo history.
     undo_stack: UndoStack,
 }
@@ -55,8 +61,22 @@ impl Engine {
             consumed_features: std::collections::HashSet::new(),
             pid_to_feature: HashMap::new(),
             inherited_body_names: HashMap::new(),
+            sources: SourceStore::new(),
             undo_stack: UndoStack::new(),
         }
+    }
+
+    /// Record (or clear) a feature's provenance (v4 §2.7). Not undoable and
+    /// no rebuild: provenance is metadata about authorship, not geometry.
+    pub fn set_provenance(
+        &mut self,
+        feature_id: Uuid,
+        provenance: Option<Provenance>,
+    ) -> Result<Option<Provenance>, EngineError> {
+        if self.tree.find_feature(feature_id).is_none() {
+            return Err(EngineError::FeatureNotFound { id: feature_id });
+        }
+        Ok(self.tree.set_provenance(feature_id, provenance))
     }
 
     /// KV13 F6: the feature that *introduced* a face's geometry — through
@@ -105,10 +125,12 @@ impl Engine {
         // GC body-name overrides owned by the deleted feature (feature-delete
         // only — never on a transient empty rebuild), capturing them for undo.
         let removed_body_names = self.tree.take_body_names(id);
+        let removed_provenance = self.tree.take_provenance(id);
         self.undo_stack.push(Command::RemoveFeature {
             feature,
             position: pos,
             removed_body_names,
+            removed_provenance,
         });
         self.rebuild(kb, pos.min(self.tree.features.len().saturating_sub(1)));
         Ok(())
@@ -374,10 +396,13 @@ impl Engine {
                 feature,
                 position,
                 removed_body_names,
+                removed_provenance,
             } => {
                 self.tree.features.insert(*position, (**feature).clone());
-                // Restore the deleted feature's body-name overrides.
+                // Restore the deleted feature's body-name overrides + provenance.
                 self.tree.restore_body_names(removed_body_names.clone());
+                self.tree
+                    .restore_provenance(feature.id, removed_provenance.clone());
                 // Adjust active_index if needed
                 if let Some(ref mut idx) = self.tree.active_index {
                     if *position <= *idx {
@@ -452,8 +477,10 @@ impl Engine {
                 let pos = self.tree.feature_index(feature.id).unwrap_or(0);
                 let _ = self.tree.remove_feature(feature.id);
                 self.feature_results.remove(&feature.id);
-                // Re-GC the feature's body names (already captured in the command).
+                // Re-GC the feature's body names + provenance (already captured
+                // in the command).
                 let _ = self.tree.take_body_names(feature.id);
+                let _ = self.tree.take_provenance(feature.id);
                 pos.min(self.tree.features.len().saturating_sub(1))
             }
             Command::EditFeature {
@@ -529,7 +556,13 @@ impl Engine {
             self.feature_results.remove(&feature.id);
         }
 
-        let state = rebuild::rebuild(&self.tree, kb, from_index, &self.feature_results);
+        let state = rebuild::rebuild(
+            &self.tree,
+            kb,
+            from_index,
+            &self.feature_results,
+            &self.sources,
+        );
         self.feature_results.extend(state.feature_results);
         self.warnings = state.warnings;
         // Parameter/expression errors surface ahead of rebuild errors — a bad

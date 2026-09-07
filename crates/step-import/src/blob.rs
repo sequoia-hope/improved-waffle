@@ -19,24 +19,64 @@ pub fn encode_step_blob(step_text: &str) -> String {
     B64.encode(bytes)
 }
 
+/// Largest payload a blob may inflate to (256 MiB). `.waffle` files are an
+/// exchange format (shared documents, git-linked sources —
+/// `specs/waffle_v4_document_model.md` §6), so a deflate bomb must be a loud
+/// per-feature error, not an allocation abort (which on wasm32 is a hard
+/// crash).
+pub const MAX_INFLATED_BYTES: usize = 256 * 1024 * 1024;
+
 /// Decode a persisted blob back to STEP text.
 pub fn decode_step_blob(encoding: &str, data: &str) -> Result<String, String> {
+    decode_step_blob_capped(encoding, data, MAX_INFLATED_BYTES)
+}
+
+/// [`decode_step_blob`] with an explicit inflation cap (bytes). Exceeding it
+/// is `EmbedTooLarge`.
+pub fn decode_step_blob_capped(encoding: &str, data: &str, cap: usize) -> Result<String, String> {
     if encoding != STEP_BLOB_ENCODING {
         return Err(format!("unknown STEP blob encoding '{encoding}'"));
     }
     let bytes = B64
         .decode(data)
         .map_err(|e| format!("STEP blob base64 decode failed: {e}"))?;
-    let mut out = String::new();
+    // Read at most cap + 1 bytes: one byte past the cap proves the payload is
+    // too large without ever inflating it fully.
+    let mut raw = Vec::new();
     flate2::read::DeflateDecoder::new(bytes.as_slice())
-        .read_to_string(&mut out)
+        .take(cap as u64 + 1)
+        .read_to_end(&mut raw)
         .map_err(|e| format!("STEP blob inflate failed: {e}"))?;
-    Ok(out)
+    if raw.len() > cap {
+        return Err(format!(
+            "EmbedTooLarge: payload inflates beyond the {cap}-byte cap"
+        ));
+    }
+    String::from_utf8(raw).map_err(|e| format!("STEP blob is not UTF-8: {e}"))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn inflation_beyond_the_cap_is_a_loud_error_not_an_allocation() {
+        // 1 MiB of zeros deflates to a few hundred bytes; a 16-byte cap
+        // refuses it without inflating the whole thing.
+        let text = "0".repeat(1024 * 1024);
+        let blob = encode_step_blob(&text);
+        let err = decode_step_blob_capped(STEP_BLOB_ENCODING, &blob, 16).unwrap_err();
+        assert!(err.contains("EmbedTooLarge"), "{err}");
+        // Exactly at the cap is fine.
+        let small = "x".repeat(16);
+        let blob = encode_step_blob(&small);
+        assert_eq!(
+            decode_step_blob_capped(STEP_BLOB_ENCODING, &blob, 16).unwrap(),
+            small
+        );
+        // The default cap admits ordinary files.
+        assert_eq!(decode_step_blob(STEP_BLOB_ENCODING, &blob).unwrap(), small);
+    }
 
     #[test]
     fn blob_round_trip() {

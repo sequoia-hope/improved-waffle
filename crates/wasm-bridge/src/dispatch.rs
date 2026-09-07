@@ -90,14 +90,7 @@ fn handle_message(
         }
 
         UiToEngine::ImportStep { file_name, data } => {
-            let params = feature_engine::types::ImportedBodyParams {
-                file_name: file_name.clone(),
-                blob_encoding: step_import::STEP_BLOB_ENCODING.to_string(),
-                blob: step_import::encode_step_blob(&data),
-                translation_m: [0.0; 3],
-                rotation_deg: [0.0; 3],
-                scale: 1.0,
-            };
+            let params = feature_engine::types::ImportedBodyParams::embedded(&file_name, &data);
             let op = Operation::ImportedBody { params };
             state
                 .engine

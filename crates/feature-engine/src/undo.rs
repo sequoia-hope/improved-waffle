@@ -1,6 +1,6 @@
 use uuid::Uuid;
 
-use crate::types::{BodyNames, DesignParameter, Feature, Operation};
+use crate::types::{BodyNames, DesignParameter, Feature, Operation, Provenance};
 
 /// A reversible command recorded by the engine.
 #[derive(Debug, Clone)]
@@ -15,6 +15,8 @@ pub enum Command {
         /// Body-name overrides owned by the removed feature, captured so undo
         /// can restore them.
         removed_body_names: BodyNames,
+        /// The removed feature's provenance record, likewise captured.
+        removed_provenance: Option<Provenance>,
     },
     EditFeature {
         feature_id: Uuid,
