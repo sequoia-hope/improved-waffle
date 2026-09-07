@@ -32,8 +32,8 @@ Prerequisites: all other sub-projects at MVP level.
 - [ ] Propagate changes to all instances
 
 ### M6: Assembly File Format
-- [ ] Extend .waffle format for assemblies
-- [ ] Part references (file paths or embedded)
+- [x] **(2026-09-07)** Substrate landed as `.waffle` v4 — `specs/waffle_v4_document_model.md`: `document.id`, git-aware `sources` table (linked/pinned/packed part references), opaque preservation of the future `Assembly` tab kind (no reader-floor bump when it lands), `scope` on `GeomRef` reserved
+- [ ] `Assembly` tab kind (instances `{id, name, source: {source_id?, tab_id}, transform, external_key?}`, mate connectors on scoped `GeomRef`s, mates; solved placements persisted as derived hints) — spec §9 Phase 3
 - [ ] STEP assembly export
 
 ## Blockers

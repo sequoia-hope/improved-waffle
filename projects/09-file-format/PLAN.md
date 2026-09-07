@@ -66,10 +66,29 @@
 - [x] **(2026-08-28)** Multi-tab File→Open: picker branch adopts the file's tabs via `initDocumentState` under a fresh storage doc id; download path (`saveProject`) writes the full document via `buildDocumentJson`
 - [x] **(2026-08-28)** Forward-compat: `min_reader_version` written by all writers (Rust `save.rs` + JS via `$lib/engine/format.js`), enforced by Rust loaders + JS open paths → clean `FutureVersion` / toast instead of parse noise
 - [x] **(2026-08-28)** Save-time guard against non-finite floats: bridge `SaveProject` uses `save_project_verified` (serialize + self-load); regression tests in `format_tests.rs` + `app/tests/gui/document-format-seam.spec.js`
-- [ ] Consolidate to a single document writer: route JS `buildDocumentJson` through Rust `save_document` via a bridge `SaveDocument{tabs…}` message (the JS-writer envelope is regression-pinned by `document-format-seam.spec.js` in the meantime)
-- [ ] Load-time hardening for shared files: cap STEP blob inflation, bounds-check counts
+- [x] **(2026-09-07, v4)** Consolidate to a single document writer: JS `buildDocumentJson` → bridge `SaveDocument{document, tabs, active_tab}` → Rust `save_document_verified`
+- [x] **(2026-09-07, v4)** Cap STEP/embed inflation (256 MiB, `EmbedTooLarge`); bounds-checking counts remains open
+- [ ] Load-time hardening for shared files: bounds-check counts (`tooth_count`, entity/array lengths, `active_index`)
 - [ ] Deduplicate `PreviewMesh` (defined in both file-format and feature-engine)
 - [ ] (defer) Region size: `outer` + `outer_edges` store the same boundary twice (374 KB in one observed extrude)
+
+## v4 document model (2026-09-07) — `specs/waffle_v4_document_model.md`
+
+Phase 1 landed (increments 1–5 + 7): spec; `document.id`; `sources` table with
+git-aware locators (`Git` commit-pinned / branch-tag-floating, `Relative`,
+`Url`, `Local`, `Embedded`), `git-blob-sha1` content hashes, optional packed
+embeds; opaque preservation of unknown tab/source/locator kinds; unknown-key
+preservation at structural levels; `FeatureTree.provenance`; engine
+`SourceStore` + bridge `ProvideSource`; ImportedBody → `source_id` (v3 blobs
+migrated into sources, deduped); single Rust writer; JS-form timestamps; exact
+float parsing; corpus back-compat pin (312 assay cases + fixtures).
+
+- [ ] Increment 6: JSON Schema golden (`json-schema` cargo feature via schemars across waffle-types/feature-engine/file-format; `docs/schema/waffle-v4.schema.json`; fixture validation)
+- [ ] `profile_entity_ids` on Extrude/Revolve (agent-friendly profile addressing; 85 literal sites — mechanical)
+- [ ] `SolveStatus::Unsolved` default (56 match sites)
+- [ ] Phase 1b: opaque preservation of unknown `Operation` variants
+- [ ] Phase 2 (app storage): `document.id` as the storage key; `GitProvider` with GitHub/GitLab/Gitea adapters + per-host tokens; content cache; open-from-link (fixes the dead `?src=` share link); pack/unpack; pin/update-to-tip UI
+- [ ] Phase 3/3b/4: Assembly tab kind (+ `scope` on GeomRef), KiCad board source, Drawing tab kind — see the spec §9
 
 ## Blockers
 

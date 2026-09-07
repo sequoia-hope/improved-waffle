@@ -1,8 +1,11 @@
 # `.waffle` v4 — Document Model: Identity, Git-Aware Sources, Scoped References
 
-Status: **PHASE 1 IN PROGRESS** (spec 2026-09-07). Plan of record for the
-file-format changes that assemblies, KiCad board links, multi-document
-assemblies, derived 2D drawings, and model-facing tooling (MCP) all depend on.
+Status: **PHASE 1 LANDED 2026-09-07** (increments 1–5 and 7 of §9; increment 6,
+the JSON Schema golden, and the §2.9/§2.10 agent-addressing items are OPEN —
+see `projects/09-file-format/PLAN.md`). Plan of record for the file-format
+changes that assemblies, KiCad board links, multi-document assemblies,
+derived 2D drawings, and model-facing tooling (MCP) all depend on. The
+descriptive format reference is `docs/FILE_FORMAT.md` (v4 section).
 
 Supersedes the "future tab kinds" note in `docs/FILE_FORMAT.md` §5.3 and the
 assembly-file-format milestone (M6) of `projects/10-assemblies/PLAN.md`. The v3
@@ -450,7 +453,7 @@ capability; that spec must carry its own §7a.
 
 | Phase | Content | Wire impact |
 |---|---|---|
-| **1 (this spec)** | `document.id`; `sources` table + git-aware locators; unknown tab/source kinds preserved; unknown keys preserved (§2.6); provenance table; ImportedBody → sources with dedup; `profile_entity_ids`; `solve_status` default; single Rust writer via bridge `SaveDocument`; engine source store + `ProvideSource`; inflation cap; JSON Schema golden; `docs/FILE_FORMAT.md` v4 section | v4, `MIN_READER_VERSION` 4 |
+| **1 (this spec)** | LANDED: `document.id`; `sources` table + git-aware locators; unknown tab/source/locator kinds preserved; unknown keys preserved (§2.6); provenance table; ImportedBody → sources with dedup; single Rust writer via bridge `SaveDocument`; engine source store + `ProvideSource`; inflation cap; JS-form timestamps; exact float parsing; corpus back-compat pin; `docs/FILE_FORMAT.md` v4 section. OPEN: `profile_entity_ids` (§2.9), `solve_status` default (§2.10), JSON Schema golden | v4, `MIN_READER_VERSION` 4 |
 | 1b | Opaque preservation of unknown `Operation` variants (feature kept, rebuild error, re-emitted) so future ops stop bumping the reader floor | none |
 | 2 | App storage: `document.id` as storage key; `GitProvider` with GitHub/GitLab/Gitea adapters; per-host tokens; content cache; open-from-link (fixes the dead `?src=`); pack/unpack; pin/update UI | none (uses Phase-1 fields) |
 | 3 | `Assembly` tab kind: instances `{id, name, source: {source_id?, tab_id}, transform: {translation_m, rotation_quat}, external_key?, parameter_overrides?}`, mate connectors `{id, name, geom_ref(scoped), frame}`, mates (Fastened first), persisted solved placements as derived hints; `scope` on `GeomRef` lands here | new tab kind (no bump); `scope` field (bump for Part-side use) |

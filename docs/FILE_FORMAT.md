@@ -1,11 +1,34 @@
 # The `.waffle` File Format — Specification
 
-**Format version: 3** (`FORMAT_VERSION`, `crates/file-format/src/save.rs`)
-**Spec written:** 2026-08-28, from the code as it exists on `main`. This document is
-*descriptive of the current implementation*, not aspirational: every claim below was
-verified against the source (file:line references throughout) and against real files
+**Format version: 4** (`FORMAT_VERSION`, `crates/file-format/src/save.rs`)
+**Spec written:** 2026-08-28 (v3), from the code as it exists on `main`; **v4
+section added 2026-09-07.** This document is *descriptive of the current
+implementation*, not aspirational: every claim below was verified against the
+source (file:line references throughout) and against real files
 (`sketch.waffle`, `err.waffle`, `minihexa.waffle`, and the 312-case assay corpus in
-`app/tests/cases/assay/`, all of which are version 3).
+`app/tests/cases/assay/`, all of which are version 3 and load through the
+v3→v4 migration — pinned by `crates/file-format/tests/corpus_backcompat.rs`).
+
+> **v4 (2026-09-07) in one paragraph — design: `specs/waffle_v4_document_model.md`.**
+> The envelope gains `document.id` (stable document identity) and a
+> `sources` table of external content with **git-aware locators** (`Git`
+> remote + path + `Commit`-pinned or `Branch`/`Tag`-floating ref, with the
+> `resolved` commit and a `git-blob-sha1` `content_hash`; also `Relative`,
+> `Url`, `Local`, `Embedded`). Imported STEP payloads move out of the
+> feature into `sources[].embed` (deduplicated by hash); the feature names
+> its source by `source_id`. Unknown **tab kinds, source kinds and locator
+> kinds** are preserved opaquely and re-emitted verbatim (so adding
+> `Assembly`/`Drawing` later is NOT a reader-floor bump); unknown keys are
+> preserved at the envelope, `document`, `Tab`, `SourceEntry` and
+> `FeatureTree` levels. `FeatureTree.provenance` records who/what created a
+> feature. Every production save now goes through **one writer**, the Rust
+> `save_document_verified`, via the bridge's `SaveDocument` message; the JS
+> side no longer composes an envelope. Timestamps are written in
+> JavaScript's `toISOString()` form so a `created` round-trips byte-exact,
+> and float parsing is exact (`serde_json/float_roundtrip`) so coordinates no
+> longer drift by an ULP per load. Migration v3→v4: mint `document.id`,
+> rewrite non-UUID tab ids (the historical `"default"`) to UUIDs, lift STEP
+> blobs into sources. `MIN_READER_VERSION` is 4.
 
 **Supersedes** `projects/09-file-format/ARCHITECTURE.md`, which describes format v1
 and contains claims that are no longer (or never were) true — see §14.
@@ -56,34 +79,36 @@ by the app's file picker.
 | Container | JSON, UTF-8. The Rust writer pretty-prints; the JS writer (`buildDocumentJson`) emits compact JSON. Both are valid — **whitespace is not significant** and consumers must not rely on it. |
 | Units | **All lengths in meters** (since v2). All angles in **degrees** (`angle`, `value_degrees`, `rotation_deg`, `pressure_angle_deg`). Direction vectors are unitless. |
 | Display unit | `display_unit` is a UI preference only (`"mm"`, `"cm"`, `"m"`, `"in"`, `"ft"`); it never changes stored values, which stay meters. |
-| IDs — features/sketches/tabs/datums | UUIDs, serialized as lowercase hyphenated strings. **Exception:** `Tab.id` and `active_tab` are free-form strings (the UI has historically emitted `"default"`); they must only be equal-comparable, not parseable (`crates/file-format/src/metadata.rs`). |
+| IDs — features/sketches/tabs/datums/document | UUIDs, serialized as lowercase hyphenated strings. `Tab.id`/`active_tab` stay typed as free-form strings so legacy documents (the historical `"default"`) keep loading, but v4 writers always emit UUIDs and the v3→v4 migration rewrites non-UUID ids (`crates/file-format/src/metadata.rs`, `migrate.rs`). |
 | IDs — sketch entities | `u32`, unique *within one sketch*. |
 | Built-in datum planes | Fixed well-known UUIDs (`app/src/lib/engine/planes.js`): Front `00000000-0000-0000-0000-000000000001`, Top `…0002`, Right `…0003`. |
-| Timestamps | RFC 3339 / ISO-8601 UTC strings (chrono `DateTime<Utc>` serde), e.g. `"2026-07-05T01:21:04.049Z"`. |
-| Floats | IEEE-754 doubles. serde_json and `JSON.stringify` both round-trip f64 exactly (shortest-representation printing). **Hazard:** a non-finite value (NaN/∞) serializes as `null` in both writers and then **fails to load** (`null` is not a valid f64 for serde). Guarded since 2026-08-28: the bridge save path self-verifies (`save_project_verified`) and errors loudly instead of emitting an unloadable file (§14.10). |
+| Timestamps | RFC 3339 / ISO-8601 UTC strings, written in JavaScript's `toISOString()` form (always ≥ 3 fractional digits: `"2026-07-05T01:21:04.049Z"`, `"2020-01-02T03:04:05.000Z"`; nanosecond values keep full precision) — `metadata::rfc3339_js`, since v4, so a `created` that came from the app round-trips byte-exact. Any RFC 3339 string parses. |
+| Floats | IEEE-754 doubles, shortest-representation printing. Parsing is **exact** since v4 (`serde_json/float_roundtrip`, enabled in `crates/file-format/Cargo.toml` and unified across the build); before, the default best-effort parser drifted 17-digit values by one ULP per load→save (measured: C0028). **Hazard:** a non-finite value (NaN/∞) serializes as `null` and then **fails to load**. Guarded since 2026-08-28: the bridge save path self-verifies (`save_document_verified`) and errors loudly instead of emitting an unloadable file (§14.10). |
 | Tuples | Rust `(f64, f64)` serializes as a 2-element array `[x, y]`. Fixed arrays `[f64; 3]` as 3-element arrays. |
 | Maps with u32 keys | JSON objects with **stringified** keys (`"12": [x, y]`) via the `u32_key_map` helper (`crates/waffle-types/src/sketch.rs:10`). |
-| Enums | All persisted enums are **internally tagged**: `#[serde(tag = "type")]` (one exception: `RegionEdge` uses `tag = "kind"`, and `PlaneDefinition` uses `tag = "method"` with renamed variants). An unknown tag value is a **hard parse error** — see §13. |
-| Unknown fields | Silently **ignored on load and dropped on the next save**. There is no unknown-field preservation anywhere (the old dossier's claim of a `#[serde(flatten)]` catch-all is false — no persisted type has one). |
+| Enums | All persisted enums are **internally tagged**: `#[serde(tag = "type")]` (one exception: `RegionEdge` uses `tag = "kind"`, and `PlaneDefinition` uses `tag = "method"` with renamed variants). An unknown tag value is a **hard parse error** — see §13 — **except** `TabKind`, `SourceKind` and `Locator` (v4), whose unknown tags are preserved opaquely (§5.3, §5.5). |
+| Unknown fields | v4: **preserved** across load → save at the envelope, `document`, `Tab`, `SourceEntry` and `FeatureTree` levels (flattened `extra` maps; convention: prefix tool-added keys with `x-`). Elsewhere (`Feature`, `GeomRef`, sketch entities, operation params) still silently ignored on load and dropped on save — do not stash data there. |
 | Optional fields | A field is optional iff it is `Option<T>` (serde derives treat missing `Option` as `None`) or carries `#[serde(default…)]`. All other fields are **required**; omitting them is a parse error. The tables below mark optionality. |
 
 ---
 
 ## 3. Top-level envelope
 
-### 3.1 Current (v3)
+### 3.1 Current (v4)
 
 ```json
 {
   "format": "waffle-iron",
-  "version": 3,
-  "min_reader_version": 3,
+  "version": 4,
+  "min_reader_version": 4,
   "document": {
+    "id": "6f1c2a4e-9b0e-4c1d-8d7a-2f3b4c5d6e7f",
     "name": "Untitled",
     "created": "2026-07-05T01:21:04.049Z",
     "modified": "2026-07-05T01:21:04.049Z",
     "display_unit": "mm"
   },
+  "sources": [],
   "tabs": [
     {
       "id": "9068ef01-8734-4955-95d4-2e78f0878fcb",
@@ -102,15 +127,21 @@ by the app's file picker.
 | Field | Type | Req | Meaning |
 |---|---|---|---|
 | `format` | string | ✔ | Must be exactly `"waffle-iron"`; anything else ⇒ `LoadError::UnknownFormat`. |
-| `version` | u32 | ✔* | Format version. `> 3` ⇒ `LoadError::FutureVersion` (refuse, don't guess). *The Rust loader defaults a missing/non-numeric version to `0`, which then fails migration (`no migration path from v0`). |
-| `min_reader_version` | u32 | opt (default 0) | Since 2026-08-28: the oldest reader (by its `FORMAT_VERSION`) that can parse this file. Readers refuse `max(version, min_reader_version) > FORMAT_VERSION` with `FutureVersion`. Writers set it to `MIN_READER_VERSION` (currently 3); bump it together with `version` whenever a change lands that old readers cannot parse — **including new enum variants**. Absent in pre-2026-08-28 files ⇒ no requirement. |
-| `document` | DocumentMetadata | ✔ | §5.1. |
+| `version` | u32 | ✔* | Format version. `> 4` ⇒ `LoadError::FutureVersion` (refuse, don't guess). *The Rust loader defaults a missing/non-numeric version to `0`, which then fails migration (`no migration path from v0`). |
+| `min_reader_version` | u32 | opt (default 0) | Since 2026-08-28: the oldest reader (by its `FORMAT_VERSION`) that can parse this file. Readers refuse `max(version, min_reader_version) > FORMAT_VERSION` with `FutureVersion`. Writers set it to `MIN_READER_VERSION` (currently 4); bump it together with `version` whenever a change lands that old readers cannot parse — new `Operation`/constraint/selector/`PlaneDefinition` variants included. Since v4, new **tab kinds, source kinds and locator kinds do not** require a bump (§5.3). Absent in pre-2026-08-28 files ⇒ no requirement. |
+| `document` | DocumentMetadata | ✔ | §5.1. `document.id` since v4 (writers always emit; a reader minting one for a hand-written file warns). |
+| `sources` | SourceEntry[] | opt (default `[]`) | v4 §5.5: external content the document depends on. |
 | `tabs` | Tab[] | ✔ | At least one tab expected; `load_document` rejects an `active_tab` that names no tab; `load_project` falls back to the first tab. |
 | `active_tab` | string | ✔ | Id of the tab open when saved. |
+| *any other key* | | | v4: preserved on load and re-emitted on save (`WaffleDocument.extra`). |
 
-The loader's v3 branch triggers on `version >= 3` **and** the presence of a `tabs`
-key (`crates/file-format/src/load.rs`); otherwise it falls through to the legacy
-flat shape.
+The loader's v4 branch triggers on `version >= 4` **and** the presence of a
+`tabs` key, the v3 branch on `version == 3` + `tabs` (then
+`migrate::migrate_v3_to_v4`); otherwise it falls through to the legacy flat
+shape (`crates/file-format/src/load.rs`). `load_document` returns a
+`LoadedDocument { document: WaffleDocument, warnings }` — warnings carry
+non-fatal findings (legacy tab id rewritten, missing `document.id`,
+unresolvable locator, embed hash mismatch, unknown tab kind).
 
 ### 3.2 Legacy v2 (and v1) flat shape
 
@@ -141,8 +172,11 @@ they are converted on load (§4).
 | 1 | initial | Flat `project` + `features`; coordinates in mm-scale scene units | `migrate_v1_to_v2` (`crates/file-format/src/migrate.rs`): multiply every **length-valued** field by 0.001 — sketch plane origins, Point x/y, Circle radius, Distance/Radius/Diameter constraint values, solved positions, profile circles and spline control points, extrude depths (both directions), revolve axis origin, fillet radius / chamfer distance / shell thickness, datum-plane origins and offsets. Angles, unit direction vectors, and ratios are **not** scaled. |
 | 2 | true-meters | Same shape as v1, values in meters | — |
 | 3 | multi-tab | Envelope restructured: `document` + `tabs[]` + `active_tab`; feature-tree content unchanged (v2→v3 is a no-op content migration) | Structural: legacy files wrapped into one tab. |
+| 4 | 2026-09-07 | `document.id`; `sources` table (git-aware locators, content hash, optional embed); opaque unknown tab/source/locator kinds; unknown-key preservation; `FeatureTree.provenance`; `ImportedBody.source_id` replaces the in-feature blob; JS-form timestamps; exact float parsing | `migrate_v3_to_v4`: mint `document.id` (serde default), rewrite non-UUID tab ids to fresh UUIDs (`active_tab` follows, warning emitted), lift every `ImportedBody.blob` into a `sources` entry (`Embedded`, `pack: true`, `content_hash: git-blob-sha1(text)`, byte-identical payloads share one entry) and set `source_id`. |
 
-Migrations run **sequentially** (v1→v2→v3). They live only in the Rust loader.
+Migrations run **sequentially** (v1→v2→v3→v4). They live only in the Rust loader;
+the JS `initDocumentState` applies the same tab-id rewrite so its tab list agrees
+with the engine's migrated view.
 The app's file-open and document-open paths do route through the Rust loader
 (`UiToEngine::LoadProject` → `file_format::load_project`,
 `crates/wasm-bridge/src/dispatch.rs:196`), so mm→m conversion is applied in
@@ -183,7 +217,7 @@ absent**: an older build given a newer file fails with a raw serde
 
 ### 5.3 `TabKind`
 
-Single variant today:
+Single known variant today:
 
 ```json
 { "type": "Part", "features": { …FeatureTree… }, "preview_mesh": null }
@@ -192,10 +226,54 @@ Single variant today:
 | Field | Type | Req | Notes |
 |---|---|---|---|
 | `features` | FeatureTree | ✔ | §6. |
-| `preview_mesh` | PreviewMesh \| null | opt | Thumbnail mesh for the document browser. The Rust writer omits the key when `None`; the JS writer emits an explicit `null`. Both load fine. |
+| `preview_mesh` | PreviewMesh \| null | opt | Thumbnail mesh for the document browser. Omitted when `None`; an explicit `null` also loads. |
 
-Future tab kinds (assembly, drawing) would be new `type` tags — which, per §13,
-old builds will reject with a parse error, not skip.
+**Unknown kinds (v4).** A well-formed `{"type": …}` the reader does not know
+(`Assembly`, `Drawing`, …) loads as `TabKind::Unknown(Value)`: the tab is kept,
+reported in the load warnings, not editable, and re-emitted **verbatim** on
+save (`crates/file-format/src/metadata.rs`, pinned by
+`tests/v4_document_tests.rs::unknown_tab_kind_is_preserved_verbatim_and_reported`).
+A *malformed* known kind (`{"type":"Part","features":42}`) or an object without a
+string `type` is still a hard parse error. Consequence: adding a tab kind is not a
+`MIN_READER_VERSION` bump. The bridge refuses to open an unknown-kind tab as the
+active part (`NotImplemented`) and refuses to hold the live tree in one.
+`Tab` also carries a flattened `extra` map for unknown keys.
+
+### 5.5 `SourceEntry` (v4)
+
+(`crates/file-format/src/sources.rs`; design and semantics:
+`specs/waffle_v4_document_model.md` §2.3–2.4, §7.)
+
+```json
+{
+  "id": "3b9e…", "name": "bracket.waffle", "kind": { "type": "Waffle" },
+  "locator": { "type": "Git", "remote": "https://github.com/acme/parts",
+               "path": "brackets/bracket.waffle", "ref": { "type": "Branch", "name": "main" } },
+  "resolved": { "commit": "9fceb02a…", "at": "2026-09-07T18:00:00.000Z" },
+  "content_hash": "git-blob-sha1:2aae6c35…", "pack": false, "embed": null,
+  "fetched_at": "2026-09-07T18:00:00.000Z"
+}
+```
+
+| Field | Type | Req/default | Notes |
+|---|---|---|---|
+| `id` | UUID | ✔ | Referenced by `ImportedBody.source_id` (and by assembly instances / drawing views / `scope.source_id` in later phases). Duplicate ids ⇒ `ParseError`. |
+| `name` | string | ✔ | Display. |
+| `kind` | `{"type": "Waffle"\|"Step"\|"KicadPcb"\|"Mesh"}` | ✔ | Unknown types preserved opaquely + warned. |
+| `locator` | `Git{remote,path,ref,host?}` \| `Relative{path}` \| `Url{url}` \| `Local{provider,doc_id}` \| `Embedded` | ✔ | `ref` ∈ `Commit{sha}` (pinned) \| `Branch{name}` \| `Tag{name}` (floating). `remote` normalized without `.git`; `host` ∈ `github`\|`gitlab`\|`gitea`\|`generic`, inferred from the hostname when absent. Structural problems (non-https, absolute/`..` paths, bad ref names, non-hex sha) are load **warnings**; the entry stays, unresolvable. Unknown types preserved opaquely. |
+| `resolved` | `{commit, at}` \| null | opt | Commit actually loaded last (git locators). |
+| `content_hash` | string \| null | opt | `git-blob-sha1:<40 hex>` of the exact bytes (= `git hash-object`); unknown prefixes are "no hash", never a mismatch. |
+| `pack` | bool \| null | opt | Writer policy for `embed`; absent ⇒ `true` for `Embedded`, else `false`. |
+| `embed` | `{encoding: "deflate-base64", blob}` \| null | opt | Cached content. Same codec + 256 MiB inflation cap as the old STEP blob (`step_import::decode_step_blob`; over-cap ⇒ `EmbedTooLarge`). An embed whose hash mismatches `content_hash` is ignored with an `EmbedHashMismatch` warning. |
+| `fetched_at` | timestamp \| null | opt | |
+| *any other key* | | | preserved. |
+
+**Content resolution at rebuild** (engine `SourceStore`, `crates/feature-engine/src/sources.rs`):
+the store (embeds registered at load + host-provided content via the bridge
+`ProvideSource` message) first, then the legacy inline blob; neither ⇒ the
+dependent feature fails `SourceUnavailable` loudly and the document still loads.
+The single-tree API keeps storeless consumers working: `load_project` inlines a
+hash-verified embed back into the feature, `save_project` lifts blobs out.
 
 ### 5.4 `PreviewMesh`
 
@@ -312,13 +390,14 @@ tagged with **`method`** (not `type`) and uses kebab-case tags:
 (The JS plane model also has a `three-points` definition; it is **not** part of the
 Rust persisted enum and never appears in files.)
 
-### 7.7 `ImportedBody` — `ImportedBodyParams` (types.rs:141)
+### 7.7 `ImportedBody` — `ImportedBodyParams` (types.rs)
 
 | Field | Type | Req/default | Notes |
 |---|---|---|---|
 | `file_name` | string | ✔ | Display/diagnostics, e.g. `"minihexa.step"`. |
-| `blob_encoding` | string | ✔ | Must equal `"deflate-base64"` (`step_import::STEP_BLOB_ENCODING`); anything else is a loud decode error. |
-| `blob` | string | ✔ | The **entire source STEP text**, raw-deflate-compressed then base64 (standard alphabet). Decoded by `step_import::decode_step_blob` (`crates/step-import/src/blob.rs`). No size cap on inflation (§14.8). |
+| `source_id` | UUID \| absent | v4 | The `sources[]` entry holding the STEP content (§5.5). v4 writers emit this and **no blob**. |
+| `blob_encoding` | string \| absent | legacy (v3) | Was required; must equal `"deflate-base64"` (`step_import::STEP_BLOB_ENCODING`) when present. |
+| `blob` | string \| absent | legacy (v3) | The **entire source STEP text**, raw-deflate-compressed then base64. Still accepted (`load_project` also *produces* it for storeless consumers); decoded by `step_import::decode_step_blob` with a 256 MiB inflation cap (`EmbedTooLarge`). |
 | `translation_m` | [f64;3] | default `[0,0,0]` | Placement translation, meters, applied after rotation. |
 | `rotation_deg` | [f64;3] | default `[0,0,0]` | Intrinsic X→Y→Z Euler angles, degrees, about the imported model's origin. |
 | `scale` | f64 | default `1.0` | Extra uniform scale on top of the STEP file's own unit conversion. |
@@ -512,9 +591,9 @@ Anyone changing the format must touch all of them:
 | Component | Location | Role |
 |---|---|---|
 | `file-format` crate | `crates/file-format/` | Reference implementation. `save_project`/`load_project` (single-tree, v3-wrapped), `save_document`/`load_document` (full multi-tab), `migrate`, `export_step`. **`save_document`/`load_document` currently have no production callers** — only tests; the bridge exposes only the single-tree pair. |
-| wasm-bridge | `crates/wasm-bridge/src/dispatch.rs:189-216` | `SaveProject` ⇒ Rust-serialized v3 (one tab, live tree), **verified** via `save_project_verified` (self round-trip; a corrupt tree is a loud bridge error, not a dead file). `LoadProject{data}` ⇒ Rust load (with migrations) of **the active tab only**, then full rebuild. `SwitchTab{features}` swaps trees without touching the file format. |
-| JS document writer | `buildDocumentJson`, `app/src/lib/engine/store.svelte.js` | **The production writer.** Pulls the live tree via `SaveProject`, splices it into the active tab, re-assembles the full v3 envelope in JS (all tabs, metadata, preview meshes, `min_reader_version`, preserved `created`). Used by autosave (3 s debounce), Ctrl+S, provider sync, and (since 2026-08-28) the file-download path, which previously dropped every non-active tab. Version constants live in `app/src/lib/engine/format.js` (must mirror the Rust constants). |
-| JS new-doc template | `app/src/routes/home/+page.svelte` | Hand-writes a minimal empty v3 document from the `format.js` constants (note: no `display_unit`, no `preview_mesh` keys — legal per §2 optionality). |
+| wasm-bridge | `crates/wasm-bridge/src/dispatch.rs` | **`SaveDocument{document, tabs, active_tab}`** (v4) ⇒ the engine substitutes the live tree into the active Part tab, attaches its `sources` table (embeds from the source store per `pack`), lifts any legacy inline payloads in inactive tabs, and returns `SaveReady{json_data}` from `save_document_verified` (self round-trip; a corrupt document is a loud bridge error, not a dead file). `SaveProject` (legacy, tests) ⇒ the live tree as a one-tab v4 document with the sources table. `LoadProject{data}` ⇒ `load_document` (all migrations) — adopts `sources`, registers usable embeds into the engine store, rebuilds the active tab's tree, appends the loader's warnings to the rebuild warnings. `ProvideSource{source_id, data}` ⇒ host-fetched content registered + rebuild. `ImportStep` ⇒ a packed `Embedded` `Step` source + a feature naming it (Import provenance). `SwitchTab{features}` swaps trees; sources are document-scoped and survive. `NewDocument` clears them. |
+| JS document composer | `buildDocumentJson`, `app/src/lib/engine/store.svelte.js` | **No longer a writer.** Sends the UI-owned document metadata (`id`, `name`, latched `created`, `modified: now`, `display_unit`) and tab list (inactive tabs with their trees; unknown-kind tabs verbatim) to `SaveDocument` and returns the engine's bytes. Used by autosave (3 s debounce), Ctrl+S, provider sync and the download path. `initDocumentState` latches `document.id` (minting one for legacy files) and rewrites non-UUID tab ids exactly as the Rust migration does. `format.js` mirrors the version constants for the engine-less read paths (home page, file-picker refusal). |
+| JS new-doc template | `app/src/routes/home/+page.svelte` | Hand-writes a minimal empty v4 document (`document.id`, `sources: []`) from the `format.js` constants; the loader normalizes anything it lacks. |
 | JS loader/bookkeeper | `initDocumentState` / `loadPendingDocument`, store.svelte.js:5395/5508 | Parses the document in JS for tab structure, then feeds the whole JSON to the Rust loader for the engine model. |
 | Storage envelope — IndexedDB | `app/src/lib/storage/indexeddb.js` | DB `waffle-iron`, store `documents`, records `{id, json: <the .waffle text>, created, modified}` (epoch ms). The `.waffle` JSON travels as an opaque string. |
 | Storage envelope — GitHub | `app/src/lib/storage/github.js` | One file per document in a user repo (default `waffle-iron-documents`) plus an index file `.waffle-index.json`. Same opaque JSON. Documents can be **shared** — files must be treated as potentially untrusted input (§14.8). |
@@ -542,11 +621,13 @@ Anyone changing the format must touch all of them:
    dropped on resave (round-tripping a newer file through an older build strips
    data without warning); there is still no "ignore-unknown-variant" mechanism.
 3. **Version-bump rule (now explicit):** bump `version` for value-reinterpreting
-   or structural changes (v1→v2 units, v2→v3 tabs). Bump `MIN_READER_VERSION`
-   (Rust `save.rs` + JS `format.js`, together with `version`) for **any** change
-   old readers cannot parse — which includes new enum *variants*
-   (`Operation`/`TabKind`/constraint/selector tags), not just structural
-   changes. Purely additive defaulted fields need no bump.
+   or structural changes (v1→v2 units, v2→v3 tabs, v3→v4 identity/sources).
+   Bump `MIN_READER_VERSION` (Rust `save.rs` + JS `format.js`, together with
+   `version`) for **any** change old readers cannot parse — which includes new
+   `Operation`/constraint/selector/`PlaneDefinition` *variants*, not just
+   structural changes. Purely additive defaulted fields need no bump. **Since
+   v4, new tab kinds, source kinds and locator kinds need no bump either**:
+   v4 readers preserve unknown ones opaquely (§5.3, §5.5).
 4. **Writer duties:** never emit NaN/∞ (serializes as `null`, poisons the file —
    §2): the bridge save path enforces this via `save_project_verified`, which
    round-trips its own output through the loader and errors loudly instead of
@@ -614,6 +695,10 @@ original text is kept for the record with a status line.
 7. **Two writers, no shared schema.** The Rust crate and `buildDocumentJson`
    both compose the envelope; divergences (2) and (3) are the existing proof of
    drift. There is no JSON Schema, no golden-file diff test between the writers.
+   **FIXED (writer) 2026-09-07:** one writer — `buildDocumentJson` routes
+   through the bridge `SaveDocument` message and the Rust
+   `save_document_verified` (§12). The JSON Schema golden remains OPEN
+   (`specs/waffle_v4_document_model.md` §9 increment 6).
 8. **Untrusted-input hardening is absent.** GitHub-shared documents make
    `.waffle` files an exchange format. `decode_step_blob` has no inflation size
    cap (deflate bomb ⇒ memory abort, and wasm32 alloc-abort is a known hard
@@ -661,17 +746,16 @@ metadata today (`created`, `display_unit`).
 
 1. **DONE.** The stale v1 dossier is superseded by this spec; keep this spec
    updated in the same PR as any format change.
-2. **Single writer — PARTIALLY DONE.** The two metadata drift bugs are fixed
-   (`created` latched, `extractDisplayUnit` reads the v3 path), the JS version
-   literals are consolidated into `app/src/lib/engine/format.js`, and
-   `document-format-seam.spec.js` pins the JS writer's envelope. The structural
-   consolidation (routing `buildDocumentJson` through the Rust `save_document`
-   via a bridge `SaveDocument{tabs…}` message) remains OPEN — it is what would
-   prevent the next drift class outright.
-3. **Forward-compat policy — DONE.** `min_reader_version` is written by all
-   writers and enforced by all readers (§13.2-3). Unknown-field preservation
-   remains deliberately absent (documented in §2); designing it in (serde
-   `flatten` catch-alls on every struct) is OPEN and unscheduled.
+2. **Single writer — DONE 2026-09-07.** `buildDocumentJson` routes through the
+   bridge `SaveDocument{document, tabs, active_tab}` message and the Rust
+   `save_document_verified`; `document-format-seam.spec.js` pins the v4 envelope
+   as seen from the app.
+3. **Forward-compat policy — DONE (v4).** `min_reader_version` is written and
+   enforced (§13.2-3). Unknown-field preservation landed at the envelope,
+   `document`, `Tab`, `SourceEntry` and `FeatureTree` levels; unknown tab,
+   source and locator kinds are preserved opaquely (§5.3, §5.5). Not preserved
+   inside `Feature`/`GeomRef`/sketch entities/operation params (dense structs
+   with ~70–120 literal sites each; documented in the v4 spec §2.6).
 4. **Multi-tab load correctness — DONE.** File→Open adopts the file's tab
    structure under a fresh storage doc id and the download path writes the
    full document (§14.4).
