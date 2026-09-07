@@ -9,10 +9,17 @@ feature-engine = { path = "../feature-engine" }
 modeling-ops = { path = "../modeling-ops" }
 waffle-types = { path = "../waffle-types" }
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# `float_roundtrip`: exact (correctly rounded) float parsing, so a load →
+# save cycle never drifts a coordinate by an ULP. Without it serde_json's
+# best-effort parser turned `-4.4087284769304716e-17` into
+# `-4.408728476930472e-17` on every round trip (measured on the assay corpus,
+# C0028). Feature unification applies it to every crate in the build.
+serde_json = { version = "1", features = ["float_roundtrip"] }
 uuid = { version = "1", features = ["serde", "v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 thiserror = "1"
+sha1 = "0.10"
+step-import = { path = "../step-import" }
 
 [dev-dependencies]
 waffle-types = { path = "../waffle-types", features = ["mock-kernel"] }

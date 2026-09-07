@@ -1,12 +1,12 @@
-use chrono::Utc;
 use feature_engine::types::{
     BooleanOp, BooleanParams, ChamferParams, ExtrudeParams, Feature, FeatureTree, FilletParams,
     Operation, RevolveParams, ShellParams,
 };
 use file_format::errors::ExportError;
+use file_format::WaffleDocument;
 use file_format::{
-    export_step, load_document, load_project, save_document, save_project, DocumentMetadata,
-    LoadError, PreviewMesh, ProjectMetadata, Tab, TabKind, FORMAT_VERSION,
+    export_step, load_document, load_project, save_document, save_project, LoadError, PreviewMesh,
+    ProjectMetadata, Tab, TabKind, FORMAT_VERSION,
 };
 use uuid::Uuid;
 use waffle_types::{
@@ -1016,7 +1016,7 @@ fn v3_round_trip_single_tab() {
 
     // Verify it's v3 format
     let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
-    assert_eq!(parsed["version"], 3);
+    assert_eq!(parsed["version"], FORMAT_VERSION);
     assert!(parsed.get("document").is_some());
     assert!(parsed.get("tabs").is_some());
 
@@ -1030,48 +1030,27 @@ fn v3_round_trip_single_tab() {
 fn v3_save_document_two_tabs() {
     let tree1 = make_simple_tree();
     let tree2 = FeatureTree::new();
-    let tab1_id = Uuid::new_v4().to_string();
-    let tab2_id = Uuid::new_v4().to_string();
-
-    let doc = DocumentMetadata {
-        name: "Two Tabs".to_string(),
-        created: Utc::now(),
-        modified: Utc::now(),
-        display_unit: Some("mm".to_string()),
-    };
-
-    let tabs = vec![
-        Tab {
-            id: tab1_id.clone(),
-            name: "Part 1".to_string(),
-            kind: TabKind::Part {
-                features: tree1.clone(),
-                preview_mesh: None,
-            },
-        },
-        Tab {
-            id: tab2_id,
-            name: "Part 2".to_string(),
-            kind: TabKind::Part {
-                features: tree2,
-                preview_mesh: None,
-            },
-        },
+    let mut doc = WaffleDocument::new("Two Tabs");
+    doc.document.display_unit = Some("mm".to_string());
+    doc.tabs = vec![
+        Tab::part("Part 1", tree1.clone()),
+        Tab::part("Part 2", tree2),
     ];
+    let tab1_id = doc.tabs[0].id.clone();
+    doc.active_tab = tab1_id.clone();
 
-    let json = save_document(&doc, &tabs, tab1_id.clone());
-    let (loaded_doc, loaded_tabs, loaded_active) = load_document(&json).unwrap();
+    let json = save_document(&doc);
+    let loaded = load_document(&json).unwrap().document;
 
-    assert_eq!(loaded_doc.name, "Two Tabs");
-    assert_eq!(loaded_tabs.len(), 2);
-    assert_eq!(loaded_active, tab1_id);
-    assert_eq!(loaded_tabs[0].name, "Part 1");
-    assert_eq!(loaded_tabs[1].name, "Part 2");
+    assert_eq!(loaded.document.name, "Two Tabs");
+    assert_eq!(loaded.document.id, doc.document.id, "document id is stable");
+    assert_eq!(loaded.tabs.len(), 2);
+    assert_eq!(loaded.active_tab, tab1_id);
+    assert_eq!(loaded.tabs[0].name, "Part 1");
+    assert_eq!(loaded.tabs[1].name, "Part 2");
 
     // Verify first tab has features
-    match &loaded_tabs[0].kind {
-        TabKind::Part { features, .. } => assert_eq!(features.features.len(), 2),
-    }
+    assert_eq!(loaded.tabs[0].features().unwrap().features.len(), 2);
 }
 
 #[test]
@@ -1091,13 +1070,16 @@ fn v2_to_v3_migration_via_load_document() {
     });
     let json = serde_json::to_string(&v2_json).unwrap();
 
-    let (doc, tabs, _active) = load_document(&json).unwrap();
-    assert_eq!(doc.name, "V2 File");
-    assert_eq!(tabs.len(), 1);
-    assert_eq!(tabs[0].name, "Part 1");
-    match &tabs[0].kind {
-        TabKind::Part { features, .. } => assert_eq!(features.features.len(), 2),
-    }
+    let doc = load_document(&json).unwrap().document;
+    assert_eq!(doc.document.name, "V2 File");
+    assert_eq!(doc.tabs.len(), 1);
+    assert_eq!(doc.tabs[0].name, "Part 1");
+    assert_eq!(doc.tabs[0].features().unwrap().features.len(), 2);
+    assert!(
+        Uuid::parse_str(&doc.tabs[0].id).is_ok(),
+        "wrapped tab gets a UUID id"
+    );
+    assert_eq!(doc.active_tab, doc.tabs[0].id);
 }
 
 #[test]
@@ -1118,38 +1100,21 @@ fn v1_to_v3_chain_via_load_document() {
     });
     let json = serde_json::to_string(&v1_json).unwrap();
 
-    let (doc, tabs, _active) = load_document(&json).unwrap();
-    assert_eq!(doc.name, "V1 File");
-    assert_eq!(tabs.len(), 1);
+    let doc = load_document(&json).unwrap().document;
+    assert_eq!(doc.document.name, "V1 File");
+    assert_eq!(doc.tabs.len(), 1);
 }
 
 #[test]
 fn v3_active_tab_validity() {
-    let doc = DocumentMetadata {
-        name: "Test".to_string(),
-        created: Utc::now(),
-        modified: Utc::now(),
-        display_unit: None,
-    };
-    let tab_id = Uuid::new_v4().to_string();
-    let tabs = vec![Tab {
-        id: tab_id.clone(),
-        name: "Part".to_string(),
-        kind: TabKind::Part {
-            features: FeatureTree::new(),
-            preview_mesh: None,
-        },
-    }];
+    let doc = WaffleDocument::new("Test");
 
     // Save with valid active_tab
-    let json = save_document(&doc, &tabs, tab_id.clone());
+    let json = save_document(&doc);
     let result = load_document(&json);
     assert!(result.is_ok());
 
-    // Manually create invalid active_tab reference
-    let bad_id = Uuid::new_v4();
-    let _bad_json = json.replace(&tab_id, &bad_id.to_string());
-    // Both tab id and active_tab got replaced, so they still match — construct truly invalid JSON
+    // Construct truly invalid JSON: active_tab names no tab
     let mut parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
     parsed["active_tab"] = serde_json::Value::String(Uuid::new_v4().to_string());
     let bad_json2 = serde_json::to_string(&parsed).unwrap();
@@ -1162,37 +1127,28 @@ fn v3_active_tab_validity() {
 
 #[test]
 fn v3_preview_mesh_serde() {
-    let doc = DocumentMetadata {
-        name: "Mesh Test".to_string(),
-        created: Utc::now(),
-        modified: Utc::now(),
-        display_unit: None,
-    };
-    let tab_id = Uuid::new_v4().to_string();
+    let mut doc = WaffleDocument::new("Mesh Test");
     let mesh = PreviewMesh {
         vertices: vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0],
         normals: vec![0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0],
         indices: vec![0, 1, 2],
     };
-    let tabs = vec![Tab {
-        id: tab_id.clone(),
-        name: "Part".to_string(),
-        kind: TabKind::Part {
-            features: FeatureTree::new(),
-            preview_mesh: Some(mesh),
-        },
-    }];
+    doc.tabs[0].kind = TabKind::Part {
+        features: FeatureTree::new(),
+        preview_mesh: Some(mesh),
+    };
 
-    let json = save_document(&doc, &tabs, tab_id);
-    let (_, loaded_tabs, _) = load_document(&json).unwrap();
+    let json = save_document(&doc);
+    let loaded = load_document(&json).unwrap().document;
 
-    match &loaded_tabs[0].kind {
+    match &loaded.tabs[0].kind {
         TabKind::Part { preview_mesh, .. } => {
             let mesh = preview_mesh.as_ref().expect("should have preview mesh");
             assert_eq!(mesh.vertices.len(), 9);
             assert_eq!(mesh.normals.len(), 9);
             assert_eq!(mesh.indices.len(), 3);
         }
+        TabKind::Unknown(_) => panic!("Part tab must load as Part"),
     }
 }
 
@@ -1200,37 +1156,17 @@ fn v3_preview_mesh_serde() {
 fn v3_load_project_returns_active_tab_features() {
     let tree1 = make_simple_tree();
     let tree2 = FeatureTree::new();
-    let tab1_id = Uuid::new_v4().to_string();
-    let tab2_id = Uuid::new_v4().to_string();
-
-    let doc = DocumentMetadata {
-        name: "Multi Tab".to_string(),
-        created: Utc::now(),
-        modified: Utc::now(),
-        display_unit: None,
-    };
-
-    let tabs = vec![
-        Tab {
-            id: tab1_id.clone(),
-            name: "Part 1".to_string(),
-            kind: TabKind::Part {
-                features: tree1.clone(),
-                preview_mesh: None,
-            },
-        },
-        Tab {
-            id: tab2_id.clone(),
-            name: "Part 2".to_string(),
-            kind: TabKind::Part {
-                features: tree2,
-                preview_mesh: None,
-            },
-        },
+    let mut doc = WaffleDocument::new("Multi Tab");
+    doc.tabs = vec![
+        Tab::part("Part 1", tree1.clone()),
+        Tab::part("Part 2", tree2),
     ];
+    let tab1_id = doc.tabs[0].id.clone();
+    let tab2_id = doc.tabs[1].id.clone();
 
     // Active tab is tab2 (empty tree)
-    let json = save_document(&doc, &tabs, tab2_id);
+    doc.active_tab = tab2_id;
+    let json = save_document(&doc);
     let (loaded_tree, loaded_meta) = load_project(&json).unwrap();
     assert_eq!(loaded_meta.name, "Multi Tab");
     assert_eq!(
@@ -1240,7 +1176,8 @@ fn v3_load_project_returns_active_tab_features() {
     );
 
     // Active tab is tab1 (2 features)
-    let json = save_document(&doc, &tabs, tab1_id);
+    doc.active_tab = tab1_id;
+    let json = save_document(&doc);
     let (loaded_tree, _) = load_project(&json).unwrap();
     assert_eq!(
         loaded_tree.features.len(),
@@ -1276,12 +1213,23 @@ fn v3_non_uuid_tab_id_loads() {
     assert_eq!(meta.name, "Legacy Default Tab");
     assert_eq!(tree.features.len(), 0);
 
-    // load_document (document model) must round-trip the opaque id too.
-    let (doc, tabs, active) = load_document(json).expect("non-uuid tab id should load");
-    assert_eq!(doc.name, "Legacy Default Tab");
-    assert_eq!(tabs.len(), 1);
-    assert_eq!(tabs[0].id, "default");
-    assert_eq!(active, "default");
+    // load_document migrates it to v4: the legacy id becomes a UUID, the
+    // active tab follows, and the rewrite is reported (v4 spec §3).
+    let loaded = load_document(json).expect("non-uuid tab id should load");
+    let doc = loaded.document;
+    assert_eq!(doc.document.name, "Legacy Default Tab");
+    assert_eq!(doc.tabs.len(), 1);
+    assert!(
+        Uuid::parse_str(&doc.tabs[0].id).is_ok(),
+        "legacy id rewritten to a UUID, got {}",
+        doc.tabs[0].id
+    );
+    assert_eq!(doc.active_tab, doc.tabs[0].id);
+    assert!(
+        loaded.warnings.iter().any(|w| w.contains("`default`")),
+        "rewrite is reported: {:?}",
+        loaded.warnings
+    );
 }
 
 /// Spec point_pair_horizontal_vertical.md I4: the new point-pair Horizontal /
@@ -1456,22 +1404,9 @@ fn save_writes_min_reader_version() {
     let parsed: serde_json::Value = serde_json::from_str(&save_project(&tree, &meta)).unwrap();
     assert_eq!(parsed["min_reader_version"], MIN_READER_VERSION);
 
-    let doc = DocumentMetadata {
-        name: "Doc".to_string(),
-        created: Utc::now(),
-        modified: Utc::now(),
-        display_unit: None,
-    };
-    let tab = Tab {
-        id: "t1".to_string(),
-        name: "Part 1".to_string(),
-        kind: TabKind::Part {
-            features: make_simple_tree(),
-            preview_mesh: None,
-        },
-    };
-    let parsed: serde_json::Value =
-        serde_json::from_str(&save_document(&doc, &[tab], "t1")).unwrap();
+    let mut doc = WaffleDocument::new("Doc");
+    doc.tabs[0].features_mut().unwrap().features = make_simple_tree().features;
+    let parsed: serde_json::Value = serde_json::from_str(&save_document(&doc)).unwrap();
     assert_eq!(parsed["min_reader_version"], MIN_READER_VERSION);
 }
 

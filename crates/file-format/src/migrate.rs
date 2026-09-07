@@ -3,10 +3,47 @@ use feature_engine::types::{
 };
 use waffle_types::{ClosedProfile, Sketch, SketchConstraint, SketchEntity};
 
+use crate::document::WaffleDocument;
 use crate::errors::LoadError;
+use crate::metadata::{DocumentMetadata, Tab};
 
 /// Scale factor for v1→v2 migration: mm-scale → meters.
 const MM_TO_METERS: f64 = 0.001;
+
+/// Structural migration v3 → v4 (`specs/waffle_v4_document_model.md` §3):
+/// the document id was minted by the v3 parse (serde default) since a v3 file
+/// has none; non-UUID tab ids (the historical `"default"`) become fresh
+/// UUIDs with `active_tab` rewritten; every legacy in-feature STEP payload is
+/// lifted into the `sources` table. Returns the document plus warnings.
+pub fn migrate_v3_to_v4(
+    document: DocumentMetadata,
+    mut tabs: Vec<Tab>,
+    mut active_tab: String,
+) -> (WaffleDocument, Vec<String>) {
+    let mut warnings = Vec::new();
+    for tab in &mut tabs {
+        if uuid::Uuid::parse_str(&tab.id).is_err() {
+            let fresh = uuid::Uuid::new_v4().to_string();
+            warnings.push(format!(
+                "tab `{}`: legacy id `{}` rewritten to {fresh}",
+                tab.name, tab.id
+            ));
+            if active_tab == tab.id {
+                active_tab = fresh.clone();
+            }
+            tab.id = fresh;
+        }
+    }
+    let mut doc = WaffleDocument {
+        document,
+        sources: Vec::new(),
+        tabs,
+        active_tab,
+        extra: Default::default(),
+    };
+    warnings.extend(doc.lift_inline_payloads());
+    (doc, warnings)
+}
 
 /// Apply format migrations from `from_version` to `to_version`.
 ///
