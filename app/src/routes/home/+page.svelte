@@ -32,10 +32,11 @@
 		const provider = getActiveProvider();
 		const id = generateDocId();
 		const now = Date.now();
-		const tabId = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+		const newUuid = () => (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
 			? crypto.randomUUID()
 			: ([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g, c =>
 				(c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16));
+		const tabId = newUuid();
 		const doc = {
 			id,
 			json: JSON.stringify({
@@ -43,10 +44,13 @@
 				version: FORMAT_VERSION,
 				min_reader_version: MIN_READER_VERSION,
 				document: {
+					// v4 identity (specs/waffle_v4_document_model.md §2.1)
+					id: newUuid(),
 					name: 'Untitled',
 					created: new Date(now).toISOString(),
 					modified: new Date(now).toISOString()
 				},
+				sources: [],
 				tabs: [{
 					id: tabId,
 					name: 'Part 1',

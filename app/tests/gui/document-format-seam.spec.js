@@ -1,12 +1,18 @@
 /**
- * Document-format seam regressions (docs/FILE_FORMAT.md §14, fixed 2026-08-28):
+ * Document-format seam regressions (docs/FILE_FORMAT.md §14, fixed 2026-08-28;
+ * v4 single writer, specs/waffle_v4_document_model.md):
  *  - §14.2 `created` was re-stamped "now" on every save
  *  - §14.3 v3 `display_unit` was reset to mm on open (v2-only read path)
  *  - §14.4 File→Open kept stale JS tab state / dropped tabs from downloads
  *  - §13   files can demand a newer reader (`min_reader_version`) and must be
  *          refused cleanly, not with parse noise
- * These pin the JS writer's envelope — the production writer of the format.
+ *  - v4    every save goes through the Rust writer (`SaveDocument`): the file
+ *          is v4, carries a stable `document.id` and a `sources` table, and a
+ *          v3 file's legacy tab ids are rewritten to UUIDs on open (the JS tab
+ *          list and the engine's migrated view must agree).
+ * These pin the production writer's envelope as seen from the app.
  */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 import { test, expect } from './helpers/waffle-test.js';
 import { seedDocument, getDocumentFromDB } from './helpers/waffle-test.js';
 import { test as rawTest } from '@playwright/test';
@@ -54,19 +60,28 @@ rawTest.describe('Document format seam', () => {
 		expect(state.documentCreated).toBe(T0);
 		expect(state.documentDisplayUnit).toBe('in');
 		expect(state.documentTabs.length).toBe(2);
-		expect(state.activeTabId).toBe('tab-b');
+		// v4: the legacy ids 'tab-a'/'tab-b' are rewritten to UUIDs on open,
+		// and the active tab follows the rewrite (it was the second tab).
+		expect(state.documentTabs.map((t) => t.name)).toEqual(['Part 1', 'Part 2']);
+		for (const t of state.documentTabs) expect(t.id).toMatch(UUID_RE);
+		expect(state.activeTabId).toBe(state.documentTabs[1].id);
+		// A legacy file has no document.id: one is minted at open and latched.
+		expect(state.documentId).toMatch(UUID_RE);
 
-		// The writer's envelope: created preserved, modified fresh, unit kept,
-		// min_reader_version present, both tabs intact.
+		// The writer's envelope (v4, from the Rust writer): created preserved,
+		// modified fresh, unit kept, identity + sources present, both tabs intact.
 		const written = JSON.parse(await page.evaluate(() => window.__waffle.buildDocumentJson()));
 		expect(written.format).toBe('waffle-iron');
-		expect(written.version).toBe(3);
-		expect(written.min_reader_version).toBe(3);
+		expect(written.version).toBe(4);
+		expect(written.min_reader_version).toBe(4);
+		expect(written.document.id).toBe(state.documentId);
 		expect(written.document.created).toBe(T0);
 		expect(written.document.modified).not.toBe(T0);
 		expect(written.document.display_unit).toBe('in');
-		expect(written.tabs.map((t) => t.id)).toEqual(['tab-a', 'tab-b']);
-		expect(written.active_tab).toBe('tab-b');
+		expect(written.sources).toEqual([]);
+		expect(written.tabs.map((t) => t.id)).toEqual(state.documentTabs.map((t) => t.id));
+		expect(written.tabs.map((t) => t.name)).toEqual(['Part 1', 'Part 2']);
+		expect(written.active_tab).toBe(state.documentTabs[1].id);
 
 		// And the real Ctrl+S storage path writes the same envelope to IndexedDB.
 		await page.keyboard.press('Control+s');
@@ -75,7 +90,8 @@ rawTest.describe('Document format seam', () => {
 		expect(stored).toBeTruthy();
 		const storedJson = JSON.parse(stored.json);
 		expect(storedJson.document.created).toBe(T0);
-		expect(storedJson.min_reader_version).toBe(3);
+		expect(storedJson.document.id).toBe(state.documentId);
+		expect(storedJson.min_reader_version).toBe(4);
 		expect(storedJson.tabs.length).toBe(2);
 	});
 
@@ -105,7 +121,7 @@ rawTest.describe('Document format seam', () => {
 		expect(state.activeDocId).not.toBe('seam002');
 		// ...and the file's structure + metadata adopted; name comes from the filename.
 		expect(state.documentTabs.length).toBe(2);
-		expect(state.activeTabId).toBe('tab-b');
+		expect(state.activeTabId).toBe(state.documentTabs[1].id);
 		expect(state.documentCreated).toBe('2021-05-06T07:08:09.000Z');
 		expect(state.documentDisplayUnit).toBe('cm');
 		expect(state.documentName).toBe('opened-doc');
@@ -162,13 +178,20 @@ rawTest.describe('Document format seam', () => {
 
 		const written = JSON.parse(await page.evaluate(() => window.__waffle.buildDocumentJson()));
 		expect(written.tabs.length).toBe(1);
+		expect(written.tabs[0].id).toMatch(UUID_RE);
 		expect(written.active_tab).toBe(written.tabs[0].id);
 		expect(written.tabs[0].kind.features.features.length).toBe(1);
-		expect(written.min_reader_version).toBe(3);
+		expect(written.version).toBe(4);
+		expect(written.min_reader_version).toBe(4);
+		expect(written.document.id).toMatch(UUID_RE);
 		expect(written.document.created).toBeTruthy();
+		expect(written.sources).toEqual([]);
 
-		// created is latched: a second save keeps it.
+		// created, identity and the implicit tab id are latched: a second save
+		// keeps them.
 		const again = JSON.parse(await page.evaluate(() => window.__waffle.buildDocumentJson()));
 		expect(again.document.created).toBe(written.document.created);
+		expect(again.document.id).toBe(written.document.id);
+		expect(again.tabs[0].id).toBe(written.tabs[0].id);
 	});
 });

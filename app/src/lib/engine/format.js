@@ -1,19 +1,21 @@
 /**
- * .waffle format constants — the single JS-side source for envelope version
- * numbers. Must mirror `FORMAT_VERSION` / `MIN_READER_VERSION` in
- * `crates/file-format/src/save.rs` (the Rust writer). See
- * `docs/FILE_FORMAT.md` §3–4, §13.
+ * .waffle format constants — the JS-side mirror of `FORMAT_VERSION` /
+ * `MIN_READER_VERSION` in `crates/file-format/src/save.rs`. Used only by the
+ * READ paths that run without the engine (home page, file picker refusal) and
+ * by the home page's empty-document template; every real save goes through
+ * the Rust writer (`SaveDocument`). See `docs/FILE_FORMAT.md` §3–4, §13 and
+ * `specs/waffle_v4_document_model.md`.
  */
 
 /** Format version this app writes. */
-export const FORMAT_VERSION = 3;
+export const FORMAT_VERSION = 4;
 
 /**
  * Oldest reader (by its FORMAT_VERSION) that can parse files this app writes.
  * Bump together with the Rust constant whenever a change lands that older
  * readers cannot parse (new enum variants included).
  */
-export const MIN_READER_VERSION = 3;
+export const MIN_READER_VERSION = 4;
 
 /**
  * True if a parsed document declares it needs a newer reader than this build.

@@ -29,6 +29,10 @@ import { fetchTestCases, fetchTestCase, createTestCase as apiCreateTestCase, del
  * crypto.randomUUID() requires HTTPS or localhost; crypto.getRandomValues() works everywhere.
  * @returns {string}
  */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** @param {unknown} s */
+function isUuid(s) { return typeof s === 'string' && UUID_RE.test(s); }
+
 function generateUUID() {
 	if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
 		return crypto.randomUUID();
@@ -363,6 +367,13 @@ let documentTabs = $state([]);
 
 /** @type {string} Human-readable document name */
 let documentName = $state('Untitled');
+/** v4 `document.id` (specs/waffle_v4_document_model.md §2.1): the document's
+ *  own identity, independent of the storage record. Latched at open (minted
+ *  once for legacy files) so every save in the session carries the same id. */
+let documentId = $state(null);
+/** Tab id used when a doc-less editor session (plain `/`) is saved: minted
+ *  once so consecutive saves agree (v4: new tabs are UUIDs). */
+let implicitTabId = null;
 
 /**
  * The document's original `created` timestamp (ISO string), adopted from the
@@ -1109,6 +1120,7 @@ export async function initEngine() {
 			},
 			shaderDebug: false,
 			getDocumentState: () => ({
+				documentId,
 				activeDocId,
 				activeTabId,
 				documentTabs: documentTabs.map(t => ({ id: t.id, name: t.name, kind: t.kind?.type })),
@@ -5504,18 +5516,11 @@ export async function loadPendingDocument() {
 	try {
 		const parsed = JSON.parse(pendingJson);
 		initDocumentState(pendingDocId, parsed);
-		// Load the active tab's features into the engine
-		const activeTab = documentTabs.find(t => t.id === activeTabId);
-		const tabFeatures = activeTab?.kind?.features;
-		if (tabFeatures?.features?.length > 0) {
-			await loadProject(pendingJson);
-		} else if (bridge && engineReady) {
-			// Empty document — clear the engine's stale model
-			await sendRebuild({
-				type: 'SwitchTab',
-				features: { features: [], active_index: null }
-			});
-		}
+		// Load the document into the engine — ALWAYS, even when the active tab
+		// is empty: the engine owns the document's `sources` table (v4 §2.3),
+		// which an empty tab can still belong to, and the Rust loader is the
+		// one place migrations run.
+		await loadProject(pendingJson, { silent: true });
 		log('system', `Loaded document ${pendingDocId}`);
 	} catch (err) {
 		log('error', `Failed to load pending document: ${err}`);
@@ -5620,6 +5625,9 @@ export function initDocumentState(docId, parsed) {
 	activeDocId = docId;
 	documentName = parsed.document?.name || 'Untitled';
 	projectName = documentName;
+	// v4 identity: adopt the file's document.id; a legacy (v1–v3) file has
+	// none, so mint one here — once — and every save persists it.
+	documentId = isUuid(parsed.document?.id) ? parsed.document.id : generateUUID();
 	// Adopt the document's creation time (v3: document.*, legacy: project.*)
 	// so saves preserve it instead of re-stamping "now".
 	documentCreated = parsed.document?.created || parsed.project?.created || null;
@@ -5631,12 +5639,22 @@ export function initDocumentState(docId, parsed) {
 	lastRebuildWarnings = new Set();
 
 	if (parsed.tabs && parsed.tabs.length > 0) {
-		documentTabs = parsed.tabs.map(t => ({
-			id: t.id,
-			name: t.name,
-			kind: t.kind || { type: 'Part', features: { features: [], active_index: null } }
-		}));
-		activeTabId = parsed.active_tab || parsed.tabs[0].id;
+		// v4: tab ids are UUIDs. A legacy id (the historical "default") is
+		// rewritten exactly as the Rust v3→v4 migration does, with active_tab
+		// following, so the JS tab list and the engine's view of the same file
+		// agree. Unknown tab keys ride along (`...t`) and are preserved on save.
+		const idMap = new Map();
+		documentTabs = parsed.tabs.map(t => {
+			const id = isUuid(t.id) ? t.id : generateUUID();
+			idMap.set(t.id, id);
+			return {
+				...t,
+				id,
+				name: t.name,
+				kind: t.kind || { type: 'Part', features: { features: [], active_index: null } }
+			};
+		});
+		activeTabId = idMap.get(parsed.active_tab) ?? documentTabs[0].id;
 	} else {
 		// Legacy v1/v2 — single implicit tab
 		const tabId = generateUUID();
@@ -5646,79 +5664,74 @@ export function initDocumentState(docId, parsed) {
 }
 
 /**
- * Build full v3 JSON from current document state for saving.
- * Includes all tabs (inactive ones from documentTabs, active one from live engine state).
- * @returns {Promise<string | null>}
+ * Build the full `.waffle` (v4) document for saving — through the ONE writer.
+ * The UI owns the document metadata and the tab list (inactive tabs carry
+ * their trees; the active tab's tree lives in the engine); the engine owns the
+ * `sources` table and composes + verifies the file (`SaveDocument` →
+ * `SaveReady`). No envelope is assembled in JavaScript
+ * (specs/waffle_v4_document_model.md §4 invariant 7).
+ * @returns {Promise<string | null>} the file text, or null when the engine
+ *   refused (the last good stored copy is then left untouched).
  */
 export async function buildDocumentJson() {
-	// Get current active tab's features from the engine via SaveProject.
-	// The engine returns v3 JSON with features inside tabs[0].kind.features.
-	const liveJson = await saveProjectToString();
-	let liveFeatures = null;
-	if (liveJson) {
-		try {
-			const parsed = JSON.parse(liveJson);
-			// v3 format: features are in tabs[0].kind.features
-			if (parsed.tabs?.[0]?.kind?.features) {
-				liveFeatures = parsed.tabs[0].kind.features;
-			}
-			// v2 fallback: features at project.features
-			else if (parsed.project?.features) {
-				liveFeatures = parsed.project.features;
-			}
-			// v1 fallback: feature_tree at top level
-			else if (parsed.feature_tree) {
-				liveFeatures = { features: parsed.feature_tree.features || [], active_index: parsed.feature_tree.active_index ?? null };
-			}
-		} catch { /* ignore */ }
-	}
+	if (!bridge || !engineReady) return null;
 
 	const now = new Date().toISOString();
-	// Latch the creation time on first save so it stays stable within the session.
+	// Latch identity + creation time on first save so they stay stable.
 	if (!documentCreated) documentCreated = now;
+	if (!documentId) documentId = generateUUID();
+	if (!implicitTabId) implicitTabId = generateUUID();
 	// Deep-clone documentTabs to unwrap Svelte 5 proxies
 	const tabSnapshot = JSON.parse(JSON.stringify(documentTabs));
 	// A doc-less editor session (plain `/`, no initDocumentState) has no tabs;
-	// wrap the live tree in an implicit tab so the download path never emits an
-	// empty document. "default" is the historical implicit-first-tab id.
-	const implicitTabId = activeTabId || 'default';
+	// wrap the live tree in an implicit tab so the download path never emits
+	// an empty document.
 	const tabs = tabSnapshot.length > 0
 		? tabSnapshot.map(t => {
-			const features = (t.id === activeTabId && liveFeatures)
-				? liveFeatures
-				: (t.kind?.features || { features: [], active_index: null });
-			return {
-				id: t.id,
-				name: t.name,
-				kind: { type: t.kind?.type || 'Part', features, preview_mesh: t.kind?.preview_mesh || null }
-			};
+			const type = t.kind?.type || 'Part';
+			// Only Part tabs are normalized. Any other kind (a tab from a newer
+			// build — Assembly, Drawing) is opaque and passes through verbatim.
+			const kind = type === 'Part'
+				? {
+					...(t.kind || {}),
+					type: 'Part',
+					features: t.kind?.features || { features: [], active_index: null },
+					preview_mesh: t.kind?.preview_mesh ?? null
+				}
+				: t.kind;
+			return { ...t, id: t.id, name: t.name, kind };
 		})
 		: [{
 			id: implicitTabId,
 			name: 'Part 1',
-			kind: {
-				type: 'Part',
-				features: liveFeatures || { features: [], active_index: null },
-				preview_mesh: null
-			}
+			kind: { type: 'Part', features: { features: [], active_index: null }, preview_mesh: null }
 		}];
+	const activeTab = tabSnapshot.length > 0 ? (activeTabId || tabs[0].id) : implicitTabId;
 
-	const doc = {
-		format: 'waffle-iron',
-		version: FORMAT_VERSION,
-		min_reader_version: MIN_READER_VERSION,
-		document: {
-			name: documentName,
-			// Preserved from open (or latched at first save) — never re-stamped.
-			created: documentCreated,
-			modified: now,
-			display_unit: documentDisplayUnit
-		},
-		tabs,
-		active_tab: tabSnapshot.length > 0 ? activeTabId : implicitTabId
-	};
-
-	return JSON.stringify(doc);
+	let response;
+	try {
+		response = await bridge.send({
+			type: 'SaveDocument',
+			document: {
+				id: documentId,
+				name: documentName,
+				// Preserved from open (or latched at first save) — never re-stamped.
+				created: documentCreated,
+				modified: now,
+				display_unit: documentDisplayUnit
+			},
+			tabs,
+			active_tab: activeTab
+		});
+	} catch (err) {
+		log('error', `SaveDocument failed: ${err?.message || err}`);
+		return null;
+	}
+	if (response?.type !== 'SaveReady' || !response.json_data) {
+		log('error', `SaveDocument refused: ${response?.message || 'engine returned no document'}`);
+		return null;
+	}
+	return response.json_data;
 }
 
 // -- Visibility toggles (toolbar compat — delegates to per-item visibility) --
@@ -6667,7 +6680,7 @@ export async function cancelImportPlacement() {
  * @param {string} [jsonData] - Optional JSON string to load directly (for programmatic use)
  * @returns {Promise<boolean>} True if load was initiated
  */
-export async function loadProject(jsonData) {
+export async function loadProject(jsonData, { silent = false } = {}) {
 	if (!bridge || !engineReady) return false;
 
 	log('action', 'Load project');
@@ -6678,7 +6691,7 @@ export async function loadProject(jsonData) {
 		if (parseTooNew(jsonData)) return false;
 		extractDisplayUnit(jsonData);
 		await sendRebuild({ type: 'LoadProject', data: jsonData });
-		showToast('info', 'Project loaded');
+		if (!silent) showToast('info', 'Project loaded');
 		return true;
 	}
 

@@ -21,6 +21,14 @@ pub struct EngineState {
     pub project_name: String,
     /// Document display unit preference (mm, cm, m, in, ft).
     pub display_unit: String,
+    /// The document's `sources` table (v4 §2.3) — metadata only; content
+    /// lives in `engine.sources`. Document-scoped: survives tab switches,
+    /// cleared by `NewDocument`, attached to every save.
+    pub sources: Vec<file_format::SourceEntry>,
+    /// Unknown `document.*` keys captured at load, re-emitted on save (§2.6).
+    pub document_extra: serde_json::Map<String, serde_json::Value>,
+    /// Unknown envelope keys captured at load, re-emitted on save (§2.6).
+    pub envelope_extra: serde_json::Map<String, serde_json::Value>,
 }
 
 /// An active sketch editing session.
@@ -45,6 +53,9 @@ impl EngineState {
             hover: None,
             project_name: "Untitled".to_string(),
             display_unit: "mm".to_string(),
+            sources: Vec::new(),
+            document_extra: serde_json::Map::new(),
+            envelope_extra: serde_json::Map::new(),
         }
     }
 
@@ -175,6 +186,9 @@ impl EngineState {
         self.hover = None;
         self.project_name = "Untitled".to_string();
         self.display_unit = "mm".to_string();
+        self.sources.clear();
+        self.document_extra.clear();
+        self.envelope_extra.clear();
     }
 }
 

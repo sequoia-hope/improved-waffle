@@ -1,44 +1,93 @@
-//! ImportStep message tests (task #138, SI1): the bridge-level contract —
-//! the message lands an ImportedBody feature in the tree with a compressed
-//! embedded payload, and the model-updated response carries the new body.
-//! Run with the REAL kernel-v2 adapter so the imported body's mesh path is
-//! exercised end to end (parse → ingest → tessellate).
+//! ImportStep + v4 sources at the bridge (task #138 SI1; v4
+//! `specs/waffle_v4_document_model.md` §2.3/§2.11): the message lands an
+//! ImportedBody feature whose STEP text lives in the document's `sources`
+//! table (packed, hashed) and in the engine's source store; SaveDocument
+//! writes it, LoadProject reads it back, ProvideSource recovers a linked
+//! source, NewDocument clears it. Run with the REAL kernel-v2 adapter so the
+//! imported body's mesh path is exercised end to end.
 
 use feature_engine::types::*;
+use file_format::{
+    git_blob_sha1, load_document, DocumentMetadata, Locator, SourceEntry, SourceKind, Tab,
+    WaffleDocument,
+};
 use kernel_v2::KernelV2Adapter;
+use uuid::Uuid;
 use wasm_bridge::messages::*;
 use wasm_bridge::*;
 
 const CUBE_STEP: &str = include_str!("../../step-import/tests/fixtures/cube.step");
 
-#[test]
-fn import_step_message_creates_feature_and_body() {
-    let mut state = EngineState::new();
-    let mut kernel = KernelV2Adapter::new();
-
-    let response = dispatch(
-        &mut state,
+fn import_cube(state: &mut EngineState, kernel: &mut KernelV2Adapter) -> EngineToUi {
+    dispatch(
+        state,
         UiToEngine::ImportStep {
             file_name: "cube.step".to_string(),
             data: CUBE_STEP.to_string(),
         },
-        &mut kernel,
-    );
+        kernel,
+    )
+}
 
-    // The feature landed, is named after the file, and carries a compressed
-    // payload (not the raw text).
+fn save_document(state: &mut EngineState, kernel: &mut KernelV2Adapter) -> String {
+    let tab = Tab::part("Part 1", FeatureTree::new());
+    let active_tab = tab.id.clone();
+    let response = dispatch(
+        state,
+        UiToEngine::SaveDocument {
+            document: DocumentMetadata::new("Doc").with_display_unit("mm"),
+            tabs: vec![tab],
+            active_tab,
+        },
+        kernel,
+    );
+    match response {
+        EngineToUi::SaveReady { json_data } => json_data,
+        other => panic!("expected SaveReady, got {other:?}"),
+    }
+}
+
+#[test]
+fn import_step_message_creates_a_source_and_a_feature_that_names_it() {
+    let mut state = EngineState::new();
+    let mut kernel = KernelV2Adapter::new();
+
+    let response = import_cube(&mut state, &mut kernel);
+
+    // The feature landed, is named after the file, and names its source
+    // instead of carrying the text.
     assert_eq!(state.engine.tree.features.len(), 1);
     let feature = &state.engine.tree.features[0];
     assert_eq!(feature.name, "Import cube.step");
     let Operation::ImportedBody { params } = &feature.operation else {
         panic!("expected ImportedBody feature");
     };
-    assert_eq!(
-        params.blob_encoding.as_deref(),
-        Some(step_import::STEP_BLOB_ENCODING)
-    );
-    assert!(params.blob.as_ref().expect("inline payload").len() < CUBE_STEP.len());
+    assert!(params.blob.is_none() && params.blob_encoding.is_none());
     assert_eq!(params.scale, 1.0);
+    let source_id = params.source_id.expect("feature names its source");
+
+    // The sources table has the packed, hashed entry; the store has the text.
+    assert_eq!(state.sources.len(), 1);
+    let entry = &state.sources[0];
+    assert_eq!(entry.id, source_id);
+    assert_eq!(entry.name, "cube.step");
+    assert_eq!(entry.kind, SourceKind::Step);
+    assert_eq!(entry.locator, Locator::Embedded);
+    assert!(entry.effective_pack());
+    assert_eq!(
+        entry.content_hash.as_deref(),
+        Some(git_blob_sha1(CUBE_STEP.as_bytes()).as_str())
+    );
+    assert_eq!(
+        state.engine.sources.text(source_id).as_deref(),
+        Some(CUBE_STEP)
+    );
+
+    // Provenance records the import.
+    assert!(matches!(
+        state.engine.tree.provenance_of(feature.id),
+        Some(Provenance { origin: ProvenanceOrigin::Import { source_id: s }, .. }) if *s == source_id
+    ));
 
     // No rebuild errors; the import produced a real body through kernel-v2.
     assert!(
@@ -62,4 +111,221 @@ fn import_step_message_creates_feature_and_body() {
 
     // Response is a model update (not an error).
     assert!(matches!(response, EngineToUi::ModelUpdated { .. }));
+}
+
+#[test]
+fn save_document_writes_the_source_and_load_project_reads_it_back() {
+    let mut state = EngineState::new();
+    let mut kernel = KernelV2Adapter::new();
+    import_cube(&mut state, &mut kernel);
+    let feature_id = state.engine.tree.features[0].id;
+
+    let json = save_document(&mut state, &mut kernel);
+    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(parsed["version"], 4);
+    assert_eq!(parsed["document"]["name"], "Doc");
+    assert_eq!(parsed["sources"].as_array().unwrap().len(), 1);
+    assert!(parsed["sources"][0]["embed"]["blob"].is_string(), "packed");
+    let params = &parsed["tabs"][0]["kind"]["features"]["features"][0]["operation"]["params"];
+    assert_eq!(params["source_id"], parsed["sources"][0]["id"]);
+    assert!(
+        params.get("blob").is_none(),
+        "no inline payload in a v4 file"
+    );
+    assert_eq!(
+        parsed["tabs"][0]["kind"]["features"]["provenance"][feature_id.to_string()]["origin"]
+            ["type"],
+        "Import"
+    );
+
+    // A fresh engine opens it: sources adopted, embed registered, body rebuilt.
+    let mut fresh = EngineState::new();
+    let mut kernel2 = KernelV2Adapter::new();
+    let response = dispatch(
+        &mut fresh,
+        UiToEngine::LoadProject { data: json },
+        &mut kernel2,
+    );
+    assert!(
+        matches!(response, EngineToUi::ModelUpdated { .. }),
+        "{response:?}"
+    );
+    assert!(
+        fresh.engine.errors.is_empty(),
+        "errors: {:?}",
+        fresh.engine.errors
+    );
+    assert_eq!(fresh.sources.len(), 1);
+    assert_eq!(fresh.project_name, "Doc");
+    assert_eq!(fresh.display_unit, "mm");
+    assert!(fresh.engine.sources.contains(fresh.sources[0].id));
+    assert_eq!(fresh.engine.feature_results[&feature_id].outputs.len(), 1);
+}
+
+#[test]
+fn a_linked_source_without_content_is_loud_until_provide_source() {
+    // A v4 document whose STEP source is linked (git, not packed) and whose
+    // content the file does not carry.
+    let mut doc = WaffleDocument::new("Linked");
+    let mut source = SourceEntry::linked(
+        "cube.step",
+        SourceKind::Step,
+        Locator::git_branch("https://github.com/acme/parts", "cube.step", "main"),
+    );
+    source.id = Uuid::new_v4();
+    let source_id = source.id;
+    doc.sources.push(source);
+    doc.tabs[0].features_mut().unwrap().features.push(Feature {
+        id: Uuid::new_v4(),
+        name: "Import cube".into(),
+        operation: Operation::ImportedBody {
+            params: ImportedBodyParams::from_source("cube.step", source_id),
+        },
+        suppressed: false,
+        references: vec![],
+    });
+    let json = file_format::save_document(&doc);
+
+    let mut state = EngineState::new();
+    let mut kernel = KernelV2Adapter::new();
+    let response = dispatch(
+        &mut state,
+        UiToEngine::LoadProject { data: json },
+        &mut kernel,
+    );
+    assert!(
+        matches!(response, EngineToUi::ModelUpdated { .. }),
+        "{response:?}"
+    );
+    assert_eq!(state.engine.errors.len(), 1, "{:?}", state.engine.errors);
+    assert!(state.engine.errors[0].1.contains("SourceUnavailable"));
+
+    // Unknown source id is refused.
+    let bad = dispatch(
+        &mut state,
+        UiToEngine::ProvideSource {
+            source_id: Uuid::new_v4(),
+            data: CUBE_STEP.into(),
+        },
+        &mut kernel,
+    );
+    assert!(matches!(bad, EngineToUi::Error { .. }));
+
+    // The host fetched it: the feature recovers, the entry is hashed, and
+    // the saved file stays linked (no embed) because pack is false.
+    let response = dispatch(
+        &mut state,
+        UiToEngine::ProvideSource {
+            source_id,
+            data: CUBE_STEP.into(),
+        },
+        &mut kernel,
+    );
+    assert!(
+        matches!(response, EngineToUi::ModelUpdated { .. }),
+        "{response:?}"
+    );
+    assert!(state.engine.errors.is_empty(), "{:?}", state.engine.errors);
+    assert_eq!(
+        state.sources[0].content_hash.as_deref(),
+        Some(git_blob_sha1(CUBE_STEP.as_bytes()).as_str())
+    );
+    assert!(state.sources[0].fetched_at.is_some());
+
+    let json = save_document(&mut state, &mut kernel);
+    let reloaded = load_document(&json).unwrap().document;
+    assert_eq!(reloaded.sources.len(), 1);
+    assert!(
+        reloaded.sources[0].embed.is_none(),
+        "linked source is not packed"
+    );
+    assert!(matches!(reloaded.sources[0].locator, Locator::Git { .. }));
+    assert_eq!(
+        reloaded.sources[0].content_hash,
+        state.sources[0].content_hash
+    );
+}
+
+#[test]
+fn legacy_save_project_carries_the_sources_table_and_new_document_clears_it() {
+    let mut state = EngineState::new();
+    let mut kernel = KernelV2Adapter::new();
+    import_cube(&mut state, &mut kernel);
+
+    let EngineToUi::SaveReady { json_data } =
+        dispatch(&mut state, UiToEngine::SaveProject, &mut kernel)
+    else {
+        panic!("SaveReady expected");
+    };
+    let parsed: serde_json::Value = serde_json::from_str(&json_data).unwrap();
+    assert_eq!(parsed["sources"].as_array().unwrap().len(), 1);
+    assert!(parsed["sources"][0]["embed"]["blob"].is_string());
+    // The single-tree loader still gets a rebuildable tree (payload inlined).
+    let (tree, _) = file_format::load_project(&json_data).unwrap();
+    let Operation::ImportedBody { params } = &tree.features[0].operation else {
+        panic!()
+    };
+    assert!(params.blob.is_some());
+
+    dispatch(&mut state, UiToEngine::NewDocument, &mut kernel);
+    assert!(state.sources.is_empty());
+    assert!(state.engine.sources.is_empty());
+    assert!(state.engine.tree.features.is_empty());
+}
+
+#[test]
+fn save_document_rejects_a_dangling_or_non_part_active_tab() {
+    let mut state = EngineState::new();
+    let mut kernel = KernelV2Adapter::new();
+    let response = dispatch(
+        &mut state,
+        UiToEngine::SaveDocument {
+            document: DocumentMetadata::new("Doc"),
+            tabs: vec![Tab::part("Part 1", FeatureTree::new())],
+            active_tab: "nope".into(),
+        },
+        &mut kernel,
+    );
+    assert!(
+        matches!(response, EngineToUi::Error { ref message, .. } if message.contains("names no tab"))
+    );
+
+    // An opaque (future-kind) tab is preserved through SaveDocument but
+    // cannot host the live tree.
+    let asm: Tab = serde_json::from_value(serde_json::json!({
+        "id": "asm", "name": "Assembly 1", "kind": { "type": "Assembly", "instances": [] }
+    }))
+    .unwrap();
+    let part = Tab::part("Part 1", FeatureTree::new());
+    let part_id = part.id.clone();
+    let response = dispatch(
+        &mut state,
+        UiToEngine::SaveDocument {
+            document: DocumentMetadata::new("Doc"),
+            tabs: vec![part.clone(), asm.clone()],
+            active_tab: "asm".into(),
+        },
+        &mut kernel,
+    );
+    assert!(
+        matches!(response, EngineToUi::Error { ref message, .. } if message.contains("Assembly"))
+    );
+    let response = dispatch(
+        &mut state,
+        UiToEngine::SaveDocument {
+            document: DocumentMetadata::new("Doc"),
+            tabs: vec![part, asm],
+            active_tab: part_id,
+        },
+        &mut kernel,
+    );
+    let EngineToUi::SaveReady { json_data } = response else {
+        panic!("{response:?}")
+    };
+    let parsed: serde_json::Value = serde_json::from_str(&json_data).unwrap();
+    assert_eq!(parsed["tabs"][1]["kind"]["type"], "Assembly");
+    assert_eq!(
+        parsed["tabs"][1]["kind"]["instances"],
+        serde_json::json!([])
+    );
 }

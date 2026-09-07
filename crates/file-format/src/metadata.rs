@@ -1,5 +1,32 @@
 use chrono::{DateTime, Utc};
 use feature_engine::types::FeatureTree;
+
+/// RFC 3339 UTC timestamps written the way JavaScript's `toISOString()`
+/// writes them (`2020-01-02T03:04:05.000Z`, always ≥ 3 fractional digits) so
+/// a `created` that came from the app round-trips byte-identical through the
+/// Rust writer; nanosecond-precision values (Rust `Utc::now()`) keep their
+/// full precision. chrono's default serializer drops the `.000`, which
+/// rewrote every whole-second timestamp on the first v4 save.
+pub mod rfc3339_js {
+    use chrono::{DateTime, SecondsFormat, Timelike, Utc};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn format(dt: &DateTime<Utc>) -> String {
+        if dt.nanosecond().is_multiple_of(1_000_000) {
+            dt.to_rfc3339_opts(SecondsFormat::Millis, true)
+        } else {
+            dt.to_rfc3339_opts(SecondsFormat::AutoSi, true)
+        }
+    }
+
+    pub fn serialize<S: Serializer>(dt: &DateTime<Utc>, s: S) -> Result<S::Ok, S::Error> {
+        format(dt).serialize(s)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<DateTime<Utc>, D::Error> {
+        DateTime::<Utc>::deserialize(d)
+    }
+}
 use serde::de::Deserializer;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -15,8 +42,10 @@ pub struct ProjectMetadata {
     /// Human-readable project name.
     pub name: String,
     /// When the project was first created.
+    #[serde(with = "rfc3339_js")]
     pub created: DateTime<Utc>,
     /// When the project was last modified.
+    #[serde(with = "rfc3339_js")]
     pub modified: DateTime<Utc>,
     /// Display unit preference (mm, cm, m, in, ft). None for legacy v1 files.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -62,7 +91,9 @@ pub struct DocumentMetadata {
     #[serde(default = "Uuid::new_v4")]
     pub id: Uuid,
     pub name: String,
+    #[serde(with = "rfc3339_js")]
     pub created: DateTime<Utc>,
+    #[serde(with = "rfc3339_js")]
     pub modified: DateTime<Utc>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub display_unit: Option<String>,

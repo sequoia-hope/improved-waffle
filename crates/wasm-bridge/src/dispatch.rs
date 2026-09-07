@@ -1,6 +1,8 @@
 use base64::Engine as _;
-use feature_engine::types::Operation;
-use file_format::ProjectMetadata;
+use feature_engine::types::{ImportedBodyParams, Operation, Provenance, ProvenanceOrigin};
+use file_format::{
+    git_blob_sha1, Embed, ProjectMetadata, SourceEntry, SourceKind, TabKind, WaffleDocument,
+};
 use modeling_ops::KernelBundle;
 use waffle_types::kernel::RenderMesh;
 use waffle_types::OutputKey;
@@ -90,11 +92,24 @@ fn handle_message(
         }
 
         UiToEngine::ImportStep { file_name, data } => {
-            let params = feature_engine::types::ImportedBodyParams::embedded(&file_name, &data);
+            // v4: the STEP text becomes a packed `Embedded` source; the
+            // feature names it by id and carries Import provenance.
+            let entry = SourceEntry::embedded(file_name.clone(), SourceKind::Step, &data);
+            let source_id = entry.id;
+            state.engine.sources.insert_text(source_id, &data);
+            state.sources.push(entry);
+            let params = ImportedBodyParams::from_source(&file_name, source_id);
             let op = Operation::ImportedBody { params };
-            state
+            let id = state
                 .engine
                 .add_feature(format!("Import {file_name}"), op, kb)?;
+            let _ = state.engine.set_provenance(
+                id,
+                Some(Provenance {
+                    origin: ProvenanceOrigin::Import { source_id },
+                    at: Some(chrono::Utc::now().to_rfc3339()),
+                }),
+            );
             Ok(model_updated_response(state))
         }
 
@@ -182,28 +197,118 @@ fn handle_message(
         UiToEngine::SaveProject => {
             let meta =
                 ProjectMetadata::new(&state.project_name).with_display_unit(&state.display_unit);
-            // Verified: refuse to emit a file the loader would reject (e.g. a
-            // non-finite float serialized as `null`) — a loud save error beats
-            // a file that saves silently and never opens again.
-            let json =
-                file_format::save_project_verified(&state.engine.tree, &meta).map_err(|e| {
-                    BridgeError::Serialization {
-                        reason: format!("refusing to save a corrupt document: {e}"),
-                    }
+            let mut doc = WaffleDocument::single_part(&meta, state.engine.tree.clone());
+            // `single_part` lifted any legacy inline payloads into fresh
+            // entries; the live tree's `source_id`s point at the document's
+            // own table, which carries the store's content.
+            let mut sources = sources_for_save(state);
+            sources.append(&mut doc.sources);
+            doc.sources = sources;
+            Ok(EngineToUi::SaveReady {
+                json_data: verified(&doc)?,
+            })
+        }
+
+        UiToEngine::SaveDocument {
+            mut document,
+            mut tabs,
+            active_tab,
+        } => {
+            let active = tabs
+                .iter_mut()
+                .find(|t| t.id == active_tab)
+                .ok_or_else(|| BridgeError::InvalidRequest {
+                    reason: format!("active_tab `{active_tab}` names no tab"),
                 })?;
-            Ok(EngineToUi::SaveReady { json_data: json })
+            match &mut active.kind {
+                TabKind::Part { features, .. } => *features = state.engine.tree.clone(),
+                TabKind::Unknown(_) => {
+                    return Err(BridgeError::InvalidRequest {
+                        reason: format!(
+                            "active tab `{}` has kind `{}`; only a Part tab can hold the live tree",
+                            active.name,
+                            active.kind.type_tag()
+                        ),
+                    })
+                }
+            }
+            // Unknown keys the UI does not carry: re-attach what load captured.
+            for (k, v) in &state.document_extra {
+                document.extra.entry(k.clone()).or_insert_with(|| v.clone());
+            }
+            let mut doc = WaffleDocument {
+                document,
+                sources: sources_for_save(state),
+                tabs,
+                active_tab,
+                extra: state.envelope_extra.clone(),
+            };
+            // Inactive tabs the UI parsed from a v3 file may still carry
+            // inline STEP payloads; lift them so the file is uniformly v4.
+            let _ = doc.lift_inline_payloads();
+            Ok(EngineToUi::SaveReady {
+                json_data: verified(&doc)?,
+            })
         }
 
         UiToEngine::LoadProject { data } => {
-            let (tree, meta) =
-                file_format::load_project(&data).map_err(|e| BridgeError::Serialization {
+            let loaded =
+                file_format::load_document(&data).map_err(|e| BridgeError::Serialization {
                     reason: e.to_string(),
                 })?;
-            state.project_name = meta.name;
-            if let Some(ref unit) = meta.display_unit {
+            let doc = loaded.document;
+            let tab = doc
+                .active_tab()
+                .or_else(|| doc.tabs.first())
+                .ok_or_else(|| BridgeError::Serialization {
+                    reason: "no tabs in document".to_string(),
+                })?;
+            let tree = match &tab.kind {
+                TabKind::Part { features, .. } => features.clone(),
+                TabKind::Unknown(_) => {
+                    return Err(BridgeError::NotImplemented {
+                        operation: format!(
+                            "opening a `{}` tab (tab `{}`) in this version",
+                            tab.kind.type_tag(),
+                            tab.name
+                        ),
+                    })
+                }
+            };
+            state.project_name = doc.document.name.clone();
+            if let Some(ref unit) = doc.document.display_unit {
                 state.display_unit = unit.clone();
             }
+            // Adopt the sources table; register every usable embed.
+            state.engine.sources.clear();
+            for (id, text) in doc.embedded_contents() {
+                state.engine.sources.insert_text(id, &text);
+            }
+            state.sources = doc.sources;
+            state.document_extra = doc.document.extra;
+            state.envelope_extra = doc.extra;
             state.engine.tree = tree;
+            state.engine.rebuild_from_scratch(kb);
+            state.engine.warnings.extend(
+                loaded
+                    .warnings
+                    .into_iter()
+                    .map(|w| format!("document: {w}")),
+            );
+            Ok(model_updated_response(state))
+        }
+
+        UiToEngine::ProvideSource { source_id, data } => {
+            let entry = state
+                .sources
+                .iter_mut()
+                .find(|s| s.id == source_id)
+                .ok_or_else(|| BridgeError::InvalidRequest {
+                    reason: format!("ProvideSource: {source_id} is not in the sources table"),
+                })?;
+            entry.content_hash = Some(git_blob_sha1(data.as_bytes()));
+            entry.fetched_at = Some(chrono::Utc::now());
+            state.engine.sources.insert_text(source_id, &data);
             state.engine.rebuild_from_scratch(kb);
             Ok(model_updated_response(state))
         }
@@ -390,6 +495,40 @@ fn merge_render_mesh(dst: &mut RenderMesh, src: &RenderMesh) {
 }
 
 /// Build a ModelUpdated response from the current engine state.
+/// The document's `sources` table as it should be written: for every entry
+/// whose content the store holds, `embed` follows the entry's `pack` policy
+/// (packed ⇒ the content, deflate-base64; linked ⇒ none) and the hash is
+/// filled in. Entries the store has no content for are written as loaded.
+fn sources_for_save(state: &EngineState) -> Vec<SourceEntry> {
+    state
+        .sources
+        .iter()
+        .cloned()
+        .map(|mut entry| {
+            if let Some(text) = state.engine.sources.text(entry.id) {
+                if entry.effective_pack() {
+                    entry.embed = Some(Embed::from_text(&text));
+                } else {
+                    entry.embed = None;
+                }
+                entry
+                    .content_hash
+                    .get_or_insert_with(|| git_blob_sha1(text.as_bytes()));
+            }
+            entry
+        })
+        .collect()
+}
+
+/// Verified save: refuse to emit a file the loader would reject (e.g. a
+/// non-finite float serialized as `null`) — a loud save error beats a file
+/// that saves silently and never opens again.
+fn verified(doc: &WaffleDocument) -> Result<String, BridgeError> {
+    file_format::save_document_verified(doc).map_err(|e| BridgeError::Serialization {
+        reason: format!("refusing to save a corrupt document: {e}"),
+    })
+}
+
 fn model_updated_response(state: &EngineState) -> EngineToUi {
     // Generate preview mesh from the last active mesh (if any)
     let preview_mesh = find_last_mesh(state).and_then(|mesh| {

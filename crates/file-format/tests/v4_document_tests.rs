@@ -646,3 +646,32 @@ fn a_v4_file_that_needs_a_newer_reader_is_refused_cleanly() {
     assert!(Uuid::parse_str(&WaffleDocument::new("x").tabs[0].id).is_ok());
     let _ = Tab::part("p", FeatureTree::new());
 }
+
+/// JavaScript writes `2020-01-02T03:04:05.000Z`; the Rust writer must hand
+/// it back byte-identical (chrono's default dropped the `.000`), while a
+/// nanosecond timestamp keeps its precision.
+#[test]
+fn timestamps_round_trip_in_javascript_form() {
+    let mut parsed: serde_json::Value =
+        serde_json::from_str(&save_document(&WaffleDocument::new("T"))).unwrap();
+    parsed["document"]["created"] = serde_json::json!("2020-01-02T03:04:05.000Z");
+    parsed["document"]["modified"] = serde_json::json!("2026-07-05T01:21:04.049Z");
+    let doc = load_document(&parsed.to_string()).unwrap().document;
+    let out: serde_json::Value = serde_json::from_str(&save_document(&doc)).unwrap();
+    assert_eq!(out["document"]["created"], "2020-01-02T03:04:05.000Z");
+    assert_eq!(out["document"]["modified"], "2026-07-05T01:21:04.049Z");
+
+    parsed["document"]["created"] = serde_json::json!("2026-07-05T20:52:55.175125183Z");
+    let doc = load_document(&parsed.to_string()).unwrap().document;
+    let out: serde_json::Value = serde_json::from_str(&save_document(&doc)).unwrap();
+    assert_eq!(out["document"]["created"], "2026-07-05T20:52:55.175125183Z");
+
+    // The legacy single-tree metadata uses the same form.
+    let meta: ProjectMetadata = serde_json::from_value(serde_json::json!({
+        "name": "P", "created": "2020-01-02T03:04:05.000Z", "modified": "2020-01-02T03:04:05.500Z"
+    }))
+    .unwrap();
+    let v = serde_json::to_value(&meta).unwrap();
+    assert_eq!(v["created"], "2020-01-02T03:04:05.000Z");
+    assert_eq!(v["modified"], "2020-01-02T03:04:05.500Z");
+}

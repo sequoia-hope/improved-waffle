@@ -11,6 +11,7 @@ crate-type = ["cdylib", "rlib"]
 default = []
 
 [dependencies]
+chrono = { version = "0.4", features = ["serde"] }
 feature-engine = { path = "../feature-engine" }
 kernel-v2 = { path = "../kernel-v2" }
 modeling-ops = { path = "../modeling-ops" }

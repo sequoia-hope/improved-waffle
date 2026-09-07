@@ -157,8 +157,32 @@ pub enum UiToEngine {
     },
 
     // -- File operations --
+    /// Legacy single-tab save: the live tree as a one-tab v4 document (with
+    /// the document's `sources` table attached). Tests and programmatic
+    /// callers; the app saves through `SaveDocument`.
     SaveProject,
+    /// Load a `.waffle` file (any version, migrated on the way in): the
+    /// engine adopts the document's `sources` table, registers every usable
+    /// embed into its source store, and rebuilds the active tab's tree.
     LoadProject {
+        data: String,
+    },
+    /// v4 single writer (`specs/waffle_v4_document_model.md` §4 inv. 7): the
+    /// UI hands over its document metadata and tab list — inactive tabs
+    /// carry their trees, the active tab's tree is taken from the live
+    /// engine — and the engine attaches its `sources` table (embeds from the
+    /// source store per each entry's `pack`) and returns the verified file
+    /// as `SaveReady`.
+    SaveDocument {
+        document: file_format::DocumentMetadata,
+        tabs: Vec<file_format::Tab>,
+        active_tab: String,
+    },
+    /// The host fetched a source's content through its locator (v4 §2.3):
+    /// register it (hash recorded on the entry) and rebuild so dependent
+    /// features recover from `SourceUnavailable`.
+    ProvideSource {
+        source_id: Uuid,
         data: String,
     },
     /// Import a STEP file as a new ImportedBody feature (task #138). `data`
