@@ -1708,7 +1708,25 @@ pub(crate) fn membrane_orientation_sign(tri: [u32; 3], key: [u32; 3]) -> i8 {
 /// `compact_unreferenced_verts` (the pass returns `> 0`, which the caller
 /// treats like a §4.5.3 collapse). Deterministic: sorted-triple + triangle
 /// index order (I7). Returns the number of triangles removed.
-pub(crate) fn remove_doubled_membranes(mesh: &mut Mesh) -> usize {
+///
+/// `attribution` is the per-triangle `(input, face)` map, 1:1 with
+/// `mesh.tris`, and is filtered in LOCKSTEP (spec I8). Measured 2026-09-07
+/// on R0051 op 3: the pass removed two fins (4 triangles) from the mesh
+/// alone, so every later triangle read the attribution of a slot earlier —
+/// B's inner-cylinder triangle `(v3, v11, v10)` took the annulus's `face 3`,
+/// the recomputed Phase A grouped it into a planar patch, and Stage 6
+/// STOPped `s6-planar-loop-nonplanar` on a vertex 1.19e-3 off the plane
+/// (a third of the model). A silent relabel one slot wide is a topology
+/// defect minted by plumbing, not by geometry.
+pub(crate) fn remove_doubled_membranes(
+    mesh: &mut Mesh,
+    attribution: &mut Vec<Option<TriangleAttribution>>,
+) -> usize {
+    debug_assert_eq!(
+        attribution.len(),
+        mesh.tris.len(),
+        "attribution must be 1:1 with mesh.tris on entry"
+    );
     use std::collections::BTreeMap;
     // Group triangles by ascending-sorted vertex triple → (index, sign).
     let mut groups: BTreeMap<[u32; 3], Vec<(usize, i8)>> = BTreeMap::new();
@@ -1759,7 +1777,16 @@ pub(crate) fn remove_doubled_membranes(mesh: &mut Mesh) -> usize {
             .filter(|&(i, _)| !remove[i])
             .map(|(_, &t)| t)
             .collect();
+        // Lockstep (I8): the attribution slot of every removed triangle goes
+        // with it, so the survivors keep their own `(input, face)`. A
+        // shorter-than-mesh attribution (never on the production path) is
+        // padded by `get(..).flatten()` exactly as `collapse_vertex` does.
+        let kept_attr: Vec<Option<TriangleAttribution>> = (0..mesh.tris.len())
+            .filter(|&i| !remove[i])
+            .map(|i| attribution.get(i).copied().flatten())
+            .collect();
         *mesh = Mesh::new(std::mem::take(&mut mesh.verts), kept);
+        *attribution = kept_attr;
     }
     removed
 }

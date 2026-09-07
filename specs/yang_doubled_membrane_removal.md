@@ -67,6 +67,18 @@ winding parity); no positional tolerance is involved.
   `compact_unreferenced_verts`; stages 5/6 consume the healed mesh.
 - **I7 (determinism):** grouping and removal in sorted-triple + triangle-index
   order.
+- **I8 (attribution lockstep, 2026-09-07):** the per-triangle `(input, face)`
+  attribution vector is filtered in the SAME pass as `mesh.tris`, so every
+  surviving triangle keeps its own attribution. Anchored on R0051 op 3
+  (`union` of the cylinder−torus body with a coaxial rectangle revolve): the
+  pass removed two fins (4 triangles) from the mesh alone, every later
+  triangle read the attribution one slot earlier, B's inner-cylinder
+  triangle `(v3, v11, v10)` took the annulus's `face 3`, the recomputed
+  Phase A grouped it into the planar patch, and Stage 6 STOPped
+  `s6-planar-loop-nonplanar` (vertex 1.19e-3 off a plane at model scale
+  3.4e-3). Pin: `membrane_removal_keeps_attribution_in_lockstep`. Traced with
+  `YANG_ATTR_TRACE=x,y,z,r` (position-keyed per-triangle attribution dump at
+  every Phase-A recompute, labelled by caller).
 
 ## 4. Oracles
 

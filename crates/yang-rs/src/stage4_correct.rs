@@ -1032,6 +1032,57 @@ fn planar_partner_hull_contains(
 /// incidence → exact intersection curves) from the current mesh + attribution.
 /// Factored out of `reconstruct_topology` so it can be re-run after a §4.5.3
 /// collapse mutates the mesh.
+/// Diagnosis probe (read-only, env-gated): `YANG_ATTR_TRACE=x,y,z,r` prints,
+/// under `label`, every mesh vertex within `r` of the target point together
+/// with every triangle that references it and that triangle's attribution —
+/// keyed by POSITION so it survives the renumbering every collapse/compaction
+/// performs. Answers "which step relabelled this triangle".
+pub(crate) fn attr_trace(label: &str, mesh: &Mesh, attribution: &TriangleAttributionMap) {
+    let Some(spec) = std::env::var_os("YANG_ATTR_TRACE") else {
+        return;
+    };
+    let nums: Vec<f64> = spec
+        .to_string_lossy()
+        .split(',')
+        .filter_map(|s| s.trim().parse().ok())
+        .collect();
+    let [x, y, z, r] = nums[..] else {
+        return;
+    };
+    for (vi, p) in mesh.verts.iter().enumerate() {
+        let q = p.as_array();
+        let d = ((q[0] - x).powi(2) + (q[1] - y).powi(2) + (q[2] - z).powi(2)).sqrt();
+        if d > r {
+            continue;
+        }
+        eprintln!(
+            "[attr-trace] {label}: vert {vi} ({:.12},{:.12},{:.12}) d={d:.3e} (mesh {} verts / {} tris)",
+            q[0],
+            q[1],
+            q[2],
+            mesh.verts.len(),
+            mesh.tris.len()
+        );
+        for (ti, t) in mesh.tris.iter().enumerate() {
+            if t.contains(&(vi as u32)) {
+                let at = attribution.attributions.get(ti).copied().flatten();
+                let pts: Vec<String> = t
+                    .iter()
+                    .map(|&w| {
+                        let c = mesh.verts[w as usize].as_array();
+                        format!("v{w}=({:.6e},{:.6e},{:.6e})", c[0], c[1], c[2])
+                    })
+                    .collect();
+                eprintln!(
+                    "[attr-trace]   tri {ti} {t:?} attr {at:?} {}",
+                    pts.join(" ")
+                );
+            }
+        }
+    }
+}
+
+#[track_caller]
 pub(crate) fn compute_phase_a(
     mesh: &Mesh,
     attribution: &TriangleAttributionMap,
@@ -1040,6 +1091,14 @@ pub(crate) fn compute_phase_a(
     edge_provenance: &crate::stage3_ssi::PosKeyedEdgeSet,
 ) -> Result<PhaseA, YangError> {
     let adjacency = triangle_adjacency(mesh);
+    if std::env::var_os("YANG_ATTR_TRACE").is_some() {
+        let loc = std::panic::Location::caller();
+        attr_trace(
+            &format!("phase-a@{}:{}", loc.file(), loc.line()),
+            mesh,
+            attribution,
+        );
+    }
     let patches = flood_fill_patches(mesh, attribution, &adjacency);
     // PR-YR27 (Finding 1a): merge edge-adjacent patches lying on the SAME
     // plane with the SAME orientation into one output face — a coplanar
@@ -13580,8 +13639,16 @@ fn stage4_relocate_and_correct_inner(
     // (a zero-volume artifact of a backtrack-spike / near-tangent junction)
     // BEFORE the shell gate reads χ. Volume- and edge-balance-preserving; it
     // leaves the spur apex dangling for `compact_unreferenced_verts`, so it
-    // rides the same Phase-A recompute path as a §4.5.3 collapse.
-    let membranes_removed = remove_doubled_membranes(mesh);
+    // rides the same Phase-A recompute path as a §4.5.3 collapse. The
+    // attribution vector is filtered in lockstep with the triangles (spec
+    // I8 — R0051's Stage-6 nonplanar STOP was this pass dropping triangles
+    // from the mesh alone).
+    let membranes_removed = {
+        let mut attr_vec = std::mem::take(&mut attribution.attributions);
+        let n = remove_doubled_membranes(mesh, &mut attr_vec);
+        attribution.attributions = attr_vec;
+        n
+    };
     if membranes_removed > 0 {
         collapsed_any = true;
     }

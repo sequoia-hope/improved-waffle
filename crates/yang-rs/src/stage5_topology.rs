@@ -1072,6 +1072,26 @@ fn run_fold_merge_passes(
                 site.survivor,
                 site.chord_t
             );
+            if c441_verbose() {
+                let pv = mesh.verts[site.victim as usize].as_array();
+                let ps = mesh.verts[site.survivor as usize].as_array();
+                eprintln!(
+                    "[s4-fold-merge]   victim v{} = ({:.12},{:.12},{:.12}) survivor v{} = \
+                     ({:.12},{:.12},{:.12}) holders {:?}",
+                    site.victim,
+                    pv[0],
+                    pv[1],
+                    pv[2],
+                    site.survivor,
+                    ps[0],
+                    ps[1],
+                    ps[2],
+                    holders
+                        .iter()
+                        .map(|&h| (h, infos[h].input, infos[h].face_idx, patches[h].tris.len()))
+                        .collect::<Vec<_>>()
+                );
+            }
             rebuilds = plan;
             merged = Some((site.victim, site.survivor));
             progressed = true;

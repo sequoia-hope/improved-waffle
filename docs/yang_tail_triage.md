@@ -92,6 +92,78 @@ now STOPs at Stage 6 `reassembled output would be non-2-manifold`, 189.5
 s — the non-2-manifold INPUT-after-overlay family is down to R0019/R0049).
 
 
+## 2026-09-07 (evening) — R0051 CONVERTED: its Stage-6 `s6-planar-loop-nonplanar` STOP was a Stage-4 PLUMBING defect — `remove_doubled_membranes` filtered `mesh.tris` but not the attribution vector; NEW CANONICAL 279C / 0W / 27E / 4EE / 0T
+
+The row below carried `SUSPECTED #146 Newell-normal class` since 2026-07-16 and
+was never probed (it runs in 0.3 s). Probed in five steps, each one layer
+deeper than the wall's own words:
+
+- `NONMANIFOLD_SITE_PROBE`: `s6-planar-loop-nonplanar: face 3 vert 116
+  off-plane d=-1.187e-3 band=1.0e-7` — at model scale 3.4e-3 a THIRD of the
+  model, not a tolerance. `YANG_INPUT_SELFX_PROBE`: both operands clean
+  (0 improper contacts) — not the R0032 class.
+- `YANG_S6_NONPLANAR_PROBE` + `YANG_S5_FOLD_PROBE`: the emitted face-3 loop is
+  `[v3, v11, v10, v102, v100]`; v11 was NEVER relocated (`disp=0`, pre-Stage-4
+  residual identical) and its offset is exactly B's rectangle side
+  (1.1874e-3) along the plane normal. B (op 3, `revolve(rectangle)` 48.9°,
+  COAXIAL with op 2's torus cut: 11 `Circle` + 17 `LineSegment` curves) is a
+  12-vertex / 20-triangle Stage-1 mesh; `YANG_STAGE0_DUMP_DIR` + Python: v11
+  is the inner-cylinder arc sample at the OTHER annulus height, incident to
+  faces 4 and 5 only, in BOTH the pre- and post-Stage-0 meshes. B is valid.
+- `YANG_S6_VERT_PROBE`: at emission the inner cylinder's triangle
+  `(v3, v11, v10)` sits in a `face_idx 3` info (with two on-plane annulus
+  triangles fanning around v10), face 4 is split into `{(v3,v2,v11)}` alone +
+  the rest, and a `face_idx 5` info carries face-3 vertices. Phase A groups
+  by attribution, so the triangle's ATTRIBUTION had changed.
+- New instrument `YANG_ATTR_TRACE=x,y,z,r` (`stage4_correct::attr_trace`, a
+  position-keyed per-triangle attribution dump at every `compute_phase_a`,
+  labelled by `#[track_caller]` site): correct (`B face 4`) through Stage-6
+  entry, the §4.5.3 reversal collapses (270 → 268 → 266 tris) and the chord
+  split; WRONG (`B face 3`) at the recompute inside
+  `insert_circle_or_junction` (262 tris). Bracketed: `pre-4a1` index 239
+  `face 4` → `post-4a1(removed=4)` index 238 `face 3` → `post-4a2(splits=0)`
+  unchanged.
+- The code: `remove_doubled_membranes(mesh)` (spec
+  `yang_doubled_membrane_removal.md`, whose own doc comment names "R0051
+  op-3 membrane {116,117,132}") rebuilt `mesh.tris` without the fin slots and
+  never touched `attribution.attributions` — every later triangle read the
+  attribution of the slot k earlier (k = fins removed before it). One slot
+  wide on R0051: the cylinder triangle took the annulus's face, Phase A
+  grouped it into the planar patch, and the producer's own gross-planarity
+  wall (`TAU_MODEL`) caught it at Stage 6. Every sibling mutator
+  (`collapse_vertex`, the chord split, the splice write-back,
+  `remesh_nonmanifold_patches`, `collapse_subtauwork_mesh_edges`) already
+  filters in lockstep; `split_pinch_vertices` rewrites vertex slots in place
+  (safe). This was the lone triangle-removing mesh-only mutator.
+
+**Fix (always-on):** `remove_doubled_membranes(mesh, attribution)` filters
+both vectors in one pass (spec I8 added); the production caller uses the
+take/restore pattern of its siblings. Pin
+`membrane_removal_keeps_attribution_in_lockstep` (RED-verified against the
+mesh-only mutant: the survivors read `[B:3, B:3, A:0, A:1, …]`). yang-rs 891
+green, clippy `--all-targets` clean. R0051: **SUPPORTED_CORRECT, 1.0 s**.
+
+**Corpus (release, 8 jobs, 600 s; wall 701.7 s, F0085 316.7 s, R0044
+278.6 s): 279C / 0W / 27E / 4EE / 0T — NEW CANONICAL.** Exactly one category
+move (R0051 ERROR → CORRECT); ZERO detail moves on the other 311 rows
+(per-id category + detail diff against the committed results.json). The
+membrane pass fires on few cases (its anchors were F0064 op 4 and R0051 op
+3) and every other row is byte-stable, so the desync had exactly one
+corpus customer.
+
+**R0081 (probed the same session, `NONMANIFOLD_SITE_PROBE` +
+`YANG_INPUT_SELFX_PROBE`, 194.6 s):** NOT this class and NOT the R0032
+class at Stage 1 (op-3 Stage-1 scan: A 0 / B 0 improper). The mesh handed
+to the arrangement for op 3 is B = the FRESH gear revolve AFTER Stage 0
+(1,476 → 104,518 tris): `i6-input-overuse` 4,004 asymmetric directed edges
+on B (6 on A), `i6-edge-overuse` 8,240, and the post-Stage-0 SELFX scan
+reports 579 improper contacts on B (1 on A). Its wall is a Stage-0 overlay
+EMISSION that is neither conformal nor self-contact-free on a 205° gear
+revolve — the R0053 family one layer further (the sub-resolution
+contraction cleared its input wall on 2026-09-06). PROBE row stands:
+next step is the Stage-0 per-pair dump (`YANG_STAGE0_DUMP_DIR` +
+`overlay_*_pair*.txt`) on op 3's coplanar pair(s).
+
 ## 2026-09-07 (later) — R0032 CONVERTED: the Stage-6 double cover was a Stage-1 SELF-intersection of the re-entering body; Stage-1 self-contact guard landed; NEW CANONICAL 278C / 0W / 28E / 4EE / 0T
 
 Provenance of the PROBE row below (`YANG_INPUT_SELFX_PROBE=1` with the loop
@@ -289,7 +361,7 @@ moved. The 30 ERROR rows are the ACTIVE rows below.
 | ~~R0095~~ | ~~non-2-manifold~~ | ~~EVERY face has a ~1e-24-area boundary triple — upstream degenerate junction geometry~~ **FLIPPED CORRECT 2026-07-28 (#195 inc-5):** the always-on rim boost + rim-snap remove the degenerate boundary triples at the source | — | ~~P3a-#146~~ DONE |
 | C0044 | non-2-manifold | 3-patch junction fires the Stage-4 gate. **P3a increment-0 probe (2026-07-18): ZERO transversal pierce candidates — the junction is coplanar contact (flush annular stack), NOT the pierce-mint class** | CONFIRMED (#169 Phase 0 + #146 inc-0) | ~~P3a-#146~~ Stage-0/M8 coplanar-seam family |
 | F0064 | non-2-manifold | wall vert 0.083 off floor plane; minted in Stage-4 mutation window OR inherited via lineage-less chained B (4 hypotheses eliminated, N51 session) | PARTIAL (#146) | P3a-#146 |
-| R0051 | non-2-manifold | in the #146 Newell-normal class per task | SUSPECTED | P3a-#146 |
+| ~~R0051~~ | ~~non-2-manifold~~ | ~~in the #146 Newell-normal class per task~~ **FLIPPED CORRECT 2026-09-07 (evening): never a junction mint — `remove_doubled_membranes` desynced the attribution vector from `mesh.tris` (one slot), the inner-cylinder triangle took the annulus's face, Stage 6 caught the off-plane vertex; lockstep filter + pin** | ~~SUSPECTED~~ CONFIRMED (attr trace) | ~~P3a-#146~~ DONE |
 | F0058 | non-2-manifold | probe 2026-07-17: `s4-shell-euler` shell root 106 χ=3 (v107 e314 f210) — Stage-4 shell-level Euler defect | CONFIRMED (#171 sweep) | P3a-#146 |
 | F0060 | non-2-manifold | probe 2026-07-17: `s4-shell-euler` shell root 118 χ=3 (v49 e150 f104) — same class as F0058 | CONFIRMED (#171 sweep) | P3a-#146 |
 | ~~F0085~~ | non-2-manifold | **FLIPPED CORRECT 2026-08-19 (a1adca26); reconciled 2026-09-04 from the committed results.json history** probe 2026-07-17: `s4-halfedge-pairing` edge (5720,5731) fwd=1 rev=0, verts 0.043 apart — the R0038-type unpaired open seam (two-sided conformality) | CONFIRMED (#171 sweep) | P3b-#137 |

@@ -43,9 +43,11 @@ pub(crate) fn doubled_membrane_heals_odd_chi_shell() {
         "doubled membrane must trip the shell gate before removal"
     );
 
-    let removed = remove_doubled_membranes(&mut mesh);
+    let mut attr: Vec<Option<TriangleAttribution>> = vec![None; mesh.tris.len()];
+    let removed = remove_doubled_membranes(&mut mesh, &mut attr);
     assert_eq!(removed, 2, "exactly the two fin triangles are removed");
     assert_eq!(mesh.tris.len(), 4, "only the tetra faces remain");
+    assert_eq!(attr.len(), 4, "attribution stays 1:1 with the triangles");
 
     // After: the healed shell is a clean χ=2 manifold.
     assert!(
@@ -60,9 +62,11 @@ pub(crate) fn doubled_membrane_heals_odd_chi_shell() {
 pub(crate) fn clean_shell_is_byte_identical() {
     let mut mesh = Mesh::new(tetra_verts(), tetra_tris());
     let before = mesh.tris.clone();
-    let removed = remove_doubled_membranes(&mut mesh);
+    let mut attr: Vec<Option<TriangleAttribution>> = vec![None; mesh.tris.len()];
+    let removed = remove_doubled_membranes(&mut mesh, &mut attr);
     assert_eq!(removed, 0, "a clean shell has no membrane to remove");
     assert_eq!(mesh.tris, before, "clean shell must be byte-identical");
+    assert_eq!(attr.len(), 4, "attribution untouched on the no-op path");
 }
 
 /// P9 GUARD (adversary): two coincident triangles with the SAME winding are a
@@ -77,12 +81,66 @@ pub(crate) fn same_winding_duplicate_is_left_for_the_gate() {
     tris.push([1, 2, 4]);
     tris.push([1, 2, 4]); // SAME winding, not a membrane
     let mut mesh = Mesh::new(verts, tris);
-    let removed = remove_doubled_membranes(&mut mesh);
+    let mut attr: Vec<Option<TriangleAttribution>> = vec![None; mesh.tris.len()];
+    let removed = remove_doubled_membranes(&mut mesh, &mut attr);
     assert_eq!(
         removed, 0,
         "same-winding duplicate is not a cancelling fin — leave it loud"
     );
     assert_eq!(mesh.tris.len(), 6, "no triangles removed");
+    assert_eq!(attr.len(), 6, "attribution untouched");
+}
+
+/// I8 (attribution lockstep) — the R0051 op-3 mechanism (2026-09-07). The
+/// fin sits BEFORE a triangle carrying a DIFFERENT attribution in index
+/// order; removing the fin from the mesh alone would shift that triangle
+/// into the fin's attribution slot (B's inner-cylinder triangle read the
+/// annulus's face and Stage 6 STOPped on a vertex a third of the model off
+/// the plane). Every survivor must keep its own `(input, face)`.
+#[test]
+pub(crate) fn membrane_removal_keeps_attribution_in_lockstep() {
+    use crate::brep::InputId;
+    let at = |input: InputId, face: u32| Some(TriangleAttribution { input, face });
+    let mut verts = tetra_verts();
+    verts.push(p(0.4, 0.4, 0.02)); // 4 = spur apex
+                                   // Fin FIRST, then the tetra faces with distinct attributions, so the
+                                   // survivors' indices all shift by two.
+    let tris = vec![
+        [1, 2, 4],
+        [1, 4, 2],
+        [0, 2, 1],
+        [0, 1, 3],
+        [0, 3, 2],
+        [1, 2, 3],
+    ];
+    let mut attr = vec![
+        at(InputId::B, 3),
+        at(InputId::B, 3),
+        at(InputId::A, 0),
+        at(InputId::A, 1),
+        at(InputId::B, 4),
+        at(InputId::B, 5),
+    ];
+    let mut mesh = Mesh::new(verts, tris);
+    let removed = remove_doubled_membranes(&mut mesh, &mut attr);
+    assert_eq!(removed, 2);
+    assert_eq!(
+        mesh.tris,
+        tetra_tris(),
+        "the four tetra faces survive in order"
+    );
+    assert_eq!(
+        attr,
+        vec![
+            at(InputId::A, 0),
+            at(InputId::A, 1),
+            at(InputId::B, 4),
+            at(InputId::B, 5),
+        ],
+        "each survivor keeps its OWN attribution — a mesh-only filter would \
+         have handed [0,2,1] the fin's B:3 and [0,3,2] A:1"
+    );
+    assert!(check_watertight_2manifold(&mesh).is_ok());
 }
 
 /// Orientation-sign helper: opposite cyclic rotations of a triple sort to

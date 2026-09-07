@@ -158,6 +158,25 @@
 > OTHER in-plane section-conic junction types; the Stage-6 non-2-manifold
 > family's next row (run `YANG_INPUT_SELFX_PROBE` first — an operand
 > self-contact is a known producer of that wall).
+>
+> **2026-09-07 (evening) — R0051 CONVERTED ⇒ 279C/0W/27E/4EE/0T NEW
+> CANONICAL.** Its Stage-6 `s6-planar-loop-nonplanar` STOP (a vertex a THIRD
+> of the model off a planar face) was a Stage-4 PLUMBING defect, not a
+> junction mint: `remove_doubled_membranes` (spec
+> `yang_doubled_membrane_removal.md`) filtered `mesh.tris` but never the
+> per-triangle attribution vector, so after its 4 removed fins every later
+> triangle read the attribution one slot earlier — B's inner-cylinder
+> triangle took the annulus's face, the recomputed Phase A grouped it into
+> the planar patch, and the producer's own gross-planarity wall fired.
+> Localized with the new `YANG_ATTR_TRACE=x,y,z,r` instrument (position-keyed
+> attribution dump at every Phase-A recompute, `#[track_caller]`-labelled)
+> and a `pre/post` bracket around the 4a1/4a2 steps. Fix: lockstep filter
+> (spec I8), pin `membrane_removal_keeps_attribution_in_lockstep`
+> (red-verified). Corpus (release, 8 jobs, 600 s; wall 701.7 s, F0085
+> 316.7 s): one category move, zero detail moves. R0081 probed the same
+> session: its wall is the FRESH gear revolve's Stage-0 emission (4,004
+> asymmetric edges, 579 improper contacts on the post-overlay B) — the R0053
+> family one layer further, PROBE row (`docs/yang_tail_triage.md`).
 
 The kernel rewrite is **live in the app**. The legacy `crates/kernel/` is
 DELETED; the app, feature-engine, and all tests run on `kernel-v2` through the
