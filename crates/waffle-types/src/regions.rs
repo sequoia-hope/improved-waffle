@@ -39,6 +39,7 @@ use crate::sketch::SketchEntity;
 
 /// A minimal closed face of the sketch, in sketch UV coordinates.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub struct Region {
     /// Outer boundary, counter-clockwise. Curved boundaries are tessellated.
     pub outer: Vec<(f64, f64)>,
@@ -72,6 +73,7 @@ pub struct Region {
 /// kernel's `ProfileEdge` so a sub-region extrudes with true curved walls.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind")]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub enum RegionEdge {
     /// Straight segment `a → b`.
     Line { a: (f64, f64), b: (f64, f64) },

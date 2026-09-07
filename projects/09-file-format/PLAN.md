@@ -74,16 +74,18 @@
 
 ## v4 document model (2026-09-07) — `specs/waffle_v4_document_model.md`
 
-Phase 1 landed (increments 1–5 + 7): spec; `document.id`; `sources` table with
+Phase 1 landed (increments 1–7): spec; `document.id`; `sources` table with
 git-aware locators (`Git` commit-pinned / branch-tag-floating, `Relative`,
 `Url`, `Local`, `Embedded`), `git-blob-sha1` content hashes, optional packed
 embeds; opaque preservation of unknown tab/source/locator kinds; unknown-key
 preservation at structural levels; `FeatureTree.provenance`; engine
 `SourceStore` + bridge `ProvideSource`; ImportedBody → `source_id` (v3 blobs
 migrated into sources, deduped); single Rust writer; JS-form timestamps; exact
-float parsing; corpus back-compat pin (312 assay cases + fixtures).
+float parsing; corpus back-compat pin (312 assay cases + fixtures); JSON
+Schema golden `docs/schema/waffle-v4.schema.json` (`json-schema` feature,
+`tests/schema_golden.rs`, own CI step).
 
-- [ ] Increment 6: JSON Schema golden (`json-schema` cargo feature via schemars across waffle-types/feature-engine/file-format; `docs/schema/waffle-v4.schema.json`; fixture validation)
+- [x] **(2026-09-07)** Increment 6: JSON Schema golden (schemars derives across waffle-types/feature-engine/file-format; every repo `.waffle` validates after migration; CI step)
 - [ ] `profile_entity_ids` on Extrude/Revolve (agent-friendly profile addressing; 85 literal sites — mechanical)
 - [ ] `SolveStatus::Unsolved` default (56 match sites)
 - [ ] Phase 1b: opaque preservation of unknown `Operation` variants

@@ -20,6 +20,16 @@ chrono = { version = "0.4", features = ["serde"] }
 thiserror = "1"
 sha1 = "0.10"
 step-import = { path = "../step-import" }
+schemars = { version = "1.2", features = ["uuid1", "chrono04"], optional = true }
+
+[features]
+# JSON Schema of the `.waffle` v4 file (`docs/schema/waffle-v4.schema.json`),
+# generated from the Rust types and pinned by `tests/schema_golden.rs`.
+# Off by default; enable with `--features json-schema`.
+json-schema = ["dep:schemars", "feature-engine/json-schema", "waffle-types/json-schema"]
 
 [dev-dependencies]
 waffle-types = { path = "../waffle-types", features = ["mock-kernel"] }
+# Validates every repo .waffle file against the generated schema
+# (tests/schema_golden.rs, `json-schema` feature). No network resolvers.
+jsonschema = { version = "0.55", default-features = false }

@@ -14,6 +14,7 @@ pub type BodyNames = HashMap<String, String>;
 /// Absent from the table means `User`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type")]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub enum ProvenanceOrigin {
     /// Authored interactively.
     User,
@@ -28,6 +29,7 @@ pub enum ProvenanceOrigin {
 
 /// Provenance record for one feature.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub struct Provenance {
     pub origin: ProvenanceOrigin,
     /// RFC 3339 timestamp; optional (the engine has no clock of its own).
@@ -45,6 +47,7 @@ pub type ProvenanceTable = HashMap<Uuid, Provenance>;
 /// unit suffixes (`in`, `cm`, ...) scale literals; other parameters may be
 /// referenced by name in any order (cycles are a loud per-parameter error).
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub struct DesignParameter {
     /// Stable identity (error routing, undo bookkeeping).
     pub id: Uuid,
@@ -75,6 +78,7 @@ impl DesignParameter {
 
 /// The ordered list of modeling features.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub struct FeatureTree {
     /// Ordered list of features. Index 0 is the first feature.
     pub features: Vec<Feature>,
@@ -207,6 +211,7 @@ impl Default for FeatureTree {
 
 /// A single feature in the parametric feature tree.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub struct Feature {
     /// Unique identifier.
     pub id: Uuid,
@@ -231,6 +236,7 @@ pub struct Feature {
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub enum Operation {
     Sketch { sketch: Sketch },
     Extrude { params: ExtrudeParams },
@@ -257,6 +263,7 @@ pub enum Operation {
 /// host-provided), then the legacy inline blob; neither ⇒ a loud
 /// `SourceUnavailable` feature error.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub struct ImportedBodyParams {
     /// Source file name (display + diagnostics), e.g. `minihexa.step`.
     pub file_name: String,
@@ -327,6 +334,7 @@ impl ImportedBodyParams {
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub enum DepthMode {
     /// Use the `depth` field directly.
     Blind,
@@ -343,6 +351,7 @@ pub enum DepthMode {
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub enum SecondDirection {
     /// Same depth as primary direction.
     Symmetric,
@@ -364,6 +373,7 @@ fn default_depth_mode() -> DepthMode {
 
 /// Parameters for an extrude operation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub struct ExtrudeParams {
     pub sketch_id: Uuid,
     pub profile_index: usize,
@@ -418,6 +428,7 @@ pub struct ExtrudeParams {
 /// `Cut→Subtract`, `Intersect→Intersect`; `NewBody` performs no boolean.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type")]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub enum CombineMode {
     /// Emit a separate, independent body; no boolean.
     NewBody,
@@ -529,6 +540,7 @@ pub(crate) fn normalize_revolve_combine(params: &RevolveParams) -> EffectiveComb
 
 /// Parameters for a revolve operation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub struct RevolveParams {
     pub sketch_id: Uuid,
     pub profile_index: usize,
@@ -561,6 +573,7 @@ fn default_merge_true() -> bool {
 
 /// Parameters for a fillet operation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub struct FilletParams {
     pub edges: Vec<GeomRef>,
     pub radius: f64,
@@ -568,6 +581,7 @@ pub struct FilletParams {
 
 /// Parameters for a chamfer operation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub struct ChamferParams {
     pub edges: Vec<GeomRef>,
     pub distance: f64,
@@ -575,6 +589,7 @@ pub struct ChamferParams {
 
 /// Parameters for a shell operation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub struct ShellParams {
     pub faces_to_remove: Vec<GeomRef>,
     pub thickness: f64,
@@ -582,6 +597,7 @@ pub struct ShellParams {
 
 /// Parameters for a boolean combine operation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub struct BooleanParams {
     pub body_a: GeomRef,
     pub body_b: GeomRef,
@@ -591,6 +607,7 @@ pub struct BooleanParams {
 /// Boolean operation type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type")]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub enum BooleanOp {
     Union,
     Subtract,
@@ -605,6 +622,7 @@ pub enum BooleanOp {
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "method")]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub enum PlaneDefinition {
     /// Explicit origin + normal.
     #[serde(rename = "point-normal")]
@@ -639,6 +657,7 @@ pub enum PlaneDefinition {
 
 /// Parameters for a datum (construction) plane.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub struct DatumPlaneParams {
     pub name: String,
     pub definition: PlaneDefinition,

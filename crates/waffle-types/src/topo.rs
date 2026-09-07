@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 /// The kind of topological entity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(tag = "type")]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub enum TopoKind {
     Vertex,
     Edge,
@@ -14,6 +15,7 @@ pub enum TopoKind {
 /// Geometric signature of a topological entity.
 /// Used for signature-based matching when role-based resolution fails.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub struct TopoSignature {
     /// Surface type (planar, cylindrical, conical, spherical, toroidal, nurbs).
     pub surface_type: Option<String>,
@@ -47,6 +49,7 @@ impl TopoSignature {
 
 /// User-specified geometric query for selecting entities.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub struct TopoQuery {
     /// Filters to narrow down candidate entities.
     pub filters: Vec<Filter>,
@@ -57,6 +60,7 @@ pub struct TopoQuery {
 /// Filter predicate for TopoQuery.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub enum Filter {
     /// Entity's surface/curve type must match.
     SurfaceType { surface_type: String },
@@ -71,6 +75,7 @@ pub enum Filter {
 /// Tie-breaking strategy when multiple entities match a query.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub enum TieBreak {
     /// Pick the entity with the largest area.
     LargestArea,

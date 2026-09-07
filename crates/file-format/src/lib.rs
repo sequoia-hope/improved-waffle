@@ -5,6 +5,8 @@ pub mod load;
 pub mod metadata;
 pub mod migrate;
 pub mod save;
+#[cfg(feature = "json-schema")]
+pub mod schema;
 pub mod sources;
 pub mod step_export;
 

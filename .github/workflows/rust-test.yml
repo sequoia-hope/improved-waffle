@@ -111,6 +111,13 @@ jobs:
           -p file-format
           -p step-import
 
+      # The .waffle v4 JSON Schema golden (docs/schema/waffle-v4.schema.json)
+      # is generated from the Rust types behind an off-by-default feature;
+      # this step fails when the committed schema is stale or when a repo
+      # .waffle file (assay corpus, fixtures, samples) stops validating.
+      - name: .waffle JSON Schema golden
+        run: cargo test -p file-format --features json-schema --test schema_golden
+
       - name: Categorized-assay smoke gate
         run: cargo test -p test-harness --test assay_kv2
 

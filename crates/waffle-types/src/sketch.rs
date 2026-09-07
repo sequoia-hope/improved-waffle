@@ -45,6 +45,7 @@ fn is_false(v: &bool) -> bool {
 
 /// A 2D sketch on a plane. Contains geometric entities and constraints.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub struct Sketch {
     /// Unique identifier for this sketch.
     pub id: Uuid,
@@ -64,6 +65,10 @@ pub struct Sketch {
     pub solve_status: SolveStatus,
     /// Solved positions for all points. Key is point entity ID.
     /// Derived data — serialized when populated (for WASM→JS bridge), skipped when empty.
+    #[cfg_attr(
+        feature = "json-schema",
+        schemars(with = "std::collections::BTreeMap<String, (f64, f64)>")
+    )]
     #[serde(
         default,
         with = "u32_key_map",
@@ -86,6 +91,7 @@ pub struct Sketch {
 /// The point remains an ordinary `SketchEntity::Point`; this side-table marks it
 /// as externally driven so rebuild can re-derive its 2D position.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub struct ProjectedEntity {
     /// The local Point entity id this binding drives.
     pub point_id: u32,
@@ -95,6 +101,7 @@ pub struct ProjectedEntity {
 
 /// The external source a projected point reprojects from.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub struct ProjectedSource {
     /// Reference to the source vertex/edge/face in an upstream feature output.
     pub geom_ref: GeomRef,
@@ -105,6 +112,7 @@ pub struct ProjectedSource {
 /// How a projected point is derived from its resolved source entity.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub enum ProjectedKind {
     /// Source is a vertex; use its position directly.
     Vertex,
@@ -209,6 +217,7 @@ fn default_normal() -> [f64; 3] {
 /// A geometric entity in a sketch.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub enum SketchEntity {
     Point {
         id: u32,
@@ -281,6 +290,7 @@ impl SketchEntity {
 /// A constraint between sketch entities.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub enum SketchConstraint {
     Coincident {
         point_a: u32,
@@ -556,6 +566,7 @@ impl SketchConstraint {
 /// Result of running the constraint solver.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub enum SolveStatus {
     /// All constraints satisfied, zero degrees of freedom.
     FullyConstrained,
@@ -591,6 +602,7 @@ pub struct SolvedSketch {
 
 /// A closed loop of sketch entities suitable for extrusion or revolution.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub struct ClosedProfile {
     /// Ordered entity IDs forming the closed loop.
     pub entity_ids: Vec<u32>,
@@ -614,6 +626,7 @@ pub struct ClosedProfile {
 
 /// Circle profile data in sketch-local UV coordinates.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub struct CircleProfile {
     pub center_u: f64,
     pub center_v: f64,
@@ -622,6 +635,7 @@ pub struct CircleProfile {
 
 /// A segment of a profile that should be built as a B-spline curve instead of a line.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub struct SplineSegment {
     /// Index into the profile's entity_ids where the spline starts.
     pub start_point_index: usize,
@@ -633,6 +647,7 @@ pub struct SplineSegment {
 
 /// An arc segment within a polygon profile, used to assign cylindrical face geometry on extrude.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub struct ArcSegment {
     /// Index into vertex_ids where the arc's sampled points begin.
     pub start_vertex_index: usize,

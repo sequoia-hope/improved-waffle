@@ -7,6 +7,7 @@ use crate::topo::{TopoKind, TopoQuery, TopoSignature};
 /// Persistent geometry reference. The core of the persistent naming system.
 /// A GeomRef identifies a specific topological entity across parametric rebuilds.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub struct GeomRef {
     /// What kind of topological entity this references.
     pub kind: TopoKind,
@@ -22,6 +23,7 @@ pub struct GeomRef {
 /// Identifies which feature output contains the target entity.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub enum Anchor {
     /// References an output of a specific feature in the tree.
     FeatureOutput {
@@ -35,6 +37,7 @@ pub enum Anchor {
 /// Identifies which output of a feature to look in.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(tag = "type")]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub enum OutputKey {
     /// The primary solid body output.
     Main,
@@ -63,6 +66,7 @@ impl OutputKey {
 /// How to find a specific entity within a feature's output.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub enum Selector {
     /// Select by semantic role assigned during the operation.
     Role { role: Role, index: usize },
@@ -77,6 +81,7 @@ pub enum Selector {
 /// What to do when GeomRef resolution is ambiguous or fails.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(tag = "type")]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub enum ResolvePolicy {
     /// Fail the rebuild if the reference cannot be uniquely resolved.
     Strict,

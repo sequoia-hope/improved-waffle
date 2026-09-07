@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 /// Roles provide stable, meaningful names for geometry that survive topology changes.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(tag = "type")]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub enum Role {
     /// The face on the positive extrusion direction end.
     EndCapPositive,

@@ -84,22 +84,38 @@ impl From<&DocumentMetadata> for ProjectMetadata {
 
 /// Document-level metadata (v3+; `id` since v4).
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub struct DocumentMetadata {
     /// Stable identity of the document (v4 §2.1): survives rename, provider
     /// move and fork. Writers always emit it; a reader that finds it absent
     /// mints one (this serde default) and the loader warns.
     #[serde(default = "Uuid::new_v4")]
+    // Schema: the serde default is a freshly minted UUID, which the derive
+    // would evaluate and embed as the schema's `default` (a different value
+    // on every generation). The always-true predicate makes the derive omit
+    // the default and mark `id` optional-on-read, which is the truth.
+    #[cfg_attr(
+        feature = "json-schema",
+        schemars(skip_serializing_if = "schema_omit_default")
+    )]
     pub id: Uuid,
     pub name: String,
     #[serde(with = "rfc3339_js")]
+    #[cfg_attr(feature = "json-schema", schemars(with = "DateTime<Utc>"))]
     pub created: DateTime<Utc>,
     #[serde(with = "rfc3339_js")]
+    #[cfg_attr(feature = "json-schema", schemars(with = "DateTime<Utc>"))]
     pub modified: DateTime<Utc>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub display_unit: Option<String>,
     /// Unknown keys preserved across load → save (v4 §2.6).
     #[serde(flatten)]
     pub extra: Map<String, Value>,
+}
+
+#[cfg(feature = "json-schema")]
+fn schema_omit_default(_: &Uuid) -> bool {
+    true
 }
 
 impl DocumentMetadata {
@@ -143,6 +159,7 @@ impl From<&ProjectMetadata> for DocumentMetadata {
 /// literal `"default"`) that must keep loading — the v3→v4 migration rewrites
 /// those to fresh UUIDs.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub struct Tab {
     pub id: String,
     pub name: String,
@@ -233,6 +250,35 @@ impl<'de> Deserialize<'de> for TabKind {
     }
 }
 
+#[cfg(feature = "json-schema")]
+impl schemars::JsonSchema for TabKind {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "TabKind".into()
+    }
+    fn json_schema(g: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "description": "A tab's content. `Part` is the only kind this version edits; any other well-formed object with a string `type` (a tab kind from a newer build: Assembly, Drawing) is preserved verbatim and re-emitted on save.",
+            "oneOf": [
+                {
+                    "type": "object",
+                    "required": ["type", "features"],
+                    "properties": {
+                        "type": { "const": "Part" },
+                        "features": g.subschema_for::<FeatureTree>(),
+                        "preview_mesh": { "anyOf": [ g.subschema_for::<PreviewMesh>(), { "type": "null" } ] }
+                    }
+                },
+                {
+                    "type": "object",
+                    "description": "Unknown tab kind (opaque, preserved).",
+                    "required": ["type"],
+                    "properties": { "type": { "type": "string", "not": { "const": "Part" } } }
+                }
+            ]
+        })
+    }
+}
+
 impl TabKind {
     /// The `type` tag as written in the file.
     pub fn type_tag(&self) -> &str {
@@ -245,6 +291,7 @@ impl TabKind {
 
 /// A lightweight mesh for 3D thumbnail previews.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub struct PreviewMesh {
     pub vertices: Vec<f32>,
     pub normals: Vec<f32>,

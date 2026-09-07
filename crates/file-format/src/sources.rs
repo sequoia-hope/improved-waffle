@@ -44,6 +44,7 @@ where
 /// the remote's hostname, else `Generic`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub enum GitHost {
     Github,
     Gitlab,
@@ -76,6 +77,7 @@ impl GitHost {
 /// A git ref: pinned to a commit, or floating on a branch/tag tip.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type")]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub enum GitRef {
     /// Reproducible forever; "update" is a no-op.
     Commit { sha: String },
@@ -224,6 +226,56 @@ impl<'de> Deserialize<'de> for Locator {
     }
 }
 
+#[cfg(feature = "json-schema")]
+impl schemars::JsonSchema for Locator {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "Locator".into()
+    }
+    fn json_schema(g: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "description": "Where a source's content lives. Unknown `type`s are preserved verbatim and reported unresolvable.",
+            "oneOf": [
+                {
+                    "type": "object", "required": ["type", "remote", "path", "ref"],
+                    "properties": {
+                        "type": { "const": "Git" },
+                        "remote": { "type": "string", "description": "HTTPS clone URL, normalized without a trailing .git" },
+                        "path": { "type": "string", "description": "Repository-relative, /-separated, no leading /" },
+                        "ref": g.subschema_for::<GitRef>(),
+                        "host": { "anyOf": [ g.subschema_for::<GitHost>(), { "type": "null" } ] }
+                    }
+                },
+                { "type": "object", "required": ["type", "path"],
+                  "properties": { "type": { "const": "Relative" }, "path": { "type": "string" } } },
+                { "type": "object", "required": ["type", "url"],
+                  "properties": { "type": { "const": "Url" }, "url": { "type": "string" } } },
+                { "type": "object", "required": ["type", "provider", "doc_id"],
+                  "properties": { "type": { "const": "Local" }, "provider": { "type": "string" }, "doc_id": { "type": "string" } } },
+                { "type": "object", "required": ["type"], "properties": { "type": { "const": "Embedded" } } },
+                { "type": "object", "description": "Unknown locator kind (opaque, preserved).", "required": ["type"],
+                  "properties": { "type": { "type": "string", "not": { "enum": LOCATOR_TAGS } } } }
+            ]
+        })
+    }
+}
+
+#[cfg(feature = "json-schema")]
+impl schemars::JsonSchema for SourceKind {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "SourceKind".into()
+    }
+    fn json_schema(_g: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "description": "What a source is. Unknown `type`s are preserved verbatim.",
+            "oneOf": [
+                { "type": "object", "required": ["type"], "properties": { "type": { "enum": SOURCE_KIND_TAGS } } },
+                { "type": "object", "description": "Unknown source kind (opaque, preserved).", "required": ["type"],
+                  "properties": { "type": { "type": "string", "not": { "enum": SOURCE_KIND_TAGS } } } }
+            ]
+        })
+    }
+}
+
 /// Strip a trailing `.git` and trailing `/` from a clone URL.
 pub fn normalize_remote(remote: &str) -> String {
     let r = remote.trim_end_matches('/');
@@ -347,6 +399,7 @@ impl<'de> Deserialize<'de> for SourceKind {
 
 /// The commit actually loaded last time (git locators only).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub struct Resolved {
     pub commit: String,
     pub at: DateTime<Utc>,
@@ -355,6 +408,7 @@ pub struct Resolved {
 /// Cached content bytes. Encoding tag + decoder shared with the v3 STEP
 /// payload (`step_import::STEP_BLOB_ENCODING`, inflation-capped).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub struct Embed {
     pub encoding: String,
     pub blob: String,
@@ -385,6 +439,7 @@ impl Embed {
 
 /// One row of the `sources` table.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub struct SourceEntry {
     /// Stable for the life of the document; relinking keeps it.
     pub id: Uuid,

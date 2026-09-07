@@ -19,6 +19,7 @@ use crate::{ClosedProfile, SketchEntity, SplineSegment};
 /// Parameters for generating an involute gear profile.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub struct GearParams {
     pub tooth_count: u32,
     pub module: f64,
