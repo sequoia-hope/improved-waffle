@@ -295,7 +295,7 @@ fn save_document_rejects_a_dangling_or_non_part_active_tab() {
     // An opaque (future-kind) tab is preserved through SaveDocument but
     // cannot host the live tree.
     let asm: Tab = serde_json::from_value(serde_json::json!({
-        "id": "asm", "name": "Assembly 1", "kind": { "type": "Assembly", "instances": [] }
+        "id": "drw", "name": "Drawing 1", "kind": { "type": "Drawing", "sheets": [] }
     }))
     .unwrap();
     let part = Tab::part("Part 1", FeatureTree::new());
@@ -305,12 +305,12 @@ fn save_document_rejects_a_dangling_or_non_part_active_tab() {
         UiToEngine::SaveDocument {
             document: DocumentMetadata::new("Doc"),
             tabs: vec![part.clone(), asm.clone()],
-            active_tab: "asm".into(),
+            active_tab: "drw".into(),
         },
         &mut kernel,
     );
     assert!(
-        matches!(response, EngineToUi::Error { ref message, .. } if message.contains("Assembly"))
+        matches!(response, EngineToUi::Error { ref message, .. } if message.contains("Drawing"))
     );
     let response = dispatch(
         &mut state,
@@ -325,11 +325,8 @@ fn save_document_rejects_a_dangling_or_non_part_active_tab() {
         panic!("{response:?}")
     };
     let parsed: serde_json::Value = serde_json::from_str(&json_data).unwrap();
-    assert_eq!(parsed["tabs"][1]["kind"]["type"], "Assembly");
-    assert_eq!(
-        parsed["tabs"][1]["kind"]["instances"],
-        serde_json::json!([])
-    );
+    assert_eq!(parsed["tabs"][1]["kind"]["type"], "Drawing");
+    assert_eq!(parsed["tabs"][1]["kind"]["sheets"], serde_json::json!([]));
 }
 
 // ── v4 Phase 2 P2-3: source listing, resolved commits, linked STEP imports ──
@@ -693,4 +690,42 @@ fn pinning_to_the_resolved_commit_keeps_content_and_any_other_ref_drops_it() {
         &mut kernel,
     );
     assert!(matches!(bad, EngineToUi::Error { .. }), "{bad:?}");
+}
+
+#[test]
+fn an_active_assembly_tab_saves_without_touching_the_live_tree() {
+    use feature_engine::assembly::AssemblyTree;
+    let mut state = EngineState::new();
+    let mut kernel = KernelV2Adapter::new();
+    import_cube(&mut state, &mut kernel);
+    let part = Tab::part("Part 1", FeatureTree::new());
+    let asm_tab = Tab::assembly("Assembly 1", AssemblyTree::default());
+    let asm_id = asm_tab.id.clone();
+    let response = dispatch(
+        &mut state,
+        UiToEngine::SaveDocument {
+            document: DocumentMetadata::new("Doc"),
+            tabs: vec![part, asm_tab],
+            active_tab: asm_id.clone(),
+        },
+        &mut kernel,
+    );
+    let EngineToUi::SaveReady { json_data } = response else {
+        panic!("{response:?}")
+    };
+    let doc = load_document(&json_data).unwrap().document;
+    assert_eq!(doc.active_tab, asm_id);
+    assert!(doc.tab(&asm_id).unwrap().assembly_tree().is_some());
+    // The Part tab kept ITS tree (empty), not the engine's live one.
+    assert!(doc.tabs[0].features().unwrap().features.is_empty());
+    // Loading a document whose active tab is an assembly opens with an
+    // empty live tree (the assembly is evaluated by OpenAssembly).
+    let mut fresh = EngineState::new();
+    let r = dispatch(
+        &mut fresh,
+        UiToEngine::LoadProject { data: json_data },
+        &mut kernel,
+    );
+    assert!(matches!(r, EngineToUi::ModelUpdated { .. }), "{r:?}");
+    assert!(fresh.engine.tree.features.is_empty());
 }

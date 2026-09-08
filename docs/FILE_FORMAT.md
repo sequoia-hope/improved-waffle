@@ -217,15 +217,17 @@ absent**: an older build given a newer file fails with a raw serde
 
 ### 5.3 `TabKind`
 
-Single known variant today:
+Two known variants (Phase 3, 2026-09-08):
 
 ```json
 { "type": "Part", "features": { …FeatureTree… }, "preview_mesh": null }
+{ "type": "Assembly", "assembly": { …AssemblyTree… }, "preview_mesh": null }
 ```
 
 | Field | Type | Req | Notes |
 |---|---|---|---|
-| `features` | FeatureTree | ✔ | §6. |
+| `features` | FeatureTree | ✔ (Part) | §6. |
+| `assembly` | AssemblyTree | ✔ (Assembly) | §5.6. |
 | `preview_mesh` | PreviewMesh \| null | opt | Thumbnail mesh for the document browser. Omitted when `None`; an explicit `null` also loads. |
 
 **Unknown kinds (v4).** A well-formed `{"type": …}` the reader does not know
@@ -238,6 +240,26 @@ string `type` is still a hard parse error. Consequence: adding a tab kind is not
 `MIN_READER_VERSION` bump. The bridge refuses to open an unknown-kind tab as the
 active part (`NotImplemented`) and refuses to hold the live tree in one.
 `Tab` also carries a flattened `extra` map for unknown keys.
+
+### 5.6 `AssemblyTree` (Phase 3, `crates/feature-engine/src/assembly.rs`)
+
+The content of an `Assembly` tab: placed **instances** of parts related by
+**mate connectors** and **mates**. All lengths meters; rotations as unit
+quaternions `[x, y, z, w]` (three.js order). Unknown keys on the tree,
+instances, connectors and mates are preserved (flattened `extra`).
+
+| Field | Type | Req/default | Notes |
+|---|---|---|---|
+| `instances` | Instance[] | default `[]` | `{id (UUID), name, source: {source_id?, tab_id}, transform: {translation_m: [3], rotation_quat: [4]} (default identity), fixed (default false, omitted), suppressed (default false, omitted), external_key?, parameter_overrides? ({name → number}, reserved)}`. `source` names a Part tab of this document (`source_id` absent) or a tab of a linked `.waffle` source (§5.5). `fixed` grounds the instance; with none marked, the first non-suppressed instance is grounded. |
+| `connectors` | MateConnector[] | default `[]`, omitted when empty | `{id, name, instance_path: [UUID] (exactly one id in this version — sub-assembly paths are reported and not solved), geom_ref? (a face of the PART, §8), frame: {origin, z_axis (default +z), x_axis (default: chosen deterministically)}}`. With `geom_ref`, the frame is derived from the current geometry at evaluation (origin on the planar face, z = outward normal, `frame.x_axis` as the secondary direction when set); without, `frame` is the frame. Coordinates are the part's own. |
+| `mates` | Mate[] | default `[]`, omitted when empty | `{id, name, kind, connectors: [a, b], suppressed}`. `kind` is tagged `type`: `Fastened {flip (default false), rotation_deg (default 0)}` — connector `b`'s frame is made coincident with `a`'s frame rotated by `rotation_deg` about its z and, if `flip`, turned 180° about its x (so the z axes oppose: two outward face normals "stacked"). Any other `type` is preserved opaquely and reported (`Revolute`, `Slider`, … are reserved). |
+| `placements` | {UUID → Transform} | default `{}`, omitted when empty | **Derived hints**: the solved placement of every non-suppressed instance, recomputed on every evaluation by `feature_engine::assembly::solve_fastened` (rigid-transform composition from the grounded instances through the mates; an over-constrained mate is a loud error; an instance no mate reaches keeps its own `transform`, with a warning). Persisted so a reader without the engine can position instances; never authoritative. |
+
+Loader warnings (`WaffleDocument::validate`): duplicate ids, dangling
+instance/connector references, a connector on a missing instance, an
+instance whose tab or source the document does not have, an unknown mate
+kind. The single-tree API (`load_project`) refuses to open an Assembly tab
+as a part.
 
 ### 5.5 `SourceEntry` (v4)
 

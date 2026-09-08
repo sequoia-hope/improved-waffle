@@ -113,6 +113,30 @@ impl WaffleDocument {
                     t.kind.type_tag()
                 ));
             }
+            if let Some(asm) = t.assembly_tree() {
+                warnings.extend(
+                    asm.validate()
+                        .into_iter()
+                        .map(|w| format!("tab `{}` ({}): {w}", t.name, t.id)),
+                );
+                for i in &asm.instances {
+                    let ok = match i.source.source_id {
+                        None => self.tabs.iter().any(|x| x.id == i.source.tab_id),
+                        Some(sid) => self.source(sid).is_some(),
+                    };
+                    if !ok {
+                        warnings.push(format!(
+                            "tab `{}` ({}): instance `{}` ({}) references {} `{}`, which this document does not have",
+                            t.name,
+                            t.id,
+                            i.name,
+                            i.id,
+                            if i.source.source_id.is_some() { "source" } else { "tab" },
+                            i.source.source_id.map(|s| s.to_string()).unwrap_or_else(|| i.source.tab_id.clone())
+                        ));
+                    }
+                }
+            }
             for f in t
                 .features()
                 .map(|tree| tree.features.as_slice())

@@ -134,9 +134,9 @@ pub fn load_project(json: &str) -> Result<(FeatureTree, ProjectMetadata), LoadEr
         .ok_or_else(|| LoadError::ParseError("no tabs in document".to_string()))?;
     let mut tree = match &tab.kind {
         TabKind::Part { features, .. } => features.clone(),
-        TabKind::Unknown(_) => {
+        TabKind::Assembly { .. } | TabKind::Unknown(_) => {
             return Err(LoadError::ParseError(format!(
-                "active tab `{}` has kind `{}`, which this version cannot open as a part",
+                "active tab `{}` has kind `{}`, which cannot be opened as a part",
                 tab.name,
                 tab.kind.type_tag()
             )))

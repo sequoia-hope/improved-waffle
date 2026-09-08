@@ -302,6 +302,9 @@ fn handle_message(
                 })?;
             match &mut active.kind {
                 TabKind::Part { features, .. } => *features = state.engine.tree.clone(),
+                // An assembly tab's content is UI-owned (instances, mates,
+                // solved placements); nothing to substitute.
+                TabKind::Assembly { .. } => {}
                 TabKind::Unknown(_) => {
                     return Err(BridgeError::InvalidRequest {
                         reason: format!(
@@ -345,6 +348,9 @@ fn handle_message(
                 })?;
             let tree = match &tab.kind {
                 TabKind::Part { features, .. } => features.clone(),
+                // The assembly itself is evaluated by `OpenAssembly` (the UI
+                // sends it with the part trees); the live tree stays empty.
+                TabKind::Assembly { .. } => feature_engine::types::FeatureTree::new(),
                 TabKind::Unknown(_) => {
                     return Err(BridgeError::NotImplemented {
                         operation: format!(

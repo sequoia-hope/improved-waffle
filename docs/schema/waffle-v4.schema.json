@@ -84,6 +84,39 @@
       ],
       "type": "object"
     },
+    "AssemblyTree": {
+      "additionalProperties": true,
+      "description": "The content of an `Assembly` tab.",
+      "properties": {
+        "connectors": {
+          "items": {
+            "$ref": "#/$defs/MateConnector"
+          },
+          "type": "array"
+        },
+        "instances": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Instance"
+          },
+          "type": "array"
+        },
+        "mates": {
+          "items": {
+            "$ref": "#/$defs/Mate"
+          },
+          "type": "array"
+        },
+        "placements": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Transform"
+          },
+          "description": "Solved placements by instance id — derived hints (see module doc).",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
     "BooleanOp": {
       "description": "Boolean operation type.",
       "oneOf": [
@@ -793,6 +826,54 @@
         }
       ]
     },
+    "Frame": {
+      "description": "A coordinate frame on part geometry: origin, primary (z) axis and\nsecondary (x) axis, in the PART's coordinates. `x_axis` is orthogonalized\nagainst `z_axis`; a zero `x_axis` means \"any perpendicular\" (chosen\ndeterministically).",
+      "properties": {
+        "origin": {
+          "default": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "type": "array"
+        },
+        "x_axis": {
+          "default": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "type": "array"
+        },
+        "z_axis": {
+          "default": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
     "GearParams": {
       "description": "Parameters for generating an involute gear profile.",
       "properties": {
@@ -1009,6 +1090,70 @@
       ],
       "type": "object"
     },
+    "Instance": {
+      "additionalProperties": true,
+      "description": "One placed occurrence of a part.",
+      "properties": {
+        "external_key": {
+          "description": "Identity in an external tool (a KiCad footprint UUID, Phase 3b).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fixed": {
+          "description": "Grounded: never moved by mates. The first non-suppressed instance is\nimplicitly grounded when none is marked.",
+          "type": "boolean"
+        },
+        "id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "parameter_overrides": {
+          "additionalProperties": {
+            "format": "double",
+            "type": "number"
+          },
+          "description": "Design-parameter overrides for this instance (reserved; not applied\nin Phase 3).",
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "source": {
+          "$ref": "#/$defs/PartRef"
+        },
+        "suppressed": {
+          "type": "boolean"
+        },
+        "transform": {
+          "$ref": "#/$defs/Transform",
+          "default": {
+            "rotation_quat": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ],
+            "translation_m": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          },
+          "description": "Explicit placement: authoritative for a grounded (`fixed`) instance\nand for one no mate reaches; the starting point otherwise."
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "source"
+      ],
+      "type": "object"
+    },
     "Locator": {
       "description": "Where a source's content lives. Unknown `type`s are preserved verbatim and reported unresolvable.",
       "oneOf": [
@@ -1118,6 +1263,142 @@
                   "Url",
                   "Local",
                   "Embedded"
+                ]
+              },
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Mate": {
+      "additionalProperties": true,
+      "description": "A relation between two connectors.",
+      "properties": {
+        "connectors": {
+          "description": "`[a, b]`: `b`'s instance is placed against `a`'s when only one side\nis placed; either direction works.",
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array"
+        },
+        "id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/MateKind"
+        },
+        "name": {
+          "type": "string"
+        },
+        "suppressed": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "kind",
+        "connectors"
+      ],
+      "type": "object"
+    },
+    "MateConnector": {
+      "additionalProperties": true,
+      "description": "A named frame on an instance's geometry. `geom_ref` (a face of the part,\nin the part's own feature space) derives the frame from the current\ngeometry at evaluation time — origin on the face, z along its outward\nnormal — with `frame.x_axis` as the secondary direction when set; without\na `geom_ref`, `frame` is the frame.",
+      "properties": {
+        "frame": {
+          "$ref": "#/$defs/Frame",
+          "default": {
+            "origin": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "x_axis": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "z_axis": [
+              0.0,
+              0.0,
+              1.0
+            ]
+          }
+        },
+        "geom_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GeomRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "instance_path": {
+          "description": "Scope (v4 §2.8): the chain of instance ids from this assembly down to\nthe owning instance. Phase 3 supports one level (no sub-assemblies):\nexactly one id.",
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "instance_path"
+      ],
+      "type": "object"
+    },
+    "MateKind": {
+      "description": "How two mate connectors relate. `Fastened` is solved in this version; any other well-formed object with a string `type` (a mate kind from a newer build) is preserved verbatim and reported.",
+      "oneOf": [
+        {
+          "properties": {
+            "flip": {
+              "default": false,
+              "type": "boolean"
+            },
+            "rotation_deg": {
+              "default": 0.0,
+              "format": "double",
+              "type": "number"
+            },
+            "type": {
+              "const": "Fastened",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Unknown mate kind (opaque, preserved; not solved).",
+          "properties": {
+            "type": {
+              "not": {
+                "enum": [
+                  "Fastened"
                 ]
               },
               "type": "string"
@@ -1376,6 +1657,25 @@
           "type": "object"
         }
       ]
+    },
+    "PartRef": {
+      "description": "Which part an instance is of: a Part tab of this document\n(`source_id: None`) or of a linked `.waffle` source (v4 §2.3).",
+      "properties": {
+        "source_id": {
+          "format": "uuid",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tab_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "tab_id"
+      ],
+      "type": "object"
     },
     "PlaneDefinition": {
       "description": "How a construction plane is defined.",
@@ -3747,7 +4047,7 @@
       "type": "object"
     },
     "TabKind": {
-      "description": "A tab's content. `Part` is the only kind this version edits; any other well-formed object with a string `type` (a tab kind from a newer build: Assembly, Drawing) is preserved verbatim and re-emitted on save.",
+      "description": "A tab's content: a `Part` (feature tree) or an `Assembly` (instances, mate connectors, mates). Any other well-formed object with a string `type` (a tab kind from a newer build: Drawing) is preserved verbatim and re-emitted on save.",
       "oneOf": [
         {
           "properties": {
@@ -3775,11 +4075,39 @@
           "type": "object"
         },
         {
+          "properties": {
+            "assembly": {
+              "$ref": "#/$defs/AssemblyTree"
+            },
+            "preview_mesh": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/PreviewMesh"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": {
+              "const": "Assembly"
+            }
+          },
+          "required": [
+            "type",
+            "assembly"
+          ],
+          "type": "object"
+        },
+        {
           "description": "Unknown tab kind (opaque, preserved).",
           "properties": {
             "type": {
               "not": {
-                "const": "Part"
+                "enum": [
+                  "Part",
+                  "Assembly"
+                ]
               },
               "type": "string"
             }
@@ -4010,6 +4338,41 @@
             "string",
             "null"
           ]
+        }
+      },
+      "type": "object"
+    },
+    "Transform": {
+      "description": "A rigid transform `p' = R p + t` with `R` as a unit quaternion\n`[x, y, z, w]` (the JS/three.js order). Lengths in meters.",
+      "properties": {
+        "rotation_quat": {
+          "default": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "type": "array"
+        },
+        "translation_m": {
+          "default": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "type": "array"
         }
       },
       "type": "object"

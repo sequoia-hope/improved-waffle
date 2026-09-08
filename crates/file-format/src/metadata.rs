@@ -1,4 +1,5 @@
 use chrono::{DateTime, Utc};
+use feature_engine::assembly::AssemblyTree;
 use feature_engine::types::FeatureTree;
 
 /// RFC 3339 UTC timestamps written the way JavaScript's `toISOString()`
@@ -183,18 +184,39 @@ impl Tab {
         }
     }
 
+    /// An Assembly tab with a fresh UUID id.
+    pub fn assembly(name: impl Into<String>, assembly: AssemblyTree) -> Self {
+        Tab {
+            id: Uuid::new_v4().to_string(),
+            name: name.into(),
+            kind: TabKind::Assembly {
+                assembly,
+                preview_mesh: None,
+            },
+            extra: Map::new(),
+        }
+    }
+
     /// The tab's feature tree, if it is a Part.
     pub fn features(&self) -> Option<&FeatureTree> {
         match &self.kind {
             TabKind::Part { features, .. } => Some(features),
-            TabKind::Unknown(_) => None,
+            _ => None,
         }
     }
 
     pub fn features_mut(&mut self) -> Option<&mut FeatureTree> {
         match &mut self.kind {
             TabKind::Part { features, .. } => Some(features),
-            TabKind::Unknown(_) => None,
+            _ => None,
+        }
+    }
+
+    /// The tab's assembly, if it is an Assembly.
+    pub fn assembly_tree(&self) -> Option<&AssemblyTree> {
+        match &self.kind {
+            TabKind::Assembly { assembly, .. } => Some(assembly),
+            _ => None,
         }
     }
 }
@@ -217,6 +239,13 @@ pub enum TabKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         preview_mesh: Option<PreviewMesh>,
     },
+    /// Phase 3 (`feature_engine::assembly`): placed instances of parts,
+    /// mate connectors and mates.
+    Assembly {
+        assembly: AssemblyTree,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        preview_mesh: Option<PreviewMesh>,
+    },
     #[serde(untagged)]
     Unknown(Value),
 }
@@ -229,9 +258,15 @@ enum KnownTabKind {
         #[serde(default)]
         preview_mesh: Option<PreviewMesh>,
     },
+    Assembly {
+        assembly: AssemblyTree,
+        #[serde(default)]
+        preview_mesh: Option<PreviewMesh>,
+    },
 }
 
-const TAB_KIND_TAGS: &[&str] = &["Part"];
+/// The tab kinds this build can open.
+pub const TAB_KIND_TAGS: &[&str] = &["Part", "Assembly"];
 
 impl<'de> Deserialize<'de> for TabKind {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
@@ -242,6 +277,13 @@ impl<'de> Deserialize<'de> for TabKind {
                     preview_mesh,
                 }) => TabKind::Part {
                     features,
+                    preview_mesh,
+                },
+                Ok(KnownTabKind::Assembly {
+                    assembly,
+                    preview_mesh,
+                }) => TabKind::Assembly {
+                    assembly,
                     preview_mesh,
                 },
                 Err(v) => TabKind::Unknown(v),
@@ -257,7 +299,7 @@ impl schemars::JsonSchema for TabKind {
     }
     fn json_schema(g: &mut schemars::SchemaGenerator) -> schemars::Schema {
         schemars::json_schema!({
-            "description": "A tab's content. `Part` is the only kind this version edits; any other well-formed object with a string `type` (a tab kind from a newer build: Assembly, Drawing) is preserved verbatim and re-emitted on save.",
+            "description": "A tab's content: a `Part` (feature tree) or an `Assembly` (instances, mate connectors, mates). Any other well-formed object with a string `type` (a tab kind from a newer build: Drawing) is preserved verbatim and re-emitted on save.",
             "oneOf": [
                 {
                     "type": "object",
@@ -270,9 +312,18 @@ impl schemars::JsonSchema for TabKind {
                 },
                 {
                     "type": "object",
+                    "required": ["type", "assembly"],
+                    "properties": {
+                        "type": { "const": "Assembly" },
+                        "assembly": g.subschema_for::<AssemblyTree>(),
+                        "preview_mesh": { "anyOf": [ g.subschema_for::<PreviewMesh>(), { "type": "null" } ] }
+                    }
+                },
+                {
+                    "type": "object",
                     "description": "Unknown tab kind (opaque, preserved).",
                     "required": ["type"],
-                    "properties": { "type": { "type": "string", "not": { "const": "Part" } } }
+                    "properties": { "type": { "type": "string", "not": { "enum": TAB_KIND_TAGS } } }
                 }
             ]
         })
@@ -284,6 +335,7 @@ impl TabKind {
     pub fn type_tag(&self) -> &str {
         match self {
             TabKind::Part { .. } => "Part",
+            TabKind::Assembly { .. } => "Assembly",
             TabKind::Unknown(v) => v.get("type").and_then(Value::as_str).unwrap_or("?"),
         }
     }

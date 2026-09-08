@@ -1,3 +1,4 @@
+pub mod assembly;
 pub mod expr;
 pub mod opaque;
 pub mod params;

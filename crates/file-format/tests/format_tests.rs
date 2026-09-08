@@ -1152,7 +1152,7 @@ fn v3_preview_mesh_serde() {
             assert_eq!(mesh.normals.len(), 9);
             assert_eq!(mesh.indices.len(), 3);
         }
-        TabKind::Unknown(_) => panic!("Part tab must load as Part"),
+        TabKind::Assembly { .. } | TabKind::Unknown(_) => panic!("Part tab must load as Part"),
     }
 }
 

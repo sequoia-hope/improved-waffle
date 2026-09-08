@@ -147,9 +147,9 @@ fn duplicate_source_ids_are_a_parse_error() {
 #[test]
 fn unknown_tab_kind_is_preserved_verbatim_and_reported() {
     let assembly = serde_json::json!({
-        "type": "Assembly",
-        "instances": [{ "id": "i1", "source": { "tab_id": "t0" }, "transform": { "translation_m": [0, 0, 0.01] } }],
-        "mates": []
+        "type": "Drawing",
+        "sheets": [{ "id": "s1", "views": [{ "source": { "tab_id": "t0" }, "projection": "front" }] }],
+        "annotations": []
     });
     let mut parsed: serde_json::Value =
         serde_json::from_str(&save_document(&WaffleDocument::new("Asm"))).unwrap();
@@ -157,18 +157,18 @@ fn unknown_tab_kind_is_preserved_verbatim_and_reported() {
     parsed["tabs"]
         .as_array_mut()
         .unwrap()
-        .push(serde_json::json!({ "id": "asm-tab", "name": "Assembly 1", "kind": assembly, "x-note": "kept" }));
+        .push(serde_json::json!({ "id": "drw-tab", "name": "Drawing 1", "kind": assembly, "x-note": "kept" }));
     parsed["active_tab"] = part_id;
 
     let loaded = load_document(&parsed.to_string()).unwrap();
     assert!(loaded
         .warnings
         .iter()
-        .any(|w| w.contains("unknown tab kind `Assembly`")));
+        .any(|w| w.contains("unknown tab kind `Drawing`")));
     let doc = loaded.document;
     assert_eq!(doc.tabs.len(), 2);
     assert!(matches!(doc.tabs[1].kind, TabKind::Unknown(_)));
-    assert_eq!(doc.tabs[1].kind.type_tag(), "Assembly");
+    assert_eq!(doc.tabs[1].kind.type_tag(), "Drawing");
     assert!(doc.tabs[1].features().is_none());
 
     let out: serde_json::Value = serde_json::from_str(&save_document(&doc)).unwrap();
@@ -176,11 +176,11 @@ fn unknown_tab_kind_is_preserved_verbatim_and_reported() {
     assert_eq!(out["tabs"][1]["x-note"], "kept");
 
     // The single-tree API still opens the Part tab, and refuses to pretend
-    // an Assembly tab is a part.
+    // a Drawing tab is a part.
     assert!(load_project(&parsed.to_string()).is_ok());
-    parsed["active_tab"] = serde_json::Value::String("asm-tab".into());
+    parsed["active_tab"] = serde_json::Value::String("drw-tab".into());
     assert!(
-        matches!(load_project(&parsed.to_string()), Err(LoadError::ParseError(m)) if m.contains("Assembly"))
+        matches!(load_project(&parsed.to_string()), Err(LoadError::ParseError(m)) if m.contains("Drawing"))
     );
 }
 

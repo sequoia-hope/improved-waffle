@@ -193,7 +193,7 @@ fn every_repo_waffle_file_validates_after_migration() {
         .as_array_mut()
         .unwrap()
         .push(serde_json::json!({
-            "id": "asm", "name": "Assembly 1", "kind": { "type": "Assembly", "instances": [] }
+            "id": "drw", "name": "Drawing 1", "kind": { "type": "Drawing", "sheets": [] }
         }));
     let errors: Vec<String> = validator
         .iter_errors(&future)
@@ -202,5 +202,29 @@ fn every_repo_waffle_file_validates_after_migration() {
     assert!(
         errors.is_empty(),
         "opaque tab kind must validate: {errors:#?}"
+    );
+    // An Assembly tab (Phase 3) validates against its real schema — and a
+    // malformed one (no `assembly`) does not.
+    let mut asm = v4.clone();
+    asm["tabs"].as_array_mut().unwrap().push(serde_json::json!({
+        "id": "asm", "name": "Assembly 1",
+        "kind": { "type": "Assembly", "assembly": { "instances": [
+            { "id": "6f1c2a4e-1111-4222-8333-444455556666", "name": "P", "source": { "tab_id": "t" },
+              "transform": { "translation_m": [0.0, 0.0, 0.01], "rotation_quat": [0.0, 0.0, 0.0, 1.0] } }
+        ], "mates": [ { "id": "6f1c2a4e-1111-4222-8333-444455556677", "name": "m",
+            "kind": { "type": "Fastened", "flip": true }, "connectors": ["6f1c2a4e-1111-4222-8333-444455556688", "6f1c2a4e-1111-4222-8333-444455556699"] } ] } }
+    }));
+    let errors: Vec<String> = validator.iter_errors(&asm).map(|e| e.to_string()).collect();
+    assert!(errors.is_empty(), "assembly tab must validate: {errors:#?}");
+    let mut bad_asm = v4.clone();
+    bad_asm["tabs"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!({
+            "id": "asm", "name": "Assembly 1", "kind": { "type": "Assembly", "instances": [] }
+        }));
+    assert!(
+        !validator.is_valid(&bad_asm),
+        "an Assembly tab without `assembly` must not validate"
     );
 }
