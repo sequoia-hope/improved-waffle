@@ -575,6 +575,7 @@ name = "feature-engine"
 version = "0.1.0"
 dependencies = [
  "modeling-ops",
+ "nalgebra",
  "schemars",
  "serde",
  "serde_json",

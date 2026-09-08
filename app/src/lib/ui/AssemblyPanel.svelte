@@ -19,8 +19,10 @@
 		updateMate,
 		removeMate,
 		getSelectedInstanceId,
-		getSelectedRefs
+		getSelectedRefs,
+		MATE_KINDS
 	} from '$lib/engine/store.svelte.js';
+	import { eulerDegToQuat, quatToEulerDeg } from '$lib/engine/rotation.js';
 
 	let asm = $derived(getAssembly());
 	let status = $derived(getAssemblyStatus());
@@ -31,6 +33,7 @@
 	let newInstanceTab = $state('');
 	let mateA = $state('');
 	let mateB = $state('');
+	let mateKind = $state('Fastened');
 	let mateFlip = $state(true);
 	let mateRotation = $state(0);
 	let busy = $state(false);
@@ -68,6 +71,20 @@
 		await run(() => addInstance({ tabId }));
 	}
 
+	function eulerOf(inst) {
+		return quatToEulerDeg(inst.transform?.rotation_quat ?? [0, 0, 0, 1]);
+	}
+
+	async function setRotation(inst, axis, valueDeg) {
+		const t = JSON.parse(JSON.stringify(inst.transform ?? { translation_m: [0, 0, 0], rotation_quat: [0, 0, 0, 1] }));
+		const v = Number(valueDeg);
+		if (!Number.isFinite(v)) return;
+		const e = eulerOf(inst);
+		e[axis] = v;
+		t.rotation_quat = eulerDegToQuat(e);
+		await run(() => updateInstance(inst.id, { transform: t }));
+	}
+
 	async function setTranslation(inst, axis, valueMm) {
 		const t = JSON.parse(JSON.stringify(inst.transform ?? { translation_m: [0, 0, 0], rotation_quat: [0, 0, 0, 1] }));
 		const v = Number(valueMm);
@@ -87,7 +104,7 @@
 
 	async function handleAddMate() {
 		if (!mateA || !mateB || mateA === mateB) return;
-		await run(() => addMate({ a: mateA, b: mateB, flip: mateFlip, rotationDeg: Number(mateRotation) || 0 }));
+		await run(() => addMate({ a: mateA, b: mateB, kind: mateKind, flip: mateFlip, rotationDeg: Number(mateRotation) || 0 }));
 		mateA = '';
 		mateB = '';
 	}
@@ -117,6 +134,12 @@
 								<input class="num" type="number" step="0.1" title="{axis} (mm)" data-testid="asm-instance-t{axis}-{i}" value={mm(inst.transform?.translation_m?.[k])} disabled={busy} onchange={(e) => setTranslation(inst, k, e.currentTarget.value)} />
 							{/each}
 							<span class="unit">mm</span>
+						</span>
+						<span class="xyz" title="rotation, XYZ Euler (°)">
+							{#each ['x', 'y', 'z'] as axis, k}
+								<input class="num" type="number" step="5" title="rotate about {axis} (°)" data-testid="asm-instance-r{axis}-{i}" value={eulerOf(inst)[k]} disabled={busy} onchange={(e) => setRotation(inst, k, e.currentTarget.value)} />
+							{/each}
+							<span class="unit">°</span>
 						</span>
 						<button class="act" title="Connector at this instance's origin" data-testid="asm-instance-origin-connector-{i}" disabled={busy} onclick={() => handleAddOriginConnector(inst)}>+ frame</button>
 					</div>
@@ -161,10 +184,17 @@
 						<span class="meta">{m.kind?.type ?? '?'} · {connectorName(m.connectors?.[0])} → {connectorName(m.connectors?.[1])}</span>
 						<button class="act" title="Remove mate" data-testid="asm-mate-remove-{i}" disabled={busy} onclick={() => run(() => removeMate(m.id))}>×</button>
 					</div>
-					{#if m.kind?.type === 'Fastened'}
+					{#if MATE_KINDS.includes(m.kind?.type)}
 						<div class="row-sub">
-							<label><input type="checkbox" data-testid="asm-mate-flip-{i}" checked={!!m.kind.flip} disabled={busy} onchange={(e) => run(() => updateMate(m.id, { flip: e.currentTarget.checked }))} /> flip</label>
-							<label>rotate <input class="num" type="number" step="15" data-testid="asm-mate-rotation-{i}" value={m.kind.rotation_deg ?? 0} disabled={busy} onchange={(e) => run(() => updateMate(m.id, { rotationDeg: e.currentTarget.value }))} />°</label>
+							<select data-testid="asm-mate-kind-{i}" value={m.kind.type} disabled={busy} onchange={(e) => run(() => updateMate(m.id, { kind: e.currentTarget.value }))}>
+								{#each MATE_KINDS as k}<option value={k}>{k}</option>{/each}
+							</select>
+							{#if m.kind.type !== 'Ball'}
+								<label><input type="checkbox" data-testid="asm-mate-flip-{i}" checked={!!m.kind.flip} disabled={busy} onchange={(e) => run(() => updateMate(m.id, { flip: e.currentTarget.checked }))} /> flip</label>
+							{/if}
+							{#if m.kind.type === 'Fastened'}
+								<label>rotate <input class="num" type="number" step="15" data-testid="asm-mate-rotation-{i}" value={m.kind.rotation_deg ?? 0} disabled={busy} onchange={(e) => run(() => updateMate(m.id, { rotationDeg: e.currentTarget.value }))} />°</label>
+							{/if}
 							<label><input type="checkbox" data-testid="asm-mate-suppressed-{i}" checked={!!m.suppressed} disabled={busy} onchange={(e) => run(() => updateMate(m.id, { suppressed: e.currentTarget.checked }))} /> off</label>
 						</div>
 					{/if}
@@ -180,9 +210,12 @@
 						<option value="">connector B</option>
 						{#each asm.connectors as c}<option value={c.id}>{c.name}</option>{/each}
 					</select>
+					<select data-testid="asm-mate-new-kind" bind:value={mateKind} title="Mate kind">
+						{#each MATE_KINDS as k}<option value={k}>{k}</option>{/each}
+					</select>
 					<label><input type="checkbox" data-testid="asm-mate-new-flip" bind:checked={mateFlip} /> flip</label>
-					<input class="num" type="number" step="15" data-testid="asm-mate-new-rotation" bind:value={mateRotation} title="rotation about z (°)" />
-					<button class="act primary" data-testid="asm-add-mate" disabled={busy || !mateA || !mateB || mateA === mateB} onclick={handleAddMate}>fasten</button>
+					<input class="num" type="number" step="15" data-testid="asm-mate-new-rotation" bind:value={mateRotation} title="rotation about z (°, Fastened)" />
+					<button class="act primary" data-testid="asm-add-mate" disabled={busy || !mateA || !mateB || mateA === mateB} onclick={handleAddMate}>mate</button>
 				</div>
 			{/if}
 		</div>

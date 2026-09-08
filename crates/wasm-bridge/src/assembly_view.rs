@@ -6,7 +6,8 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use feature_engine::assembly::{solve_fastened, AssemblyTree, Frame, PartRef, Transform};
+use feature_engine::assembly::{AssemblyTree, Frame, PartRef, Transform};
+use feature_engine::assembly_solver::solve_mates;
 use feature_engine::rebuild::resolve_face_plane;
 use feature_engine::types::FeatureTree;
 use feature_engine::Engine;
@@ -136,7 +137,7 @@ pub fn evaluate(
     }
 
     // 3. Placements.
-    let solved = solve_fastened(&view.tree, &view.frames, 1e-6);
+    let solved = solve_mates(&view.tree, &view.frames, 1e-6);
     view.placements = solved.placements;
     view.errors.extend(solved.errors);
     view.warnings.extend(solved.warnings);

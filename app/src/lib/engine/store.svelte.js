@@ -5787,14 +5787,22 @@ export async function removeConnector(connectorId) {
  * two outward face normals "stacked").
  * @returns {Promise<string|null>} the mate id
  */
-export async function addMate({ a, b, flip = true, rotationDeg = 0, name }) {
+/** Mate kinds this build solves; `Fastened` exactly, the others numerically. */
+export const MATE_KINDS = ['Fastened', 'Revolute', 'Slider', 'Cylindrical', 'Planar', 'Ball'];
+
+function mateKind(kind, flip, rotationDeg) {
+	const k = { type: MATE_KINDS.includes(kind) ? kind : 'Fastened' };
+	if (k.type !== 'Ball' && flip) k.flip = true;
+	if (k.type === 'Fastened' && rotationDeg) k.rotation_deg = rotationDeg;
+	return k;
+}
+
+export async function addMate({ a, b, kind = 'Fastened', flip = true, rotationDeg = 0, name }) {
 	return editAssembly((asm) => {
 		const id = generateUUID();
 		asm.mates = asm.mates ?? [];
-		const kind = { type: 'Fastened' };
-		if (flip) kind.flip = true;
-		if (rotationDeg) kind.rotation_deg = rotationDeg;
-		asm.mates.push({ id, name: name || `Fastened ${asm.mates.length + 1}`, kind, connectors: [a, b] });
+		const k = mateKind(kind, flip, rotationDeg);
+		asm.mates.push({ id, name: name || `${k.type} ${asm.mates.length + 1}`, kind: k, connectors: [a, b] });
 		return id;
 	});
 }
@@ -5805,13 +5813,11 @@ export async function updateMate(mateId, patch) {
 		if (!m) return false;
 		if ('name' in patch) m.name = patch.name;
 		if ('suppressed' in patch) m.suppressed = !!patch.suppressed;
-		if ('flip' in patch || 'rotationDeg' in patch) {
-			const kind = { type: 'Fastened' };
+		if ('kind' in patch || 'flip' in patch || 'rotationDeg' in patch) {
+			const type = 'kind' in patch ? patch.kind : m.kind?.type;
 			const flip = 'flip' in patch ? !!patch.flip : !!m.kind?.flip;
 			const rot = 'rotationDeg' in patch ? Number(patch.rotationDeg) || 0 : (m.kind?.rotation_deg ?? 0);
-			if (flip) kind.flip = true;
-			if (rot) kind.rotation_deg = rot;
-			m.kind = kind;
+			m.kind = mateKind(type, flip, rot);
 		}
 		return true;
 	});

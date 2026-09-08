@@ -1369,7 +1369,7 @@
       "type": "object"
     },
     "MateKind": {
-      "description": "How two mate connectors relate. `Fastened` is solved in this version; any other well-formed object with a string `type` (a mate kind from a newer build) is preserved verbatim and reported.",
+      "description": "How two mate connectors relate: Fastened (exact), Revolute, Slider, Cylindrical, Planar, Ball (numeric). Any other well-formed object with a string `type` (a mate kind from a newer build) is preserved verbatim and reported.",
       "oneOf": [
         {
           "properties": {
@@ -1393,12 +1393,93 @@
           "type": "object"
         },
         {
+          "properties": {
+            "flip": {
+              "default": false,
+              "type": "boolean"
+            },
+            "type": {
+              "const": "Revolute",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "flip": {
+              "default": false,
+              "type": "boolean"
+            },
+            "type": {
+              "const": "Slider",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "flip": {
+              "default": false,
+              "type": "boolean"
+            },
+            "type": {
+              "const": "Cylindrical",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "flip": {
+              "default": false,
+              "type": "boolean"
+            },
+            "type": {
+              "const": "Planar",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "Ball",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
           "description": "Unknown mate kind (opaque, preserved; not solved).",
           "properties": {
             "type": {
               "not": {
                 "enum": [
-                  "Fastened"
+                  "Fastened",
+                  "Revolute",
+                  "Slider",
+                  "Cylindrical",
+                  "Planar",
+                  "Ball"
                 ]
               },
               "type": "string"

@@ -1,4 +1,5 @@
 pub mod assembly;
+pub mod assembly_solver;
 pub mod expr;
 pub mod opaque;
 pub mod params;

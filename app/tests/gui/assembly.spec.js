@@ -140,6 +140,24 @@ test.describe('Assemblies', () => {
 			return Math.abs((asm.placements?.[id]?.translation_m?.[0] ?? 0) - 0.025) < 1e-9;
 		}, { timeout: 15000 });
 
+		// Rotate the second instance 90° about y through the panel: the
+		// placement's quaternion is the XYZ-Euler conversion the viewport uses.
+		await page.locator('[data-testid="asm-instance-ry-1"]').fill('90');
+		await page.locator('[data-testid="asm-instance-ry-1"]').press('Enter');
+		await page.waitForFunction(() => {
+			const asm = window.__waffle.getAssembly();
+			const q = asm.placements?.[asm.instances[1].id]?.rotation_quat ?? [0, 0, 0, 1];
+			return Math.abs(q[1] - Math.SQRT1_2) < 1e-6 && Math.abs(q[3] - Math.SQRT1_2) < 1e-6;
+		}, { timeout: 15000 });
+		await expect(page.locator('[data-testid="asm-instance-ry-1"]')).toHaveValue('90');
+		await page.locator('[data-testid="asm-instance-ry-1"]').fill('0');
+		await page.locator('[data-testid="asm-instance-ry-1"]').press('Enter');
+		await page.waitForFunction(() => {
+			const asm = window.__waffle.getAssembly();
+			const q = asm.placements?.[asm.instances[1].id]?.rotation_quat ?? [1, 1, 1, 0];
+			return Math.abs(q[3]) > 0.999999;
+		}, { timeout: 15000 });
+
 		// Origin connectors on both, then fasten (no flip): B's origin frame
 		// coincides with A's ⇒ B moves back onto A.
 		await page.locator('[data-testid="asm-instance-origin-connector-0"]').click();
@@ -166,5 +184,49 @@ test.describe('Assemblies', () => {
 			const id = asm.instances[1].id;
 			return Math.abs((asm.placements?.[id]?.translation_m?.[0] ?? 0) - 0.025) < 1e-9;
 		}, { timeout: 15000 });
+	});
+});
+
+test.describe('Assemblies: numeric mates', () => {
+	test('a revolute hinge aligns the axis, keeps the opening angle free, and a slider keeps its travel', async ({ waffle }) => {
+		const page = waffle.page;
+		const partTab = await cubePartAndAssembly(page);
+		const a = await page.evaluate((t) => window.__waffle.addInstance({ tabId: t, name: 'A', fixed: true }), partTab);
+		// B starts 30° open about y and displaced off the hinge.
+		const s = Math.sin(Math.PI / 12), c = Math.cos(Math.PI / 12);
+		const b = await page.evaluate(([t, s, c]) => window.__waffle.addInstance({ tabId: t, name: 'B', transform: { translation_m: [0.012, 0.003, 0.002], rotation_quat: [0, s, 0, c] } }), [partTab, s, c]);
+		await page.waitForFunction(() => window.__waffle.getMeshes().length === 2, { timeout: 30000 });
+		const ca = await page.evaluate((id) => window.__waffle.addConnector({ instanceId: id, name: 'A hinge', frame: { origin: [0.01, 0, 0.01], z_axis: [0, 1, 0], x_axis: [0, 0, 0] } }), a);
+		const cb = await page.evaluate((id) => window.__waffle.addConnector({ instanceId: id, name: 'B hinge', frame: { origin: [0, 0, 0.01], z_axis: [0, 1, 0], x_axis: [0, 0, 0] } }), b);
+		await page.evaluate(([x, y]) => window.__waffle.addMate({ a: x, b: y, kind: 'Revolute', flip: false, name: 'hinge' }), [ca, cb]);
+		await page.waitForFunction(() => (window.__waffle.getAssemblyStatus()?.warnings ?? []).length === 0 && (window.__waffle.getAssembly()?.mates ?? []).length === 1, { timeout: 15000 });
+		const status = await page.evaluate(() => window.__waffle.getAssemblyStatus());
+		expect(status.errors).toEqual([]);
+		const tb = status.placements[b];
+		// B's hinge point (0,0,10mm in B) lands on A's hinge point (10,0,10mm).
+		const q = tb.rotation_quat;
+		const rot = (v) => {
+			const [x, y, z, w] = q; const [vx, vy, vz] = v;
+			const ix = w * vx + y * vz - z * vy, iy = w * vy + z * vx - x * vz, iz = w * vz + x * vy - y * vx, iw = -x * vx - y * vy - z * vz;
+			return [ix * w + iw * -x + iy * -z - iz * -y, iy * w + iw * -y + iz * -x - ix * -z, iz * w + iw * -z + ix * -y - iy * -x];
+		};
+		const p = rot([0, 0, 0.01]).map((v, i) => v + tb.translation_m[i]);
+		expect(near(p[0], 0.01)).toBe(true);
+		expect(near(p[1], 0)).toBe(true);
+		expect(near(p[2], 0.01)).toBe(true);
+		// The opening angle stayed at 30° (free), the axis is y.
+		const angle = 2 * Math.atan2(Math.hypot(q[0], q[1], q[2]), Math.abs(q[3])) * 180 / Math.PI;
+		expect(Math.abs(angle - 30) < 0.05).toBe(true);
+		expect(Math.abs(q[1] / Math.hypot(q[0], q[1], q[2])) > 0.9999).toBe(true);
+		await expect(page.locator('[data-testid="asm-mate-0"]')).toContainText('Revolute');
+		await expect(page.locator('[data-testid="asm-mate-kind-0"]')).toHaveValue('Revolute');
+
+		// Change it to a Slider through the panel: the frames align fully and
+		// B keeps its travel along the axis.
+		await page.locator('[data-testid="asm-mate-kind-0"]').selectOption('Slider');
+		await page.waitForFunction(() => window.__waffle.getAssembly().mates[0].kind.type === 'Slider', { timeout: 10000 });
+		await page.waitForFunction(() => (window.__waffle.getAssemblyStatus()?.errors ?? []).length === 0, { timeout: 15000 });
+		const slid = (await page.evaluate(() => window.__waffle.getAssemblyStatus())).placements[b];
+		expect(Math.abs(slid.rotation_quat[3]) > 0.99999).toBe(true);
 	});
 });

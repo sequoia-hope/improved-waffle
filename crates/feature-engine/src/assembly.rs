@@ -106,6 +106,36 @@ pub fn quat_axis_angle(axis: [f64; 3], angle_deg: f64) -> [f64; 4] {
     quat_normalize([a[0] * s, a[1] * s, a[2] * s, h.cos()])
 }
 
+/// Quaternion `exp(θ)` for a rotation vector `θ` (axis × angle, radians).
+pub fn quat_exp(theta: [f64; 3]) -> [f64; 4] {
+    let angle = (theta[0] * theta[0] + theta[1] * theta[1] + theta[2] * theta[2]).sqrt();
+    if angle < 1e-12 {
+        return quat_normalize([theta[0] / 2.0, theta[1] / 2.0, theta[2] / 2.0, 1.0]);
+    }
+    let s = (angle / 2.0).sin() / angle;
+    [
+        theta[0] * s,
+        theta[1] * s,
+        theta[2] * s,
+        (angle / 2.0).cos(),
+    ]
+}
+
+/// Rotation vector (axis × angle, the short arc) of a unit quaternion.
+pub fn quat_log(q: [f64; 4]) -> [f64; 3] {
+    let q = if q[3] < 0.0 {
+        [-q[0], -q[1], -q[2], -q[3]]
+    } else {
+        q
+    };
+    let vn = (q[0] * q[0] + q[1] * q[1] + q[2] * q[2]).sqrt();
+    if vn < 1e-12 {
+        return [2.0 * q[0], 2.0 * q[1], 2.0 * q[2]];
+    }
+    let angle = 2.0 * vn.atan2(q[3]);
+    [q[0] / vn * angle, q[1] / vn * angle, q[2] / vn * angle]
+}
+
 /// Quaternion from an orthonormal basis given as columns (x, y, z).
 pub fn quat_from_basis(x: [f64; 3], y: [f64; 3], z: [f64; 3]) -> [f64; 4] {
     // Shepperd's method on the column-major rotation matrix.
@@ -384,9 +414,23 @@ impl MateConnector {
     }
 }
 
-/// How two connectors relate. Phase 3: `Fastened` (frames coincident, up
-/// to `flip` — rotate 180° about x, so the z axes oppose — and a rotation
-/// about z). Unknown kinds are preserved verbatim and reported.
+/// How two connectors relate (`flip` on every kind: connector b's z axis
+/// opposes a's instead of aligning with it — two outward face normals
+/// "facing"). `Fastened` removes all six degrees of freedom and is solved
+/// exactly by composition; the others are solved numerically
+/// (`crate::assembly_solver`) from the instances' current poses, which is
+/// what fixes the free degrees of freedom:
+///
+/// | kind | frees | equations |
+/// |---|---|---|
+/// | `Fastened` | — | origins coincide, frames aligned (after `rotation_deg` about z) |
+/// | `Revolute` | rotation about z | origins coincide, z axes parallel |
+/// | `Slider` | translation along z | frames aligned, b's origin on a's z axis |
+/// | `Cylindrical` | rotation about + translation along z | z axes parallel, b's origin on a's z axis |
+/// | `Planar` | translation in xy + rotation about z | z axes parallel, b's origin in a's xy plane |
+/// | `Ball` | all rotation | origins coincide |
+///
+/// Unknown kinds are preserved verbatim and reported.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "type")]
 pub enum MateKind {
@@ -396,6 +440,23 @@ pub enum MateKind {
         #[serde(default, skip_serializing_if = "is_zero")]
         rotation_deg: f64,
     },
+    Revolute {
+        #[serde(default, skip_serializing_if = "is_false")]
+        flip: bool,
+    },
+    Slider {
+        #[serde(default, skip_serializing_if = "is_false")]
+        flip: bool,
+    },
+    Cylindrical {
+        #[serde(default, skip_serializing_if = "is_false")]
+        flip: bool,
+    },
+    Planar {
+        #[serde(default, skip_serializing_if = "is_false")]
+        flip: bool,
+    },
+    Ball,
     #[serde(untagged)]
     Unknown(Value),
 }
@@ -414,10 +475,34 @@ enum KnownMateKind {
         #[serde(default)]
         rotation_deg: f64,
     },
+    Revolute {
+        #[serde(default)]
+        flip: bool,
+    },
+    Slider {
+        #[serde(default)]
+        flip: bool,
+    },
+    Cylindrical {
+        #[serde(default)]
+        flip: bool,
+    },
+    Planar {
+        #[serde(default)]
+        flip: bool,
+    },
+    Ball,
 }
 
 /// The mate kinds this build can solve.
-pub const MATE_KIND_TAGS: &[&str] = &["Fastened"];
+pub const MATE_KIND_TAGS: &[&str] = &[
+    "Fastened",
+    "Revolute",
+    "Slider",
+    "Cylindrical",
+    "Planar",
+    "Ball",
+];
 
 impl<'de> Deserialize<'de> for MateKind {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
@@ -430,6 +515,11 @@ impl<'de> Deserialize<'de> for MateKind {
                 Ok(KnownMateKind::Fastened { flip, rotation_deg }) => {
                     MateKind::Fastened { flip, rotation_deg }
                 }
+                Ok(KnownMateKind::Revolute { flip }) => MateKind::Revolute { flip },
+                Ok(KnownMateKind::Slider { flip }) => MateKind::Slider { flip },
+                Ok(KnownMateKind::Cylindrical { flip }) => MateKind::Cylindrical { flip },
+                Ok(KnownMateKind::Planar { flip }) => MateKind::Planar { flip },
+                Ok(KnownMateKind::Ball) => MateKind::Ball,
                 Err(v) => MateKind::Unknown(v),
             },
         )
@@ -440,8 +530,42 @@ impl MateKind {
     pub fn type_tag(&self) -> &str {
         match self {
             MateKind::Fastened { .. } => "Fastened",
+            MateKind::Revolute { .. } => "Revolute",
+            MateKind::Slider { .. } => "Slider",
+            MateKind::Cylindrical { .. } => "Cylindrical",
+            MateKind::Planar { .. } => "Planar",
+            MateKind::Ball => "Ball",
             MateKind::Unknown(v) => crate::opaque::type_tag(v),
         }
+    }
+
+    /// Whether the z axes are made to oppose (`flip`) rather than align.
+    pub fn flip(&self) -> bool {
+        match self {
+            MateKind::Fastened { flip, .. }
+            | MateKind::Revolute { flip }
+            | MateKind::Slider { flip }
+            | MateKind::Cylindrical { flip }
+            | MateKind::Planar { flip } => *flip,
+            MateKind::Ball | MateKind::Unknown(_) => false,
+        }
+    }
+
+    /// Solved exactly by rigid-transform composition (`solve_fastened`).
+    pub fn is_fastened(&self) -> bool {
+        matches!(self, MateKind::Fastened { .. })
+    }
+
+    /// Solved numerically (`crate::assembly_solver`).
+    pub fn is_numeric(&self) -> bool {
+        matches!(
+            self,
+            MateKind::Revolute { .. }
+                | MateKind::Slider { .. }
+                | MateKind::Cylindrical { .. }
+                | MateKind::Planar { .. }
+                | MateKind::Ball
+        )
     }
 }
 
@@ -456,9 +580,9 @@ impl schemars::JsonSchema for MateKind {
         obj.insert(
             "description".into(),
             Value::String(
-                "How two mate connectors relate. `Fastened` is solved in this version; any other \
-                 well-formed object with a string `type` (a mate kind from a newer build) is \
-                 preserved verbatim and reported."
+                "How two mate connectors relate: Fastened (exact), Revolute, Slider, Cylindrical, \
+                 Planar, Ball (numeric). Any other well-formed object with a string `type` (a mate \
+                 kind from a newer build) is preserved verbatim and reported."
                     .into(),
             ),
         );
@@ -620,7 +744,7 @@ fn mate_offset(kind: &MateKind) -> Option<Transform> {
             };
             Some(rz.compose(&fx))
         }
-        MateKind::Unknown(_) => None,
+        _ => None,
     }
 }
 
@@ -993,10 +1117,10 @@ mod tests {
                 rotation_deg: 0.0
             }
         );
-        let v = serde_json::json!({ "type": "Revolute", "axis": "z", "limits": [0, 90] });
+        let v = serde_json::json!({ "type": "Gear", "ratio": 2.5, "limits": [0, 90] });
         let u: MateKind = serde_json::from_value(v.clone()).unwrap();
         assert!(matches!(u, MateKind::Unknown(_)));
-        assert_eq!(u.type_tag(), "Revolute");
+        assert_eq!(u.type_tag(), "Gear");
         assert_eq!(serde_json::to_value(&u).unwrap(), v);
         assert!(serde_json::from_value::<MateKind>(serde_json::json!({ "flip": true })).is_err());
         assert!(serde_json::from_value::<MateKind>(
@@ -1015,7 +1139,7 @@ mod tests {
         tree.mates.push(Mate {
             id: Uuid::new_v4(),
             name: "hinge".into(),
-            kind: MateKind::Unknown(serde_json::json!({ "type": "Revolute" })),
+            kind: MateKind::Unknown(serde_json::json!({ "type": "Gear" })),
             connectors: [tree.connectors[0].id, tree.connectors[0].id],
             suppressed: false,
             extra: Map::new(),
@@ -1029,7 +1153,7 @@ mod tests {
             "{w:?}"
         );
         assert!(
-            w.iter().any(|m| m.contains("unknown mate kind `Revolute`")),
+            w.iter().any(|m| m.contains("unknown mate kind `Gear`")),
             "{w:?}"
         );
         assert!(w.iter().any(|m| m.contains("same instance")), "{w:?}");
