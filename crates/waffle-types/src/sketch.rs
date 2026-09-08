@@ -61,7 +61,10 @@ pub struct Sketch {
     pub entities: Vec<SketchEntity>,
     /// Constraints between entities.
     pub constraints: Vec<SketchConstraint>,
-    /// Current solve status (updated after each solve).
+    /// Current solve status (updated after each solve). Absent on the wire ⇒
+    /// [`SolveStatus::Unsolved`] (v4 §2.10): the engine's next rebuild solves
+    /// the sketch and replaces it, so a writer never has to run the solver.
+    #[serde(default)]
     pub solve_status: SolveStatus,
     /// Solved positions for all points. Key is point entity ID.
     /// Derived data — serialized when populated (for WASM→JS bridge), skipped when empty.
@@ -564,10 +567,16 @@ impl SketchConstraint {
 }
 
 /// Result of running the constraint solver.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(tag = "type")]
 #[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub enum SolveStatus {
+    /// Never solved: the sketch was written by a tool (an agent, a script)
+    /// that did not run the solver, or the field was absent on the wire. The
+    /// engine solves such a sketch on its next rebuild and replaces this
+    /// status; writers emit whatever the solve produced (v4 §2.10).
+    #[default]
+    Unsolved,
     /// All constraints satisfied, zero degrees of freedom.
     FullyConstrained,
     /// All constraints satisfied, but geometry can still move.
@@ -768,6 +777,15 @@ mod tests {
     }
 
     // ── SolveStatus serde roundtrip ───────────────────────────────────
+
+    #[test]
+    fn solve_status_unsolved_is_the_default_and_round_trips() {
+        assert!(matches!(SolveStatus::default(), SolveStatus::Unsolved));
+        let json = serde_json::to_string(&SolveStatus::Unsolved).unwrap();
+        assert_eq!(json, r#"{"type":"Unsolved"}"#);
+        let d: SolveStatus = serde_json::from_str(&json).unwrap();
+        assert!(matches!(d, SolveStatus::Unsolved));
+    }
 
     #[test]
     fn solve_status_fully_constrained_roundtrip() {

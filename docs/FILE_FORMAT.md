@@ -471,7 +471,7 @@ as authoritative when present.
 | `plane_normal` | [f64;3] | default `[0,0,1]` | |
 | `entities` | SketchEntity[] | ✔ | §9.2. |
 | `constraints` | SketchConstraint[] | ✔ | §9.3. |
-| `solve_status` | SolveStatus | ✔ | **Required.** `FullyConstrained` \| `UnderConstrained {dof}` \| `OverConstrained {conflicts: u32[] — indices into the constraint list}` \| `SolveFailed {reason}`. A hand-written sketch JSON without this field will not parse. |
+| `solve_status` | SolveStatus | default `{"type":"Unsolved"}` (**v4 §2.10**) | `Unsolved` \| `FullyConstrained` \| `UnderConstrained {dof}` \| `OverConstrained {conflicts: u32[] — indices into the constraint list}` \| `SolveFailed {reason}`. A sketch written without the field (or as `Unsolved`) is solved by the engine's next rebuild, which writes the solution into the entities and replaces the status — a tool never has to run the solver; a first solve that fails records the failed status and a per-feature error. Writers emit the solved status. |
 | `solved_positions` | {string→[f64,f64]} | default; omitted when empty | Derived (§10.1). |
 | `solved_profiles` | ClosedProfile[] | default; omitted when empty | Derived (§10.2). |
 | `projected` | ProjectedEntity[] | default; omitted when empty | External-geometry-driven points: `{point_id: u32, source: {geom_ref: GeomRef, kind: {"type":"Vertex"} | {"type":"EdgeSample","t":f64}}}`. Re-projected on rebuild. |

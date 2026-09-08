@@ -2443,7 +2443,10 @@
         },
         "solve_status": {
           "$ref": "#/$defs/SolveStatus",
-          "description": "Current solve status (updated after each solve)."
+          "default": {
+            "type": "Unsolved"
+          },
+          "description": "Current solve status (updated after each solve). Absent on the wire ⇒\n[`SolveStatus::Unsolved`] (v4 §2.10): the engine's next rebuild solves\nthe sketch and replaces it, so a writer never has to run the solver."
         },
         "solved_positions": {
           "additionalProperties": {
@@ -2476,8 +2479,7 @@
         "id",
         "plane",
         "entities",
-        "constraints",
-        "solve_status"
+        "constraints"
       ],
       "type": "object"
     },
@@ -3460,6 +3462,19 @@
     "SolveStatus": {
       "description": "Result of running the constraint solver.",
       "oneOf": [
+        {
+          "description": "Never solved: the sketch was written by a tool (an agent, a script)\nthat did not run the solver, or the field was absent on the wire. The\nengine solves such a sketch on its next rebuild and replaces this\nstatus; writers emit whatever the solve produced (v4 §2.10).",
+          "properties": {
+            "type": {
+              "const": "Unsolved",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
         {
           "description": "All constraints satisfied, zero degrees of freedom.",
           "properties": {

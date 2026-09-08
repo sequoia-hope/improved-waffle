@@ -236,9 +236,11 @@ fn apply_angle_field(
     }
 }
 
-/// Re-evaluate a sketch's expression-driven dimensions; if any value changed,
-/// re-solve the sketch from its current geometry and recompute derived data.
-/// Returns true if the sketch's geometry was updated.
+/// Re-evaluate a sketch's expression-driven dimensions; if any value changed —
+/// or the sketch has never been solved (`SolveStatus::Unsolved`, v4 §2.10:
+/// written by a tool that did not run the solver) — solve it from its current
+/// geometry and recompute derived data. Returns true if the sketch's geometry
+/// or status was updated.
 fn apply_sketch(
     sketch: &mut waffle_types::Sketch,
     env: &HashMap<String, f64>,
@@ -269,11 +271,12 @@ fn apply_sketch(
             Err(e) => errs.push(format!("dimension expression '{expression}': {e}")),
         }
     }
-    if changed.is_empty() {
+    let first_solve = matches!(sketch.solve_status, SolveStatus::Unsolved);
+    if changed.is_empty() && !first_solve {
         return false;
     }
 
-    // Re-solve with DRIVING constraints only (reference dims display, never
+    // (Re-)solve with DRIVING constraints only (reference dims display, never
     // constrain — same filter the sketch UI applies before solving).
     let mut solve_input = sketch.clone();
     solve_input.constraints.retain(|c| !c.is_reference());
@@ -308,7 +311,7 @@ fn apply_sketch(
         }
         SolveStatus::OverConstrained { .. } | SolveStatus::SolveFailed { .. } => {
             // Loud STOP: keep the sketch consistent by restoring the previous
-            // dimension values; the error names the failed re-solve.
+            // dimension values; the error names the failed solve.
             for (i, old) in changed {
                 sketch.constraints[i].set_dimension_value(old);
             }
@@ -316,10 +319,33 @@ fn apply_sketch(
                 SolveStatus::SolveFailed { reason } => reason.clone(),
                 _ => "over-constrained".to_string(),
             };
-            errs.push(format!(
-                "sketch re-solve failed after applying dimension expressions ({reason}); \
-                 previous dimensions kept"
-            ));
+            if first_solve {
+                // A first solve has no previous good state to fall back to:
+                // record the failed status (the sketch is no longer
+                // `Unsolved`) and derive what geometry there is, so the
+                // failure is visible in the file and the UI, not retried
+                // silently on every rebuild.
+                sketch.solve_status = solved.status;
+                sketch.solved_positions.clear();
+                sketch.solved_profiles.clear();
+                sketch.recompute_derived();
+                errs.push(format!("sketch's first solve failed ({reason})"));
+                true
+            } else {
+                errs.push(format!(
+                    "sketch re-solve failed after applying dimension expressions ({reason}); \
+                     previous dimensions kept"
+                ));
+                false
+            }
+        }
+        // The solver never returns `Unsolved`; treat it as a failed solve so
+        // the status cannot silently stay unsolved.
+        SolveStatus::Unsolved => {
+            for (i, old) in changed {
+                sketch.constraints[i].set_dimension_value(old);
+            }
+            errs.push("sketch solve returned no status".to_string());
             false
         }
     }

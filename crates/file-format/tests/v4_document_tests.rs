@@ -771,3 +771,53 @@ fn profile_entity_ids_survive_the_writer_and_drive_the_rebuild() {
         errors[0].1
     );
 }
+
+// ---------------------------------------- §2.10 solve_status is optional
+
+#[test]
+fn a_sketch_without_solve_status_loads_and_is_solved_by_the_rebuild() {
+    // Author the square by id set (no solver run) and strip `solve_status`
+    // entirely — the shape a script emits.
+    let json = agent_authored_square_extrude(0, serde_json::json!([10, 11, 12, 13]));
+    let mut doc: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let sketch = &mut doc["tabs"][0]["kind"]["features"]["features"][0]["operation"]["sketch"];
+    assert!(sketch
+        .as_object_mut()
+        .unwrap()
+        .remove("solve_status")
+        .is_some());
+    let json = doc.to_string();
+
+    let loaded = load_document(&json).unwrap();
+    let tree = loaded.document.tabs[0].features().unwrap();
+    let Operation::Sketch { sketch } = &tree.features[0].operation else {
+        panic!()
+    };
+    assert!(matches!(
+        sketch.solve_status,
+        waffle_types::SolveStatus::Unsolved
+    ));
+
+    // The engine solves it during rebuild; the status the writer then emits
+    // is the solved one, never `Unsolved`.
+    let (tree, _) = load_project(&json).unwrap();
+    let mut kernel = MockKernel::new();
+    let mut engine = Engine::new();
+    engine.tree = tree;
+    engine.rebuild_from_scratch(&mut kernel);
+    assert!(engine.errors.is_empty(), "{:?}", engine.errors);
+    let Operation::Sketch { sketch } = &engine.tree.features[0].operation else {
+        panic!()
+    };
+    assert!(
+        matches!(
+            sketch.solve_status,
+            waffle_types::SolveStatus::UnderConstrained { .. }
+                | waffle_types::SolveStatus::FullyConstrained
+        ),
+        "{:?}",
+        sketch.solve_status
+    );
+    assert_eq!(sketch.solved_profiles.len(), 1);
+    assert_eq!(engine.feature_results.len(), 2, "sketch + extrude");
+}
