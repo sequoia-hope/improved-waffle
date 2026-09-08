@@ -821,3 +821,85 @@ fn a_sketch_without_solve_status_loads_and_is_solved_by_the_rebuild() {
     assert_eq!(sketch.solved_profiles.len(), 1);
     assert_eq!(engine.feature_results.len(), 2, "sketch + extrude");
 }
+
+// ------------------------------------ Phase 1b: opaque unknown operations
+
+#[test]
+fn unknown_operation_is_preserved_verbatim_reported_and_fails_its_rebuild_loudly() {
+    let loft = serde_json::json!({
+        "type": "Loft",
+        "params": { "sections": [[10, 11, 12, 13]], "ruled": true },
+        "x-tool": "a-newer-build"
+    });
+    let json = agent_authored_square_extrude(0, serde_json::json!([10, 11, 12, 13]));
+    let mut doc: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let features = doc["tabs"][0]["kind"]["features"]["features"]
+        .as_array_mut()
+        .unwrap();
+    let loft_id = Uuid::new_v4();
+    features.insert(
+        1,
+        serde_json::json!({ "id": loft_id, "name": "Loft 1", "suppressed": false,
+                            "references": [], "operation": loft }),
+    );
+    let json = doc.to_string();
+
+    // Loads, with a warning naming the feature and its kind.
+    let loaded = load_document(&json).unwrap();
+    assert!(
+        loaded
+            .warnings
+            .iter()
+            .any(|w| w.contains("Loft 1") && w.contains("unknown operation kind `Loft`")),
+        "{:?}",
+        loaded.warnings
+    );
+    let tree = loaded.document.tabs[0].features().unwrap();
+    assert_eq!(tree.features.len(), 3);
+    assert!(matches!(tree.features[1].operation, Operation::Unknown(_)));
+
+    // Re-emitted verbatim by the writer.
+    let saved = save_document(&loaded.document);
+    let out: serde_json::Value = serde_json::from_str(&saved).unwrap();
+    assert_eq!(
+        out["tabs"][0]["kind"]["features"]["features"][1]["operation"],
+        loft
+    );
+    assert_eq!(
+        out["tabs"][0]["kind"]["features"]["features"][1]["id"],
+        serde_json::json!(loft_id)
+    );
+
+    // The rebuild errors THAT feature and builds the others.
+    let (tree, _) = load_project(&saved).unwrap();
+    let mut kernel = MockKernel::new();
+    let mut engine = Engine::new();
+    engine.tree = tree;
+    engine.rebuild_from_scratch(&mut kernel);
+    assert_eq!(engine.errors.len(), 1, "{:?}", engine.errors);
+    assert_eq!(engine.errors[0].0, loft_id);
+    assert!(
+        engine.errors[0]
+            .1
+            .contains("operation kind `Loft` is not supported"),
+        "{}",
+        engine.errors[0].1
+    );
+    assert_eq!(engine.feature_results.len(), 2, "sketch + extrude built");
+}
+
+#[test]
+fn malformed_known_operation_is_still_a_parse_error() {
+    let json = agent_authored_square_extrude(0, serde_json::json!([10, 11, 12, 13]));
+    let mut doc: serde_json::Value = serde_json::from_str(&json).unwrap();
+    doc["tabs"][0]["kind"]["features"]["features"][1]["operation"] =
+        serde_json::json!({ "type": "Extrude", "params": 42 });
+    assert!(
+        matches!(load_document(&doc.to_string()), Err(LoadError::ParseError(m)) if m.contains("operation `Extrude`"))
+    );
+    doc["tabs"][0]["kind"]["features"]["features"][1]["operation"] =
+        serde_json::json!({ "params": {} });
+    assert!(
+        matches!(load_document(&doc.to_string()), Err(LoadError::ParseError(m)) if m.contains("string `type`"))
+    );
+}

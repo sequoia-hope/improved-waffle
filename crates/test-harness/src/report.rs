@@ -155,6 +155,7 @@ impl ModelBuilder {
                 Operation::BooleanCombine { .. } => "Boolean",
                 Operation::DatumPlane { .. } => "DatumPlane",
                 Operation::ImportedBody { .. } => "ImportedBody",
+                Operation::Unknown(_) => "Unknown",
             };
 
             let detail = describe_operation(&feature.operation);
@@ -284,6 +285,12 @@ fn describe_operation(op: &Operation) -> String {
                 point_count, line_count, profile_count, outer,
                 sketch.plane_origin[0], sketch.plane_origin[1], sketch.plane_origin[2],
                 sketch.plane_normal[0], sketch.plane_normal[1], sketch.plane_normal[2],
+            )
+        }
+        Operation::Unknown(_) => {
+            format!(
+                "Params: unknown operation kind `{}` (opaque)",
+                op.type_tag()
             )
         }
         Operation::Extrude { params } => {

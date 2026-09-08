@@ -128,7 +128,7 @@ by the app's file picker.
 |---|---|---|---|
 | `format` | string | ✔ | Must be exactly `"waffle-iron"`; anything else ⇒ `LoadError::UnknownFormat`. |
 | `version` | u32 | ✔* | Format version. `> 4` ⇒ `LoadError::FutureVersion` (refuse, don't guess). *The Rust loader defaults a missing/non-numeric version to `0`, which then fails migration (`no migration path from v0`). |
-| `min_reader_version` | u32 | opt (default 0) | Since 2026-08-28: the oldest reader (by its `FORMAT_VERSION`) that can parse this file. Readers refuse `max(version, min_reader_version) > FORMAT_VERSION` with `FutureVersion`. Writers set it to `MIN_READER_VERSION` (currently 4); bump it together with `version` whenever a change lands that old readers cannot parse — new `Operation`/constraint/selector/`PlaneDefinition` variants included. Since v4, new **tab kinds, source kinds and locator kinds do not** require a bump (§5.3). Absent in pre-2026-08-28 files ⇒ no requirement. |
+| `min_reader_version` | u32 | opt (default 0) | Since 2026-08-28: the oldest reader (by its `FORMAT_VERSION`) that can parse this file. Readers refuse `max(version, min_reader_version) > FORMAT_VERSION` with `FutureVersion`. Writers set it to `MIN_READER_VERSION` (currently 4); bump it together with `version` whenever a change lands that old readers cannot parse — new constraint/selector/`PlaneDefinition` variants included. Since v4, new **tab kinds, source kinds and locator kinds do not** require a bump (§5.3), and since Phase 1b (2026-09-08) **new operation kinds do not either** (§7: unknown `Operation` kinds are preserved opaquely). Absent in pre-2026-08-28 files ⇒ no requirement. |
 | `document` | DocumentMetadata | ✔ | §5.1. `document.id` since v4 (writers always emit; a reader minting one for a hand-written file warns). |
 | `sources` | SourceEntry[] | opt (default `[]`) | v4 §5.5: external content the document depends on. |
 | `tabs` | Tab[] | ✔ | At least one tab expected; `load_document` rejects an `active_tab` that names no tab; `load_project` falls back to the first tab. |
@@ -319,6 +319,23 @@ bridge actually sends and JS actually stores into the file) — a drift hazard
 `operation` is internally tagged with `type` ∈ `Sketch`, `Extrude`, `Revolve`,
 `Fillet`, `Chamfer`, `Shell`, `BooleanCombine`, `DatumPlane`, `ImportedBody`.
 Parameter payloads sit under `sketch` (for `Sketch`) or `params` (all others).
+
+**Unknown kinds (v4 Phase 1b, 2026-09-08).** A well-formed `{"type": …}`
+operation whose tag this build does not know (one from a newer build) loads
+as `Operation::Unknown(Value)` (`crates/feature-engine/src/types.rs`,
+`opaque.rs`): the feature stays in the tree, the load warnings name it
+(`feature … unknown operation kind …`), its rebuild fails with a loud
+per-feature `UnsupportedOperation` error while every other feature builds,
+and the writer re-emits the operation object **verbatim** (pinned by
+`crates/file-format/tests/v4_document_tests.rs::unknown_operation_is_preserved_verbatim_reported_and_fails_its_rebuild_loudly`).
+A *malformed* KNOWN kind (`{"type":"Extrude","params":42}`, or a known kind
+missing a field) and an object without a string `type` are still hard parse
+errors that name the tag. Consequence: adding an operation kind is no longer
+a `MIN_READER_VERSION` bump; the `Feature` envelope around it (`id`, `name`,
+`suppressed`, `references`) is still a dense struct, so a `GeomRef` selector
+or anchor kind the reader does not know inside `references` still fails to
+parse. Same contract as `TabKind` (§5.3) and `SourceEntry.kind`/`locator`
+(§5.5).
 
 > **Deferred operations:** `Fillet`, `Chamfer`, `Shell` are serializable and
 > loadable but the operations themselves are deferred indefinitely (root
@@ -620,17 +637,21 @@ Anyone changing the format must touch all of them:
    `format.js/fileTooNew`) refuses files that demand a newer reader with a
    clean `FutureVersion` / "saved by a newer version" error. Builds older than
    2026-08-28 ignore the field and still fail with parse noise on future
-   variants — unavoidable retroactively. Unknown *fields* are still silently
-   dropped on resave (round-tripping a newer file through an older build strips
-   data without warning); there is still no "ignore-unknown-variant" mechanism.
+   variants — unavoidable retroactively. Since v4, unknown *keys* at the
+   envelope/document/tab/source/feature-tree levels survive a resave (§3.1,
+   §5.2, §5.5, §6.1), and unknown tab kinds, source kinds, locator kinds and
+   (Phase 1b) operation kinds are preserved opaquely (§5.3, §5.5, §7). Unknown
+   keys *inside* a known operation's params, a `GeomRef`, a sketch entity or a
+   constraint are still dropped on resave.
 3. **Version-bump rule (now explicit):** bump `version` for value-reinterpreting
    or structural changes (v1→v2 units, v2→v3 tabs, v3→v4 identity/sources).
    Bump `MIN_READER_VERSION` (Rust `save.rs` + JS `format.js`, together with
    `version`) for **any** change old readers cannot parse — which includes new
-   `Operation`/constraint/selector/`PlaneDefinition` *variants*, not just
-   structural changes. Purely additive defaulted fields need no bump. **Since
-   v4, new tab kinds, source kinds and locator kinds need no bump either**:
-   v4 readers preserve unknown ones opaquely (§5.3, §5.5).
+   constraint/selector/`PlaneDefinition` *variants*, not just structural
+   changes. Purely additive defaulted fields need no bump. **Since v4, new tab
+   kinds, source kinds and locator kinds need no bump, and since Phase 1b
+   neither do new operation kinds**: v4 readers preserve unknown ones opaquely
+   (§5.3, §5.5, §7).
 4. **Writer duties:** never emit NaN/∞ (serializes as `null`, poisons the file —
    §2): the bridge save path enforces this via `save_project_verified`, which
    round-trips its own output through the loader and errors loudly instead of

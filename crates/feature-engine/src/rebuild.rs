@@ -302,6 +302,10 @@ fn execute_feature(
     sources: &SourceStore,
 ) -> Result<OpResult, EngineError> {
     match &feature.operation {
+        Operation::Unknown(_) => Err(EngineError::UnsupportedOperation {
+            type_tag: feature.operation.type_tag().to_string(),
+        }),
+
         Operation::Sketch { .. } => {
             // Sketches don't produce OpResults directly — they store solved geometry.
             // Return a minimal OpResult with no outputs.

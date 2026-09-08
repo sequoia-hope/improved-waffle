@@ -121,6 +121,10 @@ fn migrate_feature_v1_to_v2(feature: &mut Feature) {
             // Cannot exist in v1 files (the variant postdates v3); nothing to
             // migrate. translation_m is meters by definition.
         }
+        Operation::Unknown(_) => {
+            // Opaque (v4 Phase 1b): this reader cannot know which of its
+            // fields are lengths. Preserved verbatim; its rebuild fails loudly.
+        }
     }
 }
 

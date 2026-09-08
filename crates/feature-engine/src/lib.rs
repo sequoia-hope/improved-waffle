@@ -1,4 +1,5 @@
 pub mod expr;
+pub mod opaque;
 pub mod params;
 pub mod preview_mesh;
 pub mod rebuild;

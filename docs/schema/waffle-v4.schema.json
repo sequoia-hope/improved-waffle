@@ -1131,7 +1131,7 @@
       ]
     },
     "Operation": {
-      "description": "A parametric modeling operation with its parameters.",
+      "description": "A parametric modeling operation with its parameters. Any other well-formed object with a string `type` (an operation kind from a newer build) is preserved verbatim, re-emitted on save, and fails its rebuild loudly.",
       "oneOf": [
         {
           "properties": {
@@ -1274,6 +1274,31 @@
           "required": [
             "type",
             "params"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Unknown operation kind (opaque, preserved; rebuild fails loudly).",
+          "properties": {
+            "type": {
+              "not": {
+                "enum": [
+                  "Sketch",
+                  "Extrude",
+                  "Revolve",
+                  "Fillet",
+                  "Chamfer",
+                  "Shell",
+                  "BooleanCombine",
+                  "DatumPlane",
+                  "ImportedBody"
+                ]
+              },
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
           ],
           "type": "object"
         }

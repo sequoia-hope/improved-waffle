@@ -610,5 +610,6 @@ fn operation_name(op: &Operation) -> String {
         Operation::BooleanCombine { .. } => "Boolean Combine".to_string(),
         Operation::DatumPlane { params } => params.name.clone(),
         Operation::ImportedBody { params } => format!("Import {}", params.file_name),
+        Operation::Unknown(_) => op.type_tag().to_string(),
     }
 }

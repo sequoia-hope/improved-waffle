@@ -113,6 +113,21 @@ impl WaffleDocument {
                     t.kind.type_tag()
                 ));
             }
+            for f in t
+                .features()
+                .map(|tree| tree.features.as_slice())
+                .unwrap_or(&[])
+            {
+                if let Operation::Unknown(_) = &f.operation {
+                    warnings.push(format!(
+                        "feature `{}` ({}) in tab `{}`: unknown operation kind `{}` — preserved, not rebuildable in this version",
+                        f.name,
+                        f.id,
+                        t.name,
+                        f.operation.type_tag()
+                    ));
+                }
+            }
         }
         for s in &self.sources {
             if let Some(embed) = &s.embed {

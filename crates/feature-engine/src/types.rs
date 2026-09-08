@@ -234,10 +234,53 @@ pub struct Feature {
 // per feature, not one per vertex. Revisit if a feature tree ever gets large
 // enough for the enum's size to show up in a profile.
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "type")]
+pub enum Operation {
+    Sketch {
+        sketch: Sketch,
+    },
+    Extrude {
+        params: ExtrudeParams,
+    },
+    Revolve {
+        params: RevolveParams,
+    },
+    Fillet {
+        params: FilletParams,
+    },
+    Chamfer {
+        params: ChamferParams,
+    },
+    Shell {
+        params: ShellParams,
+    },
+    BooleanCombine {
+        params: BooleanParams,
+    },
+    DatumPlane {
+        params: DatumPlaneParams,
+    },
+    ImportedBody {
+        params: ImportedBodyParams,
+    },
+    /// A well-formed `{"type": …}` operation this build does not know — one
+    /// from a newer build. Kept verbatim, re-emitted on save, and its rebuild
+    /// is a loud `EngineError::UnsupportedOperation`; so adding an operation
+    /// kind is no longer a `MIN_READER_VERSION` bump (v4 Phase 1b,
+    /// `specs/waffle_v4_document_model.md` §2.5). A malformed KNOWN kind is
+    /// still a parse error (`crate::opaque`).
+    #[serde(untagged)]
+    Unknown(serde_json::Value),
+}
+
+/// The known variants, for deserialization (`Operation`'s own `Deserialize`
+/// routes unknown tags to `Operation::Unknown`).
+#[allow(clippy::large_enum_variant)] // mirrors `Operation`; same call
+#[derive(Deserialize)]
 #[serde(tag = "type")]
 #[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
-pub enum Operation {
+enum KnownOperation {
     Sketch { sketch: Sketch },
     Extrude { params: ExtrudeParams },
     Revolve { params: RevolveParams },
@@ -247,6 +290,100 @@ pub enum Operation {
     BooleanCombine { params: BooleanParams },
     DatumPlane { params: DatumPlaneParams },
     ImportedBody { params: ImportedBodyParams },
+}
+
+/// The operation `type` tags this build can rebuild.
+pub const OPERATION_TAGS: &[&str] = &[
+    "Sketch",
+    "Extrude",
+    "Revolve",
+    "Fillet",
+    "Chamfer",
+    "Shell",
+    "BooleanCombine",
+    "DatumPlane",
+    "ImportedBody",
+];
+
+impl From<KnownOperation> for Operation {
+    fn from(k: KnownOperation) -> Self {
+        match k {
+            KnownOperation::Sketch { sketch } => Operation::Sketch { sketch },
+            KnownOperation::Extrude { params } => Operation::Extrude { params },
+            KnownOperation::Revolve { params } => Operation::Revolve { params },
+            KnownOperation::Fillet { params } => Operation::Fillet { params },
+            KnownOperation::Chamfer { params } => Operation::Chamfer { params },
+            KnownOperation::Shell { params } => Operation::Shell { params },
+            KnownOperation::BooleanCombine { params } => Operation::BooleanCombine { params },
+            KnownOperation::DatumPlane { params } => Operation::DatumPlane { params },
+            KnownOperation::ImportedBody { params } => Operation::ImportedBody { params },
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for Operation {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Ok(
+            match crate::opaque::known_or_unknown::<D, KnownOperation>(
+                d,
+                OPERATION_TAGS,
+                "operation",
+            )? {
+                Ok(known) => known.into(),
+                Err(value) => Operation::Unknown(value),
+            },
+        )
+    }
+}
+
+impl Operation {
+    /// The `type` tag as written in the file.
+    pub fn type_tag(&self) -> &str {
+        match self {
+            Operation::Sketch { .. } => "Sketch",
+            Operation::Extrude { .. } => "Extrude",
+            Operation::Revolve { .. } => "Revolve",
+            Operation::Fillet { .. } => "Fillet",
+            Operation::Chamfer { .. } => "Chamfer",
+            Operation::Shell { .. } => "Shell",
+            Operation::BooleanCombine { .. } => "BooleanCombine",
+            Operation::DatumPlane { .. } => "DatumPlane",
+            Operation::ImportedBody { .. } => "ImportedBody",
+            Operation::Unknown(v) => crate::opaque::type_tag(v),
+        }
+    }
+}
+
+#[cfg(feature = "json-schema")]
+impl schemars::JsonSchema for Operation {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "Operation".into()
+    }
+    fn json_schema(g: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        // The known kinds exactly as the derive renders them, plus one opaque
+        // branch for any other tag.
+        let mut schema = <KnownOperation as schemars::JsonSchema>::json_schema(g);
+        let obj = schema.as_object_mut().expect("object schema");
+        obj.insert(
+            "description".into(),
+            serde_json::Value::String(
+                "A parametric modeling operation with its parameters. Any other well-formed \
+                 object with a string `type` (an operation kind from a newer build) is \
+                 preserved verbatim, re-emitted on save, and fails its rebuild loudly."
+                    .into(),
+            ),
+        );
+        obj.get_mut("oneOf")
+            .and_then(serde_json::Value::as_array_mut)
+            .expect("tagged enum renders as oneOf")
+            .push(serde_json::json!({
+                "type": "object",
+                "description": "Unknown operation kind (opaque, preserved; rebuild fails loudly).",
+                "required": ["type"],
+                "properties": { "type": { "type": "string", "not": { "enum": OPERATION_TAGS } } }
+            }));
+        schema
+    }
 }
 
 /// Parameters for an imported (STEP) body feature — task #138,
@@ -687,6 +824,11 @@ pub enum EngineError {
 
     #[error("profile index {index} out of range (sketch has {count} profiles)")]
     ProfileOutOfRange { index: usize, count: usize },
+
+    /// v4 Phase 1b: the feature's operation kind is one this build does not
+    /// know (`Operation::Unknown`). The feature stays in the tree and the file.
+    #[error("operation kind `{type_tag}` is not supported by this version (the feature is preserved, not rebuilt)")]
+    UnsupportedOperation { type_tag: String },
 
     /// v4 §2.9: `profile_entity_ids` names a loop the solved sketch does not
     /// have.

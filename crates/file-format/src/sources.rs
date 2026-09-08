@@ -9,36 +9,14 @@
 //! parse error — opacity is for the future, not for corruption.
 
 use chrono::{DateTime, Utc};
-use serde::de::{self, Deserializer};
+use serde::de::Deserializer;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use uuid::Uuid;
 
 use crate::hash::git_blob_sha1;
 
-/// Deserialize a `{"type": …}` object as the known enum `K`, or hand back the
-/// raw value when the tag is unrecognized. Malformed input is an error.
-pub(crate) fn known_or_unknown<'de, D, K>(
-    deserializer: D,
-    known_tags: &[&str],
-    what: &str,
-) -> Result<Result<K, Value>, D::Error>
-where
-    D: Deserializer<'de>,
-    K: for<'a> Deserialize<'a>,
-{
-    let value = Value::deserialize(deserializer)?;
-    let tag = value.get("type").and_then(Value::as_str).ok_or_else(|| {
-        de::Error::custom(format!("{what}: expected an object with a string `type`"))
-    })?;
-    if known_tags.contains(&tag) {
-        serde_json::from_value::<K>(value.clone())
-            .map(Ok)
-            .map_err(|e| de::Error::custom(format!("{what} `{tag}`: {e}")))
-    } else {
-        Ok(Err(value))
-    }
-}
+pub(crate) use feature_engine::opaque::known_or_unknown;
 
 /// Which API adapter resolves a `Git` locator (§7.2). Absent ⇒ inferred from
 /// the remote's hostname, else `Generic`.

@@ -1,8 +1,9 @@
 # `.waffle` v4 — Document Model: Identity, Git-Aware Sources, Scoped References
 
 Status: **PHASE 1 LANDED 2026-09-07** (increments 1–7 of §9, including the
-JSON Schema golden; §2.9 profile addressing and §2.10 `solve_status`
-default landed 2026-09-08 — see `projects/09-file-format/PLAN.md`). Plan of record for the file-format
+JSON Schema golden; §2.9 profile addressing, §2.10 `solve_status` default
+and Phase 1b opaque operations landed 2026-09-08 — see
+`projects/09-file-format/PLAN.md`). Plan of record for the file-format
 changes that assemblies, KiCad board links, multi-document assemblies,
 derived 2D drawings, and model-facing tooling (MCP) all depend on. The
 descriptive format reference is `docs/FILE_FORMAT.md` (v4 section).
@@ -50,9 +51,9 @@ phases** (§9); Phase 1 lands the substrate they need.
 All lengths meters, angles degrees, timestamps RFC 3339 UTC, ids lowercase
 hyphenated UUIDs unless stated. Additive rules of v3 (§13 of the v3 spec)
 still apply: new optional fields are serde-defaulted; new **enum variants**
-of `Operation`, constraint, selector, or `PlaneDefinition` still require a
-`MIN_READER_VERSION` bump. New **tab kinds** and **source kinds/locators** do
-not (§2.5, §2.3).
+of constraint, selector, or `PlaneDefinition` still require a
+`MIN_READER_VERSION` bump. New **tab kinds**, **source kinds/locators** and
+(Phase 1b, 2026-09-08) **operation kinds** do not (§2.5, §2.3).
 
 ### 2.1 Envelope
 
@@ -175,7 +176,12 @@ and re-emits it byte-for-byte on save. Same for `SourceEntry.kind` and
 `SourceEntry.locator`. Consequence: **adding a tab kind, source kind, or
 locator kind is NOT a `MIN_READER_VERSION` bump.** Adding an `Operation`
 variant inside a Part still is (unchanged from v3) until the same opaque
-treatment lands for features (§9, Phase 1b).
+treatment lands for features (§9, Phase 1b — **LANDED 2026-09-08**:
+`Operation::Unknown(Value)` in feature-engine, manual `Deserialize` through
+the shared `feature_engine::opaque::known_or_unknown`, which file-format's
+tab/source/locator kinds now reuse; the feature is kept, reported in the load
+warnings, re-emitted verbatim, and its rebuild is a loud per-feature
+`UnsupportedOperation` while later features still build).
 
 ### 2.6 Unknown fields are preserved at structural levels
 
@@ -454,7 +460,7 @@ capability; that spec must carry its own §7a.
 | Phase | Content | Wire impact |
 |---|---|---|
 | **1 (this spec)** | LANDED: `document.id`; `sources` table + git-aware locators; unknown tab/source/locator kinds preserved; unknown keys preserved (§2.6); provenance table; ImportedBody → sources with dedup; single Rust writer via bridge `SaveDocument`; engine source store + `ProvideSource`; inflation cap; JS-form timestamps; exact float parsing; corpus back-compat pin; JSON Schema golden (`docs/schema/waffle-v4.schema.json`, CI-pinned, every repo file validates); `docs/FILE_FORMAT.md` v4 section; `profile_entity_ids` (§2.9) and `solve_status` default (§2.10), 2026-09-08 | v4, `MIN_READER_VERSION` 4 |
-| 1b | Opaque preservation of unknown `Operation` variants (feature kept, rebuild error, re-emitted) so future ops stop bumping the reader floor | none |
+| 1b | **LANDED 2026-09-08.** Opaque preservation of unknown `Operation` variants (feature kept, rebuild error, re-emitted) so future ops stop bumping the reader floor | none |
 | 2 | App storage: `document.id` as storage key; `GitProvider` with GitHub/GitLab/Gitea adapters; per-host tokens; content cache; open-from-link (fixes the dead `?src=`); pack/unpack; pin/update UI | none (uses Phase-1 fields) |
 | 3 | `Assembly` tab kind: instances `{id, name, source: {source_id?, tab_id}, transform: {translation_m, rotation_quat}, external_key?, parameter_overrides?}`, mate connectors `{id, name, geom_ref(scoped), frame}`, mates (Fastened first), persisted solved placements as derived hints; `scope` on `GeomRef` lands here | new tab kind (no bump); `scope` field (bump for Part-side use) |
 | 3b | KiCad: `KicadPcb` source kind; derived board sketch/extrude (`Derived` provenance); one instance per footprint keyed by footprint UUID; component models as `Step` sources resolved through a KiCad path-variable table; mounting holes → connectors | none beyond Phase 3 |
