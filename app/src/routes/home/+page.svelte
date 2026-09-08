@@ -1,7 +1,7 @@
 <script>
 	import { goto } from '$app/navigation';
 	import { base } from '$app/paths';
-	import { getActiveProvider, migrateLocalStorage, generateDocId, getStore, registerProvider, unregisterProvider, setActiveProvider } from '$lib/storage/index.js';
+	import { getActiveProvider, migrateLocalStorage, getStore, registerProvider, unregisterProvider, setActiveProvider } from '$lib/storage/index.js';
 	import { FORMAT_VERSION, MIN_READER_VERSION } from '$lib/engine/format.js';
 	import { onMount } from 'svelte';
 	import HomeHeader from '$lib/ui/HomeHeader.svelte';
@@ -30,12 +30,13 @@
 
 	async function handleNewDocument() {
 		const provider = getActiveProvider();
-		const id = generateDocId();
 		const now = Date.now();
 		const newUuid = () => (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
 			? crypto.randomUUID()
 			: ([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g, c =>
 				(c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16));
+		// v4 P2-5: the storage record is keyed by the document's own identity.
+		const id = newUuid();
 		const tabId = newUuid();
 		const doc = {
 			id,
@@ -45,7 +46,7 @@
 				min_reader_version: MIN_READER_VERSION,
 				document: {
 					// v4 identity (specs/waffle_v4_document_model.md §2.1)
-					id: newUuid(),
+					id,
 					name: 'Untitled',
 					created: new Date(now).toISOString(),
 					modified: new Date(now).toISOString()

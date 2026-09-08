@@ -665,10 +665,12 @@ export async function initEngine() {
 			}
 		}
 
-		// Ensure activeDocId is set so saveToProvider() works on direct `/` navigation
+		// Ensure activeDocId is set so saveToProvider() works on direct `/`
+		// navigation. v4 P2-5: the storage record is keyed by the document's
+		// own identity, so mint that identity now and use it as the key.
 		if (!activeDocId) {
-			const { generateDocId } = await import('$lib/storage/types.js');
-			activeDocId = generateDocId();
+			if (!documentId) documentId = generateUUID();
+			activeDocId = documentId;
 		}
 
 		// Initialize default tab state if no document was loaded.
@@ -5673,8 +5675,12 @@ export function initDocumentState(docId, parsed, link = null) {
 	documentName = parsed.document?.name || 'Untitled';
 	projectName = documentName;
 	// v4 identity: adopt the file's document.id; a legacy (v1–v3) file has
-	// none, so mint one here — once — and every save persists it.
-	documentId = isUuid(parsed.document?.id) ? parsed.document.id : generateUUID();
+	// none, so mint one here — once — and every save persists it. When the
+	// caller keyed a NEW storage record by a fresh UUID (P2-5: record key =
+	// document identity), the minted identity IS that key.
+	documentId = isUuid(parsed.document?.id)
+		? parsed.document.id
+		: isUuid(docId) ? docId : generateUUID();
 	// Adopt the document's creation time (v3: document.*, legacy: project.*)
 	// so saves preserve it instead of re-stamping "now".
 	documentCreated = parsed.document?.created || parsed.project?.created || null;
@@ -6025,11 +6031,12 @@ export async function forkLinkedDocument() {
 			return null;
 		}
 	}
-	const { generateDocId, getActiveProvider } = await import('$lib/storage/index.js');
+	const { getActiveProvider } = await import('$lib/storage/index.js');
 	documentId = generateUUID();
 	documentCreated = new Date().toISOString();
 	documentLink = null;
-	activeDocId = generateDocId();
+	// The fork's storage record is keyed by its new identity (P2-5).
+	activeDocId = documentId;
 	try {
 		await saveToProvider();
 	} catch (err) {
@@ -7005,14 +7012,15 @@ export async function loadProject(jsonData, { silent = false } = {}) {
 			try {
 				await sendRebuild({ type: 'LoadProject', data: text });
 				// Adopt the opened file's tab structure (the engine only holds
-				// the active tab's tree) under a FRESH storage doc id — autosave
-				// keeps working for the opened file but can no longer overwrite
-				// the previously open storage document with this file's content
-				// (docs/FILE_FORMAT.md §14.4). Same convention as initEngine's
-				// direct-`/` bootstrap.
+				// the active tab's tree) under the file's OWN identity as the
+				// storage key (v4 P2-5): a different document can never
+				// overwrite the previously open storage record
+				// (docs/FILE_FORMAT.md §14.4), and re-opening an export of a
+				// stored document re-homes to that same record. A legacy file
+				// without an identity gets a fresh one.
 				if (parsed) {
-					const { generateDocId } = await import('$lib/storage/types.js');
-					initDocumentState(generateDocId(), parsed);
+					const fileId = isUuid(parsed.document?.id) ? parsed.document.id : generateUUID();
+					initDocumentState(fileId, parsed);
 				}
 				// Project name from filename (wins over the stored doc name).
 				const nameWithoutExt = file.name.replace(/\.(waffle|json)$/i, '');

@@ -1,6 +1,7 @@
 import { generateDocId } from './types.js';
 
 const DB_NAME = 'waffle-iron';
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DB_VERSION = 1;
 const STORE_NAME = 'documents';
 
@@ -102,19 +103,43 @@ export class IndexedDBStore {
 	}
 
 	/**
-	 * Get a document by ID.
+	 * Get a document by its record key, or — since v4 Phase 2 P2-5 — by its
+	 * `document.id`: records created since then are keyed by the document's
+	 * own identity, and older 8-char-keyed records are still found by the
+	 * identity inside their JSON (no re-keying migration; a linked read-only
+	 * copy of someone else's document is only returned when no record of the
+	 * user's own carries that identity).
 	 * @param {string} id
 	 * @returns {Promise<import('./types.js').StoredDocument|null>}
 	 */
 	async get(id) {
 		const db = await this.#getDB();
-		return new Promise((resolve, reject) => {
+		const byKey = await new Promise((resolve, reject) => {
 			const tx = db.transaction(STORE_NAME, 'readonly');
-			const store = tx.objectStore(STORE_NAME);
-			const request = store.get(id);
+			const request = tx.objectStore(STORE_NAME).get(id);
 			request.onsuccess = () => resolve(request.result || null);
 			request.onerror = () => reject(request.error);
 		});
+		if (byKey || !UUID_RE.test(id)) return byKey;
+		const all = await new Promise((resolve, reject) => {
+			const tx = db.transaction(STORE_NAME, 'readonly');
+			const request = tx.objectStore(STORE_NAME).getAll();
+			request.onsuccess = () => resolve(request.result || []);
+			request.onerror = () => reject(request.error);
+		});
+		let linkedMatch = null;
+		for (const doc of all) {
+			let docId = null;
+			try {
+				docId = JSON.parse(doc.json)?.document?.id ?? null;
+			} catch {
+				continue;
+			}
+			if (docId !== id) continue;
+			if (!doc.link) return doc;
+			linkedMatch = linkedMatch ?? doc;
+		}
+		return linkedMatch;
 	}
 
 	/**
