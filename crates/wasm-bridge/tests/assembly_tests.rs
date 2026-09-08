@@ -86,6 +86,7 @@ fn open(
         UiToEngine::OpenAssembly {
             assembly: tree.clone(),
             part_trees: parts.clone(),
+            assembly_trees: HashMap::new(),
         },
         kernel,
     );
@@ -257,4 +258,213 @@ fn a_part_the_document_lacks_and_a_bad_face_are_loud_but_the_rest_renders() {
     assert_eq!(status.parts.len(), 1);
     // The buildable instance is still placed.
     assert!(status.placements.contains_key(&ida));
+}
+
+// ── 3d-2 sub-assemblies, 3d-3b linked-source tabs ───────────────────────
+
+#[test]
+fn a_sub_assembly_instance_renders_its_members_with_composed_placements_and_connectors_reach_them()
+{
+    let mut state = EngineState::new();
+    let mut kernel = KernelV2Adapter::new();
+    let part = cube_part(&mut state, &mut kernel);
+    let parts: HashMap<String, FeatureTree> = HashMap::from([("part".to_string(), part)]);
+
+    // Sub-assembly "stack": two cubes fastened (B on A).
+    let a = instance("A", "part", Transform::identity(), true);
+    let b = instance("B", "part", Transform::identity(), false);
+    let (ida, idb) = (a.id, b.id);
+    let ca = connector(
+        "A top",
+        ida,
+        None,
+        Frame::on_plane([0.005, 0.005, 0.01], [0.0, 0.0, 1.0]),
+    );
+    let cb = connector(
+        "B bottom",
+        idb,
+        None,
+        Frame::on_plane([0.005, 0.005, 0.0], [0.0, 0.0, -1.0]),
+    );
+    let (cida, cidb) = (ca.id, cb.id);
+    let stack = AssemblyTree {
+        instances: vec![a, b],
+        connectors: vec![ca, cb],
+        mates: vec![fastened(cida, cidb, true)],
+        ..Default::default()
+    };
+    let asm_trees: HashMap<String, AssemblyTree> = HashMap::from([("stack".to_string(), stack)]);
+
+    // Top: two instances of the stack, the second moved 50 mm in x, plus a
+    // lone cube fastened onto the FIRST stack's top cube (connector path
+    // [stack1, B]).
+    let s1 = instance("Stack 1", "stack", Transform::identity(), true);
+    let s2 = instance(
+        "Stack 2",
+        "stack",
+        Transform::translation([0.05, 0.0, 0.0]),
+        false,
+    );
+    let lone = instance("Lone", "part", Transform::identity(), false);
+    let (ids1, ids2, idl) = (s1.id, s2.id, lone.id);
+    let mut c_top_of_b = connector(
+        "stack1 B top",
+        ids1,
+        None,
+        Frame::on_plane([0.005, 0.005, 0.01], [0.0, 0.0, 1.0]),
+    );
+    c_top_of_b.instance_path = vec![ids1, idb];
+    let c_lone = connector(
+        "lone bottom",
+        idl,
+        None,
+        Frame::on_plane([0.005, 0.005, 0.0], [0.0, 0.0, -1.0]),
+    );
+    let (cid_top, cid_lone) = (c_top_of_b.id, c_lone.id);
+    let top = AssemblyTree {
+        instances: vec![s1, s2, lone],
+        connectors: vec![c_top_of_b, c_lone],
+        mates: vec![fastened(cid_top, cid_lone, true)],
+        ..Default::default()
+    };
+
+    let r = dispatch(
+        &mut state,
+        UiToEngine::OpenAssembly {
+            assembly: top,
+            part_trees: parts,
+            assembly_trees: asm_trees,
+        },
+        &mut kernel,
+    );
+    let EngineToUi::ModelUpdated { assembly, .. } = r else {
+        panic!("{r:?}")
+    };
+    let status = assembly.unwrap();
+    assert!(status.errors.is_empty(), "{:?}", status.errors);
+    let view = state.assembly.as_ref().unwrap();
+    assert_eq!(view.parts.len(), 1, "the cube is built once for everything");
+    // Leaves: [s1,A], [s1,B], [s2,A], [s2,B], [lone].
+    let paths: Vec<Vec<Uuid>> = view.leaves.iter().map(|l| l.path.clone()).collect();
+    assert_eq!(
+        paths,
+        vec![
+            vec![ids1, ida],
+            vec![ids1, idb],
+            vec![ids2, ida],
+            vec![ids2, idb],
+            vec![idl]
+        ]
+    );
+    let z_of = |p: &[Uuid]| {
+        view.leaves
+            .iter()
+            .find(|l| l.path == p)
+            .unwrap()
+            .transform
+            .translation_m
+    };
+    assert!((z_of(&[ids1, idb])[2] - 0.01).abs() < 1e-6);
+    assert!(
+        (z_of(&[ids2, idb])[2] - 0.01).abs() < 1e-6 && (z_of(&[ids2, idb])[0] - 0.05).abs() < 1e-6
+    );
+    // The lone cube sits on stack 1's TOP cube: z = 20 mm.
+    let lone_t = status.placements[&idl];
+    assert!((lone_t.translation_m[2] - 0.02).abs() < 1e-6, "{lone_t:?}");
+    assert!(lone_t.translation_m[0].abs() < 1e-6, "{lone_t:?}");
+
+    // A self-referencing sub-assembly is a loud error, not a hang.
+    let selfref = instance("Me", "loop", Transform::identity(), false);
+    let looping = AssemblyTree {
+        instances: vec![selfref],
+        ..Default::default()
+    };
+    let r = dispatch(
+        &mut state,
+        UiToEngine::OpenAssembly {
+            assembly: looping.clone(),
+            part_trees: HashMap::new(),
+            assembly_trees: HashMap::from([("loop".to_string(), looping)]),
+        },
+        &mut kernel,
+    );
+    let EngineToUi::ModelUpdated { assembly, .. } = r else {
+        panic!("{r:?}")
+    };
+    assert!(assembly.unwrap().errors.iter().any(|e| e.contains("cycle")));
+}
+
+#[test]
+fn list_source_tabs_reads_a_linked_document_and_its_parts_can_be_instanced() {
+    use file_format::{SourceEntry, SourceKind, WaffleDocument};
+    let mut state = EngineState::new();
+    let mut kernel = KernelV2Adapter::new();
+    let part = cube_part(&mut state, &mut kernel);
+
+    // A linked .waffle document with a Part tab (the cube) and an Assembly tab.
+    let mut linked = WaffleDocument::new("Linked");
+    let linked_part_tab = linked.tabs[0].id.clone();
+    if let file_format::TabKind::Part { features, .. } = &mut linked.tabs[0].kind {
+        *features = part;
+    }
+    linked
+        .tabs
+        .push(file_format::Tab::assembly("Asm", AssemblyTree::default()));
+    // Its own STEP source must travel with it for the cube to build.
+    linked.sources = state.sources.clone();
+    let linked_json = file_format::save_document(&linked);
+    let entry = SourceEntry::embedded("linked.waffle", SourceKind::Waffle, &linked_json);
+    let sid = entry.id;
+    state.engine.sources.insert_text(sid, &linked_json);
+    state.sources.push(entry);
+
+    let r = dispatch(
+        &mut state,
+        UiToEngine::ListSourceTabs { source_id: sid },
+        &mut kernel,
+    );
+    let EngineToUi::SourceTabsListed { tabs, .. } = r else {
+        panic!("{r:?}")
+    };
+    assert_eq!(tabs.len(), 2);
+    assert_eq!(
+        (tabs[0].id.as_str(), tabs[0].kind.as_str()),
+        (linked_part_tab.as_str(), "Part")
+    );
+    assert_eq!(tabs[1].kind, "Assembly");
+
+    let inst = Instance {
+        id: Uuid::new_v4(),
+        name: "Linked cube".into(),
+        source: PartRef {
+            source_id: Some(sid),
+            tab_id: linked_part_tab,
+        },
+        transform: Transform::identity(),
+        fixed: true,
+        suppressed: false,
+        external_key: None,
+        parameter_overrides: None,
+        extra: Map::new(),
+    };
+    let tree = AssemblyTree {
+        instances: vec![inst],
+        ..Default::default()
+    };
+    let status = open(&mut state, &mut kernel, &tree, &HashMap::new());
+    assert!(status.errors.is_empty(), "{:?}", status.errors);
+    assert_eq!(status.parts.len(), 1);
+    assert!(status.parts[0].source_id == Some(sid));
+    let view = state.assembly.as_ref().unwrap();
+    assert_eq!(view.leaves.len(), 1);
+    assert_eq!(view.parts[0].1.feature_results.len(), 1);
+
+    let bad = dispatch(
+        &mut state,
+        UiToEngine::ListSourceTabs {
+            source_id: Uuid::new_v4(),
+        },
+        &mut kernel,
+    );
+    assert!(matches!(bad, EngineToUi::Error { .. }));
 }

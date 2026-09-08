@@ -726,6 +726,7 @@ export async function initEngine() {
 				featureId: m.featureId,
 				bodyId: m.bodyId ?? null,
 				instanceId: m.instanceId ?? null,
+				instancePath: m.instancePath ? [...m.instancePath] : null,
 				instanceName: m.instanceName ?? null,
 				transform: m.transform ? JSON.parse(JSON.stringify(m.transform)) : null,
 				vertexCount: m.vertices?.length / 3,
@@ -815,7 +816,10 @@ export async function initEngine() {
 			addMate: (opts) => addMate(opts),
 			updateMate: (id, patch) => updateMate(id, patch),
 			removeMate: (id) => removeMate(id),
-			getSelectedInstanceId: () => selectedInstanceId,
+			getSelectedInstanceId: () => selectedInstancePath?.[0] ?? null,
+			getSelectedInstancePath: () => selectedInstancePath ? [...selectedInstancePath] : null,
+			getSourceTabs: () => JSON.parse(JSON.stringify(sourceTabs)),
+			listSourceTabs: async (id) => (await bridge.send({ type: 'ListSourceTabs', source_id: id }))?.tabs ?? [],
 			setSourcePack: (id, pack) => setSourcePack(id, pack),
 			packAllSources: () => packAllSources(),
 			pinSource: (id) => pinSource(id),
@@ -5677,22 +5681,50 @@ export async function refreshAssembly() {
 	const tab = activeAssemblyTab();
 	if (!tab || !bridge || !engineReady) return false;
 	const part_trees = {};
+	const assembly_trees = {};
 	for (const t of documentTabs) {
 		if (t.kind?.type === 'Part' && t.kind.features) {
 			part_trees[t.id] = JSON.parse(JSON.stringify(t.kind.features));
+		} else if (t.kind?.type === 'Assembly' && t.id !== tab.id && t.kind.assembly) {
+			const a = JSON.parse(JSON.stringify(t.kind.assembly));
+			delete a.placements;
+			assembly_trees[t.id] = a;
 		}
 	}
 	const assembly = JSON.parse(JSON.stringify(tab.kind.assembly));
 	// Placements are derived; the engine recomputes them.
 	delete assembly.placements;
 	try {
-		await sendRebuild({ type: 'OpenAssembly', assembly, part_trees });
+		await sendRebuild({ type: 'OpenAssembly', assembly, part_trees, assembly_trees });
+		refreshSourceTabs();
 		return true;
 	} catch (err) {
 		log('error', `Assembly evaluation failed: ${err?.message || err}`);
 		showToast('error', `Assembly evaluation failed: ${err?.message || err}`);
 		return false;
 	}
+}
+
+/**
+ * Tabs of each available linked `.waffle` source (`ListSourceTabs`), for
+ * the "add instance" chooser: `{ [source_id]: [{id, name, kind}] }`.
+ */
+let sourceTabs = $state({});
+export function getSourceTabs() { return sourceTabs; }
+
+async function refreshSourceTabs() {
+	if (!bridge || !engineReady) return;
+	const next = {};
+	for (const s of documentSources) {
+		if (s.kind !== 'Waffle' || !s.available) continue;
+		try {
+			const r = await bridge.send({ type: 'ListSourceTabs', source_id: s.id });
+			if (r?.type === 'SourceTabsListed') next[s.id] = r.tabs;
+		} catch (err) {
+			log('warn', `ListSourceTabs ${s.name}: ${err?.message || err}`);
+		}
+	}
+	sourceTabs = next;
 }
 
 /** Mutate the open assembly's tree, then re-evaluate and autosave. */
@@ -5714,7 +5746,9 @@ async function editAssembly(fn) {
 export async function addInstance({ tabId, sourceId = null, name, transform, fixed = false }) {
 	return editAssembly((asm) => {
 		const id = generateUUID();
-		const partTab = documentTabs.find(t => t.id === tabId);
+		const partTab = sourceId
+			? (sourceTabs[sourceId] ?? []).find(t => t.id === tabId)
+			: documentTabs.find(t => t.id === tabId);
 		const count = asm.instances.filter(i => i.source.tab_id === tabId && (i.source.source_id ?? null) === sourceId).length;
 		asm.instances.push({
 			id,
@@ -5757,15 +5791,16 @@ export async function removeInstance(instanceId) {
  * is derived from the geometry at evaluation) or an explicit `frame`.
  * @returns {Promise<string|null>} the connector id
  */
-export async function addConnector({ instanceId, geomRef = null, frame = null, name }) {
+export async function addConnector({ instanceId = null, instancePath = null, geomRef = null, frame = null, name }) {
 	return editAssembly((asm) => {
 		const id = generateUUID();
 		asm.connectors = asm.connectors ?? [];
-		const inst = asm.instances.find(i => i.id === instanceId);
+		const path = instancePath?.length ? [...instancePath] : [instanceId];
+		const inst = asm.instances.find(i => i.id === path[0]);
 		asm.connectors.push({
 			id,
-			name: name || `${inst?.name ?? 'Instance'} connector ${asm.connectors.length + 1}`,
-			instance_path: [instanceId],
+			name: name || `${inst?.name ?? 'Instance'}${path.length > 1 ? ' › member' : ''} connector ${asm.connectors.length + 1}`,
+			instance_path: path,
 			...(geomRef ? { geom_ref: JSON.parse(JSON.stringify(geomRef)) } : {}),
 			frame: frame ? JSON.parse(JSON.stringify(frame)) : { origin: [0, 0, 0], z_axis: [0, 0, 1], x_axis: [0, 0, 0] }
 		});
@@ -5830,10 +5865,14 @@ export async function removeMate(mateId) {
 	});
 }
 
-/** The instance whose body was last clicked in the viewport (assembly mode). */
-let selectedInstanceId = $state(null);
-export function getSelectedInstanceId() { return selectedInstanceId; }
-export function setSelectedInstanceId(id) { selectedInstanceId = id; }
+/**
+ * The instance whose body was last clicked in the viewport (assembly mode):
+ * its full path (`[instance, member, …]` through sub-assemblies).
+ */
+let selectedInstancePath = $state(null);
+export function getSelectedInstanceId() { return selectedInstancePath?.[0] ?? null; }
+export function getSelectedInstancePath() { return selectedInstancePath; }
+export function setSelectedInstancePath(path) { selectedInstancePath = path?.length ? [...path] : null; }
 
 /**
  * Add a new tab to the document.

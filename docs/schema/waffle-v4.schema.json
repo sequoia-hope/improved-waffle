@@ -1350,7 +1350,7 @@
           "type": "string"
         },
         "instance_path": {
-          "description": "Scope (v4 §2.8): the chain of instance ids from this assembly down to\nthe owning instance. Phase 3 supports one level (no sub-assemblies):\nexactly one id.",
+          "description": "Scope (v4 §2.8): the chain of instance ids from this assembly down to\nthe owning instance — `[instance]` for a part instance, `[instance,\nmember, …]` for a member of a sub-assembly instance (3d-2). The mate\nsolver moves the top-level instance; the member's relative placement\nis composed into the frame at evaluation.",
           "items": {
             "format": "uuid",
             "type": "string"

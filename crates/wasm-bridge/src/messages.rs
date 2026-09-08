@@ -237,6 +237,15 @@ pub enum UiToEngine {
         assembly: feature_engine::assembly::AssemblyTree,
         #[serde(default)]
         part_trees: HashMap<String, FeatureTree>,
+        /// This document's OTHER assembly tabs, so an instance may be of an
+        /// assembly (a sub-assembly, 3d-2).
+        #[serde(default)]
+        assembly_trees: HashMap<String, feature_engine::assembly::AssemblyTree>,
+    },
+    /// The tabs of a linked `.waffle` source (for "add instance"): id, name
+    /// and kind of each.
+    ListSourceTabs {
+        source_id: Uuid,
     },
     /// Fork of a linked document (v4 §7.1): rewrite every `Relative` source
     /// into an absolute `Git` locator in `base`'s repository, pinned at
@@ -379,6 +388,12 @@ pub enum EngineToUi {
     /// Answer to `ListSources`.
     SourcesListed { sources: Vec<SourceStatus> },
 
+    /// Answer to `ListSourceTabs`.
+    SourceTabsListed {
+        source_id: Uuid,
+        tabs: Vec<SourceTabInfo>,
+    },
+
     /// STEP export is ready.
     ExportReady { step_data: String },
 
@@ -448,4 +463,13 @@ pub struct AssemblyStatus {
     /// Parts that were built (tab id, and source id for linked parts).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub parts: Vec<feature_engine::assembly::PartRef>,
+}
+
+/// One tab of a linked document.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SourceTabInfo {
+    pub id: String,
+    pub name: String,
+    /// `Part`, `Assembly`, or an unknown kind's tag.
+    pub kind: String,
 }

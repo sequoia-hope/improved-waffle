@@ -28,7 +28,7 @@
 		proposeHoverRef,
 		getSketchHover,
 		getFreshHoveredRef,
-		setSelectedInstanceId
+		setSelectedInstancePath
 	} from '$lib/engine/store.svelte.js';
 	import { SIDE_FACE_GROUP_THRESHOLD } from '$lib/config.js';
 	import { handleBodyFaceClick } from '$lib/sketch/tools.js';
@@ -278,6 +278,7 @@
 			featureId: m.featureId,
 			bodyId: m.bodyId,
 			instanceId: m.instanceId ?? null,
+			instancePath: m.instancePath ?? null,
 			...placementProps(m.transform)
 		}));
 	});
@@ -534,7 +535,7 @@
 
 		// Assembly mode: remember which instance the clicked body belongs to
 		// (mate connectors are created "on the selected face of an instance").
-		setSelectedInstanceId(mesh.instanceId ?? null);
+		setSelectedInstancePath(mesh.instancePath ?? (mesh.instanceId ? [mesh.instanceId] : null));
 
 		// Canonicalize SideFace refs when grouping
 		if (shouldGroupSideFaces(mesh.faceRanges)) {

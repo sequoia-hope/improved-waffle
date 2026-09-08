@@ -228,6 +228,7 @@ function collectBodies() {
 			// Assembly mode (v4 Phase 3b): which instance this body belongs to
 			// and its solved placement; absent for the live part.
 			instanceId: meta.instanceId ?? null,
+			instancePath: meta.instancePath ?? null,
 			instanceName: meta.instanceName ?? null,
 			partTabId: meta.partTabId ?? null,
 			transform: meta.transform ?? null,

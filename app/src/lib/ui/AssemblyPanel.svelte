@@ -19,7 +19,11 @@
 		updateMate,
 		removeMate,
 		getSelectedInstanceId,
+		getSelectedInstancePath,
 		getSelectedRefs,
+		getSources,
+		getSourceTabs,
+		getActiveTabId,
 		MATE_KINDS
 	} from '$lib/engine/store.svelte.js';
 	import { eulerDegToQuat, quatToEulerDeg } from '$lib/engine/rotation.js';
@@ -27,10 +31,26 @@
 	let asm = $derived(getAssembly());
 	let status = $derived(getAssemblyStatus());
 	let partTabs = $derived(getDocumentTabs().filter((t) => t.kind?.type === 'Part'));
+	let assemblyTabs = $derived(getDocumentTabs().filter((t) => t.kind?.type === 'Assembly' && t.id !== getActiveTabId()));
+	/** Instance sources: this document's parts and assemblies, then linked documents' tabs. */
+	let sourceOptions = $derived.by(() => {
+		const opts = [];
+		for (const t of partTabs) opts.push({ key: `tab:${t.id}`, tabId: t.id, sourceId: null, label: t.name, group: 'Parts' });
+		for (const t of assemblyTabs) opts.push({ key: `tab:${t.id}`, tabId: t.id, sourceId: null, label: `${t.name} (assembly)`, group: 'Assemblies' });
+		const tabsBySource = getSourceTabs();
+		for (const s of getSources()) {
+			for (const t of tabsBySource[s.id] ?? []) {
+				if (t.kind !== 'Part' && t.kind !== 'Assembly') continue;
+				opts.push({ key: `src:${s.id}:${t.id}`, tabId: t.id, sourceId: s.id, label: `${s.name} › ${t.name}${t.kind === 'Assembly' ? ' (assembly)' : ''}`, group: 'Linked' });
+			}
+		}
+		return opts;
+	});
 	let selectedInstance = $derived(getSelectedInstanceId());
+	let selectedPath = $derived(getSelectedInstancePath());
 	let selectedFace = $derived(getSelectedRefs().find((r) => r?.kind?.type === 'Face') ?? null);
 
-	let newInstanceTab = $state('');
+	let newInstanceKey = $state('');
 	let mateA = $state('');
 	let mateB = $state('');
 	let mateKind = $state('Fastened');
@@ -39,8 +59,20 @@
 	let busy = $state(false);
 
 	function partName(inst) {
-		if (inst.source?.source_id) return `${inst.source.tab_id} (linked)`;
-		return partTabs.find((t) => t.id === inst.source?.tab_id)?.name ?? inst.source?.tab_id ?? '?';
+		if (inst.source?.source_id) {
+			const s = getSources().find((x) => x.id === inst.source.source_id);
+			const t = (getSourceTabs()[inst.source.source_id] ?? []).find((x) => x.id === inst.source.tab_id);
+			return `${s?.name ?? 'linked'} › ${t?.name ?? inst.source.tab_id}`;
+		}
+		const tab = getDocumentTabs().find((t) => t.id === inst.source?.tab_id);
+		if (!tab) return inst.source?.tab_id ?? '?';
+		return tab.kind?.type === 'Assembly' ? `${tab.name} (assembly)` : tab.name;
+	}
+
+	function pathLabel(path) {
+		if (!path?.length) return '?';
+		const top = instanceName(path[0]);
+		return path.length > 1 ? `${top} › member` : top;
 	}
 
 	function instanceName(id) {
@@ -66,9 +98,9 @@
 	}
 
 	async function handleAddInstance() {
-		const tabId = newInstanceTab || partTabs[0]?.id;
-		if (!tabId) return;
-		await run(() => addInstance({ tabId }));
+		const opt = sourceOptions.find((o) => o.key === newInstanceKey) ?? sourceOptions[0];
+		if (!opt) return;
+		await run(() => addInstance({ tabId: opt.tabId, sourceId: opt.sourceId }));
 	}
 
 	function eulerOf(inst) {
@@ -94,8 +126,8 @@
 	}
 
 	async function handleAddConnectorFromFace() {
-		if (!selectedInstance || !selectedFace) return;
-		await run(() => addConnector({ instanceId: selectedInstance, geomRef: selectedFace }));
+		if (!selectedPath?.length || !selectedFace) return;
+		await run(() => addConnector({ instancePath: selectedPath, geomRef: selectedFace }));
 	}
 
 	async function handleAddOriginConnector(inst) {
@@ -146,12 +178,18 @@
 				</div>
 			{/each}
 			<div class="row add">
-				<select data-testid="asm-add-instance-part" bind:value={newInstanceTab} disabled={partTabs.length === 0}>
-					{#each partTabs as t}
-						<option value={t.id}>{t.name}</option>
+				<select data-testid="asm-add-instance-part" bind:value={newInstanceKey} disabled={sourceOptions.length === 0}>
+					{#each ['Parts', 'Assemblies', 'Linked'] as group}
+						{#if sourceOptions.some((o) => o.group === group)}
+							<optgroup label={group}>
+								{#each sourceOptions.filter((o) => o.group === group) as o}
+									<option value={o.key}>{o.label}</option>
+								{/each}
+							</optgroup>
+						{/if}
 					{/each}
 				</select>
-				<button class="act primary" data-testid="asm-add-instance" disabled={busy || partTabs.length === 0} onclick={handleAddInstance}>+ instance</button>
+				<button class="act primary" data-testid="asm-add-instance" disabled={busy || sourceOptions.length === 0} onclick={handleAddInstance}>+ instance</button>
 			</div>
 		</div>
 
@@ -160,7 +198,7 @@
 			{#each asm.connectors ?? [] as c, i (c.id)}
 				<div class="row" data-testid="asm-connector-{i}">
 					<span class="name-static">{c.name}</span>
-					<span class="meta">{instanceName(c.instance_path?.[0])} · {c.geom_ref ? 'face' : 'frame'}</span>
+					<span class="meta">{pathLabel(c.instance_path)} · {c.geom_ref ? 'face' : 'frame'}</span>
 					<button class="act" title="Remove connector" data-testid="asm-connector-remove-{i}" disabled={busy} onclick={() => run(() => removeConnector(c.id))}>×</button>
 				</div>
 			{/each}

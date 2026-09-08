@@ -168,7 +168,7 @@ pub fn solve_mates(tree: &AssemblyTree, frames: &HashMap<Uuid, Frame>, tol_m: f6
         ) else {
             continue; // reported by validate()/solve_fastened
         };
-        let (Some(ia), Some(ib)) = (ca.instance_id(), cb.instance_id()) else {
+        let (Some(ia), Some(ib)) = (ca.top_instance_id(), cb.top_instance_id()) else {
             continue;
         };
         if !frame_xf.contains_key(&ca.id) || !frame_xf.contains_key(&cb.id) {
@@ -199,8 +199,8 @@ pub fn solve_mates(tree: &AssemblyTree, frames: &HashMap<Uuid, Frame>, tol_m: f6
         .map(|m| {
             let ca = tree.connector(m.connectors[0]).unwrap();
             let cb = tree.connector(m.connectors[1]).unwrap();
-            let ia_id = ca.instance_id().unwrap();
-            let ib_id = cb.instance_id().unwrap();
+            let ia_id = ca.top_instance_id().unwrap();
+            let ib_id = cb.top_instance_id().unwrap();
             MateEq {
                 mate: m,
                 ia: index_of(ia_id),

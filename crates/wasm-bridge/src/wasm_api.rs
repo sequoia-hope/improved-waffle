@@ -542,9 +542,9 @@ struct BodyAddr {
     feature_index: usize,
     feature_id: uuid::Uuid,
     output_index: usize,
-    /// `(instance id, index into the assembly view's parts)`; `None` for the
-    /// live part.
-    instance: Option<(uuid::Uuid, usize)>,
+    /// `(leaf index in the assembly view, index into its parts)`; `None`
+    /// for the live part.
+    instance: Option<(usize, usize)>,
 }
 
 /// The engine a body address lives in.
@@ -562,7 +562,7 @@ fn engine_of<'a>(engine: &'a WasmEngine, addr: &BodyAddr) -> Option<&'a feature_
 
 fn bodies_of_engine(
     fe: &feature_engine::Engine,
-    instance: Option<(uuid::Uuid, usize)>,
+    instance: Option<(usize, usize)>,
 ) -> Vec<BodyAddr> {
     let consumed = &fe.consumed_features;
     let mut bodies = Vec::new();
@@ -593,9 +593,9 @@ fn bodies_of_engine(
 fn collect_renderable_bodies(engine: &WasmEngine) -> Vec<BodyAddr> {
     if let Some(view) = engine.state.assembly.as_ref() {
         let mut bodies = Vec::new();
-        for inst in view.tree.instances.iter().filter(|i| !i.suppressed) {
-            if let Some(idx) = view.part_index(&inst.source) {
-                bodies.extend(bodies_of_engine(&view.parts[idx].1, Some((inst.id, idx))));
+        for (li, leaf) in view.leaves.iter().enumerate() {
+            if let Some((_, fe)) = view.parts.get(leaf.part) {
+                bodies.extend(bodies_of_engine(fe, Some((li, leaf.part))));
             }
         }
         return bodies;
@@ -690,9 +690,21 @@ pub fn get_body_metadata() -> String {
             let body_id = output_key
                 .as_ref()
                 .map(|k| feature_engine::types::FeatureTree::body_id(addr.feature_id, k))
-                .map(|id| match addr.instance {
-                    Some((inst, _)) => format!("{inst}/{id}"),
-                    None => id,
+                .map(|id| {
+                    match addr
+                        .instance
+                        .and_then(|(li, _)| engine.state.assembly.as_ref()?.leaves.get(li))
+                    {
+                        Some(leaf) => format!(
+                            "{}/{id}",
+                            leaf.path
+                                .iter()
+                                .map(|u| u.to_string())
+                                .collect::<Vec<_>>()
+                                .join("/")
+                        ),
+                        None => id,
+                    }
                 });
 
             // Ordinal among this feature's rendered bodies (1-based).
@@ -729,21 +741,24 @@ pub fn get_body_metadata() -> String {
                 "bodyId": body_id,
                 "name": name,
             });
-            if let (Some((inst_id, _)), Some(view)) =
-                (addr.instance, engine.state.assembly.as_ref())
-            {
-                let inst = view.tree.instance(inst_id);
-                entry["instanceId"] = serde_json::json!(inst_id);
-                entry["instanceName"] = serde_json::json!(inst.map(|i| i.name.clone()));
-                entry["partTabId"] = serde_json::json!(inst.map(|i| i.source.tab_id.clone()));
-                entry["transform"] = serde_json::to_value(view.placement(inst_id))
-                    .unwrap_or(serde_json::Value::Null);
-                if let Some(i) = inst {
-                    entry["name"] = serde_json::json!(format!(
-                        "{} · {}",
-                        i.name,
-                        entry["name"].as_str().unwrap_or("Body")
-                    ));
+            if let (Some((li, _)), Some(view)) = (addr.instance, engine.state.assembly.as_ref()) {
+                if let Some(leaf) = view.leaves.get(li) {
+                    let top = leaf.path[0];
+                    let inst = view.tree.instance(top);
+                    entry["instanceId"] = serde_json::json!(top);
+                    entry["instancePath"] = serde_json::json!(leaf.path);
+                    entry["instanceName"] = serde_json::json!(inst.map(|i| i.name.clone()));
+                    entry["partTabId"] = serde_json::json!(inst.map(|i| i.source.tab_id.clone()));
+                    entry["transform"] =
+                        serde_json::to_value(leaf.transform).unwrap_or(serde_json::Value::Null);
+                    if let Some(i) = inst {
+                        let depth = if leaf.path.len() > 1 { " › …" } else { "" };
+                        entry["name"] = serde_json::json!(format!(
+                            "{}{depth} · {}",
+                            i.name,
+                            entry["name"].as_str().unwrap_or("Body")
+                        ));
+                    }
                 }
             }
             entries.push(entry);

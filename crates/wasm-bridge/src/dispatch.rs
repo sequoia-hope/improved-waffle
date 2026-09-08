@@ -437,9 +437,19 @@ fn handle_message(
             Ok(model_updated_response(state))
         }
 
+        UiToEngine::ListSourceTabs { source_id } => {
+            let tabs = crate::assembly_view::source_tabs(source_id, &state.engine.sources)
+                .map_err(|reason| BridgeError::InvalidRequest { reason })?
+                .into_iter()
+                .map(|(id, name, kind)| crate::messages::SourceTabInfo { id, name, kind })
+                .collect();
+            Ok(EngineToUi::SourceTabsListed { source_id, tabs })
+        }
+
         UiToEngine::OpenAssembly {
             assembly,
             part_trees,
+            assembly_trees,
         } => {
             state.active_sketch = None;
             state.selection.clear();
@@ -448,8 +458,13 @@ fn handle_message(
             // on the instances only.
             state.engine.tree = feature_engine::types::FeatureTree::new();
             state.engine.rebuild_from_scratch(kb);
-            let view =
-                crate::assembly_view::evaluate(assembly, &part_trees, &state.engine.sources, kb);
+            let view = crate::assembly_view::evaluate(
+                assembly,
+                &part_trees,
+                &assembly_trees,
+                &state.engine.sources,
+                kb,
+            );
             state.assembly = Some(view);
             Ok(model_updated_response(state))
         }

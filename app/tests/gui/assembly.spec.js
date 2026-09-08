@@ -230,3 +230,44 @@ test.describe('Assemblies: numeric mates', () => {
 		expect(Math.abs(slid.rotation_quat[3]) > 0.99999).toBe(true);
 	});
 });
+
+test.describe('Assemblies: sub-assemblies and linked parts', () => {
+	test('an assembly can be instanced inside another; its members render with composed placements', async ({ waffle }) => {
+		const page = waffle.page;
+		const partTab = await cubePartAndAssembly(page);
+		const asm1 = await page.evaluate(() => window.__waffle.getDocumentState().activeTabId);
+		// Assembly 1: two cubes stacked by a fastened mate.
+		const a = await page.evaluate((t) => window.__waffle.addInstance({ tabId: t, name: 'A', fixed: true }), partTab);
+		const b = await page.evaluate((t) => window.__waffle.addInstance({ tabId: t, name: 'B' }), partTab);
+		const ca = await page.evaluate((id) => window.__waffle.addConnector({ instanceId: id, name: 'A top', frame: { origin: [0.005, 0.005, 0.01], z_axis: [0, 0, 1], x_axis: [0, 0, 0] } }), a);
+		const cb = await page.evaluate((id) => window.__waffle.addConnector({ instanceId: id, name: 'B bottom', frame: { origin: [0.005, 0.005, 0], z_axis: [0, 0, -1], x_axis: [0, 0, 0] } }), b);
+		await page.evaluate(([x, y]) => window.__waffle.addMate({ a: x, b: y, flip: true }), [ca, cb]);
+		await page.waitForFunction(() => window.__waffle.getMeshes().length === 2, { timeout: 30000 });
+
+		// Assembly 2: two instances of Assembly 1, the second 50 mm over.
+		await page.locator('[data-testid="tab-add-assembly"]').click();
+		await page.waitForFunction((id) => window.__waffle.getDocumentState().activeTabId !== id && window.__waffle.getAssembly() !== null, asm1, { timeout: 10000 });
+		await expect(page.locator('[data-testid="asm-add-instance-part"] optgroup[label="Assemblies"]')).toHaveCount(1);
+		const s1 = await page.evaluate((t) => window.__waffle.addInstance({ tabId: t, name: 'Stack 1', fixed: true }), asm1);
+		const s2 = await page.evaluate((t) => window.__waffle.addInstance({ tabId: t, name: 'Stack 2', transform: { translation_m: [0.05, 0, 0], rotation_quat: [0, 0, 0, 1] } }), asm1);
+		await page.waitForFunction(() => window.__waffle.getMeshes().length === 4, { timeout: 30000 });
+		const meshes = await page.evaluate(() => window.__waffle.getMeshes());
+		const paths = meshes.map((m) => m.instancePath);
+		expect(paths).toEqual([[s1, a], [s1, b], [s2, a], [s2, b]]);
+		const s2b = meshes.find((m) => m.instancePath[0] === s2 && m.instancePath[1] === b);
+		expect(near(s2b.transform.translation_m[0], 0.05)).toBe(true);
+		expect(near(s2b.transform.translation_m[2], 0.01)).toBe(true);
+		expect(s2b.bodyId.startsWith(`${s2}/${b}/`)).toBe(true);
+		await expect(page.locator('[data-testid="asm-instance-part-0"]')).toContainText('(assembly)');
+		expect((await page.evaluate(() => window.__waffle.getAssemblyStatus())).errors).toEqual([]);
+
+		// A connector on a MEMBER (Stack 1 › B's top) fastens a lone cube at z = 20 mm.
+		const lone = await page.evaluate((t) => window.__waffle.addInstance({ tabId: t, name: 'Lone' }), partTab);
+		const cm = await page.evaluate(([top, mem]) => window.__waffle.addConnector({ instancePath: [top, mem], name: 'stack1 B top', frame: { origin: [0.005, 0.005, 0.01], z_axis: [0, 0, 1], x_axis: [0, 0, 0] } }), [s1, b]);
+		const cl = await page.evaluate((id) => window.__waffle.addConnector({ instanceId: id, name: 'lone bottom', frame: { origin: [0.005, 0.005, 0], z_axis: [0, 0, -1], x_axis: [0, 0, 0] } }), lone);
+		await page.evaluate(([x, y]) => window.__waffle.addMate({ a: x, b: y, flip: true }), [cm, cl]);
+		await page.waitForFunction((id) => Math.abs((window.__waffle.getAssemblyStatus()?.placements?.[id]?.translation_m?.[2] ?? 0) - 0.02) < 1e-6, lone, { timeout: 15000 });
+		await expect(page.locator('[data-testid="asm-connector-0"]')).toContainText('member');
+		expect((await page.evaluate(() => window.__waffle.getAssemblyStatus())).errors).toEqual([]);
+	});
+});

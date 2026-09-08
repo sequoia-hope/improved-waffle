@@ -397,8 +397,10 @@ pub struct MateConnector {
     pub id: Uuid,
     pub name: String,
     /// Scope (v4 §2.8): the chain of instance ids from this assembly down to
-    /// the owning instance. Phase 3 supports one level (no sub-assemblies):
-    /// exactly one id.
+    /// the owning instance — `[instance]` for a part instance, `[instance,
+    /// member, …]` for a member of a sub-assembly instance (3d-2). The mate
+    /// solver moves the top-level instance; the member's relative placement
+    /// is composed into the frame at evaluation.
     pub instance_path: Vec<Uuid>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub geom_ref: Option<GeomRef>,
@@ -409,8 +411,18 @@ pub struct MateConnector {
 }
 
 impl MateConnector {
+    /// The owning instance when the connector is on a direct part instance
+    /// (a one-element path).
     pub fn instance_id(&self) -> Option<Uuid> {
         (self.instance_path.len() == 1).then(|| self.instance_path[0])
+    }
+
+    /// The TOP-LEVEL instance of this assembly the connector belongs to —
+    /// the instance the mate solver moves. For a connector on a sub-assembly
+    /// member (`[top, sub, …]`) that is `top`; the evaluator composes the
+    /// member's relative placement into the frame.
+    pub fn top_instance_id(&self) -> Option<Uuid> {
+        self.instance_path.first().copied()
     }
 }
 
@@ -667,17 +679,13 @@ impl AssemblyTree {
             if !cids.insert(c.id) {
                 out.push(format!("connector `{}` ({}): duplicate id", c.name, c.id));
             }
-            match c.instance_path.as_slice() {
-                [one] if self.instance(*one).is_some() => {}
-                [one] => out.push(format!(
-                    "connector `{}` ({}): instance {one} does not exist",
+            match c.instance_path.first() {
+                Some(top) if self.instance(*top).is_some() => {}
+                Some(top) => out.push(format!(
+                    "connector `{}` ({}): instance {top} does not exist",
                     c.name, c.id
                 )),
-                [] => out.push(format!("connector `{}` ({}): no instance", c.name, c.id)),
-                _ => out.push(format!(
-                    "connector `{}` ({}): sub-assembly paths are not supported in this version",
-                    c.name, c.id
-                )),
+                None => out.push(format!("connector `{}` ({}): no instance", c.name, c.id)),
             }
         }
         let mut mids = HashSet::new();
@@ -705,7 +713,7 @@ impl AssemblyTree {
                 self.connector(m.connectors[0]),
                 self.connector(m.connectors[1]),
             ) {
-                if a.instance_id().is_some() && a.instance_id() == b.instance_id() {
+                if a.top_instance_id().is_some() && a.top_instance_id() == b.top_instance_id() {
                     out.push(format!(
                         "mate `{}` ({}): both connectors are on the same instance",
                         m.name, m.id
@@ -814,7 +822,7 @@ pub fn solve_fastened(
                 consumed.insert(m.id);
                 continue;
             };
-            let (Some(ia), Some(ib)) = (ca.instance_id(), cb.instance_id()) else {
+            let (Some(ia), Some(ib)) = (ca.top_instance_id(), cb.top_instance_id()) else {
                 result.errors.push(format!(
                     "mate `{}` ({}): connector without a usable instance",
                     m.name, m.id
@@ -1146,7 +1154,6 @@ mod tests {
         });
         let w = tree.validate();
         assert!(w.iter().any(|m| m.contains("does not exist")), "{w:?}");
-        assert!(w.iter().any(|m| m.contains("sub-assembly paths")), "{w:?}");
         assert!(
             w.iter()
                 .any(|m| m.contains("connector") && m.contains("does not exist")),
