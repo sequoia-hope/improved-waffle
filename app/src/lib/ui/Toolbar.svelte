@@ -24,6 +24,7 @@
 		showBooleanDialog,
 		showDatumPlaneDialog,
 		importStep,
+		showImportLinkDialog,
 		saveProject,
 		saveToStorage,
 		loadProject,
@@ -165,6 +166,7 @@
 		{ id: 'boolean', label: 'Boolean', shortcut: '' },
 		{ id: 'datum-plane', label: 'Plane', shortcut: '' },
 		{ id: 'import-step', label: 'Import', shortcut: '' },
+		{ id: 'import-link', label: 'Link STEP', shortcut: '' },
 	];
 
 	const sketchTools = [
@@ -236,6 +238,10 @@
 		}
 		if (toolId === 'import-step' && !inSketch) {
 			importStep();
+			return;
+		}
+		if (toolId === 'import-link' && !inSketch) {
+			showImportLinkDialog();
 			return;
 		}
 		if (toolId === 'construction') {

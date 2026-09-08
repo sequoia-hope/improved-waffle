@@ -184,6 +184,28 @@ pub enum UiToEngine {
     ProvideSource {
         source_id: Uuid,
         data: String,
+        /// The commit the host fetched `data` at (git locators): recorded
+        /// as the entry's `resolved`, so `resolved.commit` and
+        /// `content_hash` describe the same bytes (v4 §4 inv. 4).
+        #[serde(default)]
+        resolved_commit: Option<String>,
+    },
+    /// The document's `sources` table with per-entry availability (whether
+    /// the engine's store holds the content). The host resolves the missing
+    /// ones through their locators and answers with `ProvideSource`
+    /// (v4 §2.3 content resolution order, Phase 2 P2-3).
+    ListSources,
+    /// Import a STEP file the host fetched through a locator (a git file
+    /// URL, a share link): a LINKED `Step` source — not packed, with its
+    /// content hash and resolved commit recorded — plus an ImportedBody
+    /// feature naming it. The same file re-resolves from its origin on
+    /// later opens.
+    ImportStepFromLocator {
+        file_name: String,
+        locator: file_format::Locator,
+        data: String,
+        #[serde(default)]
+        resolved_commit: Option<String>,
     },
     /// Fork of a linked document (v4 §7.1): rewrite every `Relative` source
     /// into an absolute `Git` locator in `base`'s repository, pinned at
@@ -314,6 +336,9 @@ pub enum EngineToUi {
     /// Project loaded successfully.
     ProjectLoaded { feature_tree: FeatureTree },
 
+    /// Answer to `ListSources`.
+    SourcesListed { sources: Vec<SourceStatus> },
+
     /// STEP export is ready.
     ExportReady { step_data: String },
 
@@ -348,4 +373,24 @@ pub enum EngineToUi {
     /// Planetary preview generated: one polyline per gear (sun, N planets,
     /// ring). Empty when the params are invalid.
     PlanetaryPreviewGenerated { polylines: Vec<Vec<(f64, f64)>> },
+}
+
+/// One `sources` entry as the host needs it to resolve content: the entry's
+/// identity and addressing, and whether the engine already holds its bytes.
+/// The embed blob is never sent (it is the content itself).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SourceStatus {
+    pub id: Uuid,
+    pub name: String,
+    /// The source kind's `type` tag (`Waffle`, `Step`, … or an unknown one).
+    pub kind: String,
+    pub locator: file_format::Locator,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolved: Option<file_format::Resolved>,
+    /// Effective pack policy (§2.3).
+    pub pack: bool,
+    /// Whether the engine's source store holds the content.
+    pub available: bool,
 }

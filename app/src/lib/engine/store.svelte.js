@@ -778,6 +778,9 @@ export async function initEngine() {
 			loadProject: (jsonData) => loadProject(jsonData),
 			// Test SETUP: real file pickers can't be driven from Playwright.
 			importStepFromText: (fileName, text) => importStepFromText(fileName, text),
+			importStepFromLink: (url) => importStepFromLink(url),
+			resolveDocumentSources: () => resolveDocumentSources(),
+			listSources: async () => (await bridge.send({ type: 'ListSources' }))?.sources ?? [],
 			getImportDialogState: () => importDialogState,
 			showImportDialogForEdit: (featureId) => showImportDialogForEdit(featureId),
 			hideImportDialog: () => hideImportDialog(),
@@ -5553,6 +5556,7 @@ export async function loadPendingDocument() {
 		// one place migrations run.
 		await loadProject(pendingJson, { silent: true });
 		log('system', `Loaded document ${pendingDocId}`);
+		await resolveDocumentSources();
 	} catch (err) {
 		log('error', `Failed to load pending document: ${err}`);
 	}
@@ -6639,6 +6643,62 @@ export async function importStepFromText(fileName, text) {
 }
 
 /**
+ * Import a STEP file from a link (a GitHub/GitLab/Gitea file URL, a raw URL,
+ * an `/open` share link, or any https URL) as a LINKED source
+ * (specs/waffle_v4_document_model.md §2.3, Phase 2 P2-3): fetched now at the
+ * resolved commit, cached by hash, and recorded with its locator + commit so
+ * later opens re-resolve it from its origin instead of embedding a copy.
+ * @param {string} url
+ * @returns {Promise<boolean>}
+ */
+export async function importStepFromLink(url) {
+	if (!bridge || !engineReady) return false;
+	const { locatorForImportLink, fetchGitAt } = await import('$lib/storage/sources.js');
+	const { fetchUrlLocator } = await import('$lib/storage/git/hosts.js');
+	const { cachePut } = await import('$lib/storage/git/cache.js');
+	const { gitBlobSha1 } = await import('$lib/storage/git/hash.js');
+	const locator = locatorForImportLink(url);
+	if (!locator) {
+		showToast('error', 'Not a usable link (https file URL or share link expected)');
+		return false;
+	}
+	const fileName = (locator.type === 'Git' ? locator.path : locator.url).split('/').pop() || 'linked.step';
+	log('action', 'Import STEP from link', { fileName, locator });
+	try {
+		let text;
+		let resolvedCommit = null;
+		if (locator.type === 'Git') {
+			({ text, commit: resolvedCommit } = await fetchGitAt(locator, null));
+		} else {
+			({ text } = await fetchUrlLocator(locator.url));
+		}
+		await cachePut(await gitBlobSha1(text), text);
+		await sendRebuild({
+			type: 'ImportStepFromLocator',
+			file_name: fileName,
+			locator,
+			data: text,
+			resolved_commit: resolvedCommit
+		});
+		showToast('info', `Linked ${fileName}`);
+		const features = featureTree?.features ?? [];
+		const feature = [...features].reverse().find((f) => f.operation?.type === 'ImportedBody');
+		if (feature) showImportDialog(feature.id, { isNew: true });
+		return true;
+	} catch (err) {
+		log('error', `STEP link import failed: ${err?.message || err}`);
+		showToast('error', `STEP link import failed: ${err?.message || err}`);
+		return false;
+	}
+}
+
+/** @type {{ url: string } | null} */
+let importLinkDialogState = $state(null);
+export function getImportLinkDialogState() { return importLinkDialogState; }
+export function showImportLinkDialog() { importLinkDialogState = { url: '' }; }
+export function hideImportLinkDialog() { importLinkDialogState = null; }
+
+/**
  * Open a file picker for a .step/.stp file and import it.
  * @returns {Promise<boolean>} True if an import was initiated
  */
@@ -6812,6 +6872,7 @@ export async function loadProject(jsonData, { silent = false } = {}) {
 				const nameWithoutExt = file.name.replace(/\.(waffle|json)$/i, '');
 				if (nameWithoutExt) setProjectName(nameWithoutExt);
 				showToast('info', 'Project loaded');
+				await resolveDocumentSources();
 				resolve(true);
 			} catch (err) {
 				log('error', `Load project failed: ${err.message || err}`);
@@ -6821,6 +6882,64 @@ export async function loadProject(jsonData, { silent = false } = {}) {
 		};
 		input.click();
 	});
+}
+
+/**
+ * The document's own git location (specs/waffle_v4_document_model.md §2.4):
+ * the link it was opened from, else the active provider's locator for it
+ * (a document saved to the GitHub provider). Null for browser-local docs —
+ * their `Relative` links are unresolvable until saved somewhere.
+ * @returns {Promise<any|null>}
+ */
+async function documentLocation() {
+	if (documentLink?.locator?.type === 'Git') return JSON.parse(JSON.stringify(documentLink.locator));
+	if (!activeDocId) return null;
+	try {
+		const { getActiveProvider } = await import('$lib/storage/index.js');
+		const provider = getActiveProvider();
+		if (typeof provider?.getLocator === 'function') return await provider.getLocator(activeDocId);
+	} catch {
+		// no location
+	}
+	return null;
+}
+
+/**
+ * Resolve every source the engine lacks content for (v4 §2.3 resolution
+ * order, Phase 2 P2-3): `ListSources` → content cache by hash, else fetch
+ * through the locator at the RECORDED commit → `ProvideSource` (rebuilds).
+ * Failures are loud per source (toast) and leave the dependent feature's
+ * `SourceUnavailable` error standing; the document itself stays open.
+ * @returns {Promise<{resolved: number, failed: number}>}
+ */
+export async function resolveDocumentSources() {
+	if (!bridge || !engineReady) return { resolved: 0, failed: 0 };
+	let listed;
+	try {
+		listed = await bridge.send({ type: 'ListSources' });
+	} catch (err) {
+		log('error', `ListSources failed: ${err?.message || err}`);
+		return { resolved: 0, failed: 0 };
+	}
+	const missing = (listed?.sources ?? []).filter((s) => !s.available);
+	if (missing.length === 0) return { resolved: 0, failed: 0 };
+	const { resolveSourceContent } = await import('$lib/storage/sources.js');
+	const location = await documentLocation();
+	let resolved = 0;
+	let failed = 0;
+	for (const s of missing) {
+		try {
+			const { text, resolvedCommit, from } = await resolveSourceContent(s, location);
+			await sendRebuild({ type: 'ProvideSource', source_id: s.id, data: text, resolved_commit: resolvedCommit });
+			log('system', `Resolved source ${s.name} (${from})`);
+			resolved++;
+		} catch (err) {
+			failed++;
+			log('error', `Source ${s.name} unavailable: ${err?.message || err}`);
+			showToast('warning', `Source unavailable: ${err?.message || err}`);
+		}
+	}
+	return { resolved, failed };
 }
 
 /**

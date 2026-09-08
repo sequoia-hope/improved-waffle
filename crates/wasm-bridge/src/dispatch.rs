@@ -8,7 +8,7 @@ use waffle_types::kernel::RenderMesh;
 use waffle_types::OutputKey;
 
 use crate::engine_state::{BridgeError, EngineState};
-use crate::messages::{EngineToUi, UiToEngine};
+use crate::messages::{EngineToUi, SourceStatus, UiToEngine};
 
 /// Dispatch a UI message to the engine and return a response.
 ///
@@ -95,22 +95,48 @@ fn handle_message(
             // v4: the STEP text becomes a packed `Embedded` source; the
             // feature names it by id and carries Import provenance.
             let entry = SourceEntry::embedded(file_name.clone(), SourceKind::Step, &data);
-            let source_id = entry.id;
-            state.engine.sources.insert_text(source_id, &data);
-            state.sources.push(entry);
-            let params = ImportedBodyParams::from_source(&file_name, source_id);
-            let op = Operation::ImportedBody { params };
-            let id = state
-                .engine
-                .add_feature(format!("Import {file_name}"), op, kb)?;
-            let _ = state.engine.set_provenance(
-                id,
-                Some(Provenance {
-                    origin: ProvenanceOrigin::Import { source_id },
-                    at: Some(chrono::Utc::now().to_rfc3339()),
-                }),
-            );
+            add_import_feature(state, kb, entry, &file_name, &data)?;
             Ok(model_updated_response(state))
+        }
+
+        UiToEngine::ImportStepFromLocator {
+            file_name,
+            locator,
+            data,
+            resolved_commit,
+        } => {
+            if !locator.is_shareable() {
+                return Err(BridgeError::InvalidRequest {
+                    reason: "ImportStepFromLocator: a Local locator cannot be linked".to_string(),
+                });
+            }
+            let mut entry = SourceEntry::linked(file_name.clone(), SourceKind::Step, locator);
+            entry.set_content(&data); // hash; no embed (linked ⇒ pack false)
+            entry.fetched_at = Some(chrono::Utc::now());
+            entry.resolved = resolved_commit.map(|c| file_format::Resolved {
+                commit: c.to_ascii_lowercase(),
+                at: chrono::Utc::now(),
+            });
+            add_import_feature(state, kb, entry, &file_name, &data)?;
+            Ok(model_updated_response(state))
+        }
+
+        UiToEngine::ListSources => {
+            let sources = state
+                .sources
+                .iter()
+                .map(|e| SourceStatus {
+                    id: e.id,
+                    name: e.name.clone(),
+                    kind: source_kind_tag(&e.kind),
+                    locator: e.locator.clone(),
+                    content_hash: e.content_hash.clone(),
+                    resolved: e.resolved.clone(),
+                    pack: e.effective_pack(),
+                    available: state.engine.sources.contains(e.id),
+                })
+                .collect();
+            Ok(EngineToUi::SourcesListed { sources })
         }
 
         // -- Feature operations --
@@ -298,7 +324,11 @@ fn handle_message(
             Ok(model_updated_response(state))
         }
 
-        UiToEngine::ProvideSource { source_id, data } => {
+        UiToEngine::ProvideSource {
+            source_id,
+            data,
+            resolved_commit,
+        } => {
             let entry = state
                 .sources
                 .iter_mut()
@@ -308,6 +338,12 @@ fn handle_message(
                 })?;
             entry.content_hash = Some(git_blob_sha1(data.as_bytes()));
             entry.fetched_at = Some(chrono::Utc::now());
+            if let Some(commit) = resolved_commit {
+                entry.resolved = Some(file_format::Resolved {
+                    commit: commit.to_ascii_lowercase(),
+                    at: chrono::Utc::now(),
+                });
+            }
             state.engine.sources.insert_text(source_id, &data);
             state.engine.rebuild_from_scratch(kb);
             Ok(model_updated_response(state))
@@ -508,6 +544,41 @@ fn merge_render_mesh(dst: &mut RenderMesh, src: &RenderMesh) {
     dst.vertices.extend_from_slice(&src.vertices);
     dst.normals.extend_from_slice(&src.normals);
     dst.indices.extend(src.indices.iter().map(|i| i + vbase));
+}
+
+/// Register a STEP source (already built by the caller: embedded or linked)
+/// and add the ImportedBody feature that names it, with Import provenance.
+fn add_import_feature(
+    state: &mut EngineState,
+    kb: &mut dyn KernelBundle,
+    entry: SourceEntry,
+    file_name: &str,
+    data: &str,
+) -> Result<uuid::Uuid, BridgeError> {
+    let source_id = entry.id;
+    state.engine.sources.insert_text(source_id, data);
+    state.sources.push(entry);
+    let params = ImportedBodyParams::from_source(file_name, source_id);
+    let op = Operation::ImportedBody { params };
+    let id = state
+        .engine
+        .add_feature(format!("Import {file_name}"), op, kb)?;
+    let _ = state.engine.set_provenance(
+        id,
+        Some(Provenance {
+            origin: ProvenanceOrigin::Import { source_id },
+            at: Some(chrono::Utc::now().to_rfc3339()),
+        }),
+    );
+    Ok(id)
+}
+
+/// The `type` tag of a source kind as written in the file.
+fn source_kind_tag(kind: &SourceKind) -> String {
+    serde_json::to_value(kind)
+        .ok()
+        .and_then(|v| v.get("type").and_then(|t| t.as_str()).map(str::to_string))
+        .unwrap_or_else(|| "?".to_string())
 }
 
 /// Build a ModelUpdated response from the current engine state.

@@ -61,9 +61,17 @@ test.describe('STEP import', () => {
 		expect(tree.features).toHaveLength(1);
 		expect(tree.features[0].operation.type).toBe('ImportedBody');
 		expect(tree.features[0].name).toBe('Import cube.step');
-		// Payload is embedded compressed, not raw text.
-		expect(tree.features[0].operation.params.blob_encoding).toBe('deflate-base64');
-		expect(tree.features[0].operation.params.blob.length).toBeLessThan(CUBE_STEP.length);
+		// v4 (specs/waffle_v4_document_model.md §2.11): the STEP text lives in
+		// the document's `sources` table as a packed Embedded source; the
+		// feature names it by id and carries no inline payload.
+		expect(tree.features[0].operation.params.source_id).toMatch(/^[0-9a-f-]{36}$/);
+		expect(tree.features[0].operation.params.blob ?? null).toBeNull();
+		const saved = JSON.parse(await waffle.page.evaluate(() => window.__waffle.buildDocumentJson()));
+		expect(saved.sources).toHaveLength(1);
+		expect(saved.sources[0].id).toBe(tree.features[0].operation.params.source_id);
+		expect(saved.sources[0].locator).toEqual({ type: 'Embedded' });
+		expect(saved.sources[0].embed.encoding).toBe('deflate-base64');
+		expect(saved.sources[0].embed.blob.length).toBeLessThan(CUBE_STEP.length);
 
 		// It renders: one mesh with the cube's 6 pick ranges, 10mm extent.
 		const meshes = await getMeshes(waffle.page);

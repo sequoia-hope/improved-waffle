@@ -206,6 +206,7 @@ fn a_linked_source_without_content_is_loud_until_provide_source() {
         UiToEngine::ProvideSource {
             source_id: Uuid::new_v4(),
             data: CUBE_STEP.into(),
+            resolved_commit: None,
         },
         &mut kernel,
     );
@@ -218,6 +219,7 @@ fn a_linked_source_without_content_is_loud_until_provide_source() {
         UiToEngine::ProvideSource {
             source_id,
             data: CUBE_STEP.into(),
+            resolved_commit: None,
         },
         &mut kernel,
     );
@@ -328,4 +330,167 @@ fn save_document_rejects_a_dangling_or_non_part_active_tab() {
         parsed["tabs"][1]["kind"]["instances"],
         serde_json::json!([])
     );
+}
+
+// ── v4 Phase 2 P2-3: source listing, resolved commits, linked STEP imports ──
+
+#[test]
+fn list_sources_reports_availability_and_provide_source_records_the_commit() {
+    let mut state = EngineState::new();
+    let mut kernel = KernelV2Adapter::new();
+
+    // One packed (available) source from an import, one linked entry the
+    // host still has to fetch.
+    import_cube(&mut state, &mut kernel);
+    let mut doc = load_document(&save_document(&mut state, &mut kernel))
+        .unwrap()
+        .document;
+    let linked = SourceEntry::linked(
+        "bolt.step",
+        SourceKind::Step,
+        Locator::git_branch(
+            "https://github.com/acme/parts",
+            "fasteners/bolt.step",
+            "main",
+        ),
+    );
+    let linked_id = linked.id;
+    doc.sources.push(linked);
+    let json = file_format::save_document(&doc);
+    let mut state = EngineState::new();
+    dispatch(
+        &mut state,
+        UiToEngine::LoadProject { data: json },
+        &mut kernel,
+    );
+
+    let listed = dispatch(&mut state, UiToEngine::ListSources, &mut kernel);
+    let EngineToUi::SourcesListed { sources } = listed else {
+        panic!("{listed:?}")
+    };
+    assert_eq!(sources.len(), 2);
+    let cube = sources.iter().find(|s| s.name == "cube.step").unwrap();
+    assert!(cube.available && cube.pack);
+    assert_eq!(cube.kind, "Step");
+    assert!(cube.content_hash.is_some());
+    let bolt = sources.iter().find(|s| s.id == linked_id).unwrap();
+    assert!(!bolt.available && !bolt.pack);
+    assert!(matches!(bolt.locator, Locator::Git { .. }));
+    assert!(bolt.resolved.is_none());
+
+    // The host fetched it at a commit: hash AND resolved commit recorded.
+    let sha = "9fceb02a".repeat(5);
+    let resp = dispatch(
+        &mut state,
+        UiToEngine::ProvideSource {
+            source_id: linked_id,
+            data: CUBE_STEP.to_string(),
+            resolved_commit: Some(sha.to_uppercase()),
+        },
+        &mut kernel,
+    );
+    assert!(matches!(resp, EngineToUi::ModelUpdated { .. }), "{resp:?}");
+    let entry = state.sources.iter().find(|s| s.id == linked_id).unwrap();
+    assert_eq!(
+        entry.content_hash.as_deref(),
+        Some(git_blob_sha1(CUBE_STEP.as_bytes()).as_str())
+    );
+    assert_eq!(
+        entry.resolved.as_ref().map(|r| r.commit.as_str()),
+        Some(sha.as_str())
+    );
+    let EngineToUi::SourcesListed { sources } =
+        dispatch(&mut state, UiToEngine::ListSources, &mut kernel)
+    else {
+        panic!()
+    };
+    assert!(
+        sources
+            .iter()
+            .find(|s| s.id == linked_id)
+            .unwrap()
+            .available
+    );
+}
+
+#[test]
+fn import_step_from_locator_creates_a_linked_source_that_builds_and_saves_unpacked() {
+    let mut state = EngineState::new();
+    let mut kernel = KernelV2Adapter::new();
+    let sha = "9fceb02a".repeat(5);
+    let resp = dispatch(
+        &mut state,
+        UiToEngine::ImportStepFromLocator {
+            file_name: "cube.step".to_string(),
+            locator: Locator::git_branch(
+                "https://github.com/acme/parts",
+                "parts/cube.step",
+                "main",
+            ),
+            data: CUBE_STEP.to_string(),
+            resolved_commit: Some(sha.clone()),
+        },
+        &mut kernel,
+    );
+    assert!(matches!(resp, EngineToUi::ModelUpdated { .. }), "{resp:?}");
+    assert!(state.engine.errors.is_empty(), "{:?}", state.engine.errors);
+    assert_eq!(state.engine.tree.features.len(), 1);
+    let Operation::ImportedBody { params } = &state.engine.tree.features[0].operation else {
+        panic!()
+    };
+    let source_id = params.source_id.expect("names its source");
+    assert!(params.blob.is_none());
+
+    // Saved: linked (no embed), hashed, resolved — and it loads back as
+    // unavailable until the host provides it again.
+    let json = save_document(&mut state, &mut kernel);
+    let doc = load_document(&json).unwrap().document;
+    let entry = doc.source(source_id).unwrap();
+    assert!(matches!(entry.locator, Locator::Git { .. }));
+    assert!(!entry.effective_pack());
+    assert!(entry.embed.is_none());
+    assert_eq!(
+        entry.content_hash.as_deref(),
+        Some(git_blob_sha1(CUBE_STEP.as_bytes()).as_str())
+    );
+    assert_eq!(
+        entry.resolved.as_ref().map(|r| r.commit.as_str()),
+        Some(sha.as_str())
+    );
+    assert!(entry.fetched_at.is_some());
+    assert!(
+        matches!(&state.engine.tree.provenance.get(&state.engine.tree.features[0].id).map(|p| &p.origin), Some(ProvenanceOrigin::Import { source_id: s }) if *s == source_id)
+    );
+
+    let mut fresh = EngineState::new();
+    dispatch(
+        &mut fresh,
+        UiToEngine::LoadProject { data: json },
+        &mut kernel,
+    );
+    assert!(
+        fresh
+            .engine
+            .errors
+            .iter()
+            .any(|(_, m)| m.contains("SourceUnavailable") || m.contains("unavailable")),
+        "{:?}",
+        fresh.engine.errors
+    );
+
+    // A Local locator cannot be linked.
+    let bad = dispatch(
+        &mut state,
+        UiToEngine::ImportStepFromLocator {
+            file_name: "x.step".into(),
+            locator: Locator::Local {
+                provider: "local".into(),
+                doc_id: "abc".into(),
+            },
+            data: CUBE_STEP.to_string(),
+            resolved_commit: None,
+        },
+        &mut kernel,
+    );
+    assert!(matches!(bad, EngineToUi::Error { .. }), "{bad:?}");
 }

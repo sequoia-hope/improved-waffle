@@ -8,8 +8,11 @@
  * legacy `/?src=<raw url>` link redirects here; a private repo asks for a
  * per-host token and retries; the GitHub provider's share URL is this link.
  */
+import fs from 'fs';
 import { test as rawTest, expect } from '@playwright/test';
 import { getDocumentFromDB } from './helpers/waffle-test.js';
+
+const CUBE_STEP = fs.readFileSync(new URL('./fixtures/cube.step', import.meta.url), 'utf8');
 
 const SHA = '9fceb02a9fceb02a9fceb02a9fceb02a9fceb02a';
 const REMOTE = 'https://github.com/acme/parts';
@@ -227,5 +230,136 @@ rawTest.describe('Open from link', () => {
 		});
 		expect(r.share).toBe(`http://localhost:5173/open?remote=${encodeURIComponent(REMOTE)}&path=bracket.waffle&ref=main`);
 		expect(r.locator).toEqual({ type: 'Git', remote: REMOTE, path: 'bracket.waffle', ref: { type: 'Branch', name: 'main' }, host: 'github' });
+	});
+});
+
+// ---------------------------------------------------------- P2-3: sources
+
+const STEP_SRC_ID = '5e7a0000-1111-4222-8333-444455556666';
+const IMPORT_FEATURE_ID = '7b1c0000-1111-4222-8333-444455556666';
+
+/** The shared doc plus a linked STEP source (Relative) and the feature using it. */
+function sharedDocWithStep() {
+	const d = sharedDoc();
+	d.sources.push({
+		id: STEP_SRC_ID,
+		name: 'cube.step',
+		kind: { type: 'Step' },
+		locator: { type: 'Relative', path: '../parts/cube.step' },
+		pack: false
+	});
+	d.tabs[0].kind.features.features.push({
+		id: IMPORT_FEATURE_ID,
+		name: 'Import cube.step',
+		suppressed: false,
+		references: [],
+		operation: {
+			type: 'ImportedBody',
+			params: { file_name: 'cube.step', source_id: STEP_SRC_ID, translation_m: [0, 0, 0], rotation_deg: [0, 0, 0], scale: 1 }
+		}
+	});
+	return d;
+}
+
+/** GitHub mock serving the linked document AND the STEP file at the commit. */
+async function mockGitHubWithStep(page) {
+	const calls = [];
+	await page.route('https://api.github.com/**', async (route) => {
+		const url = route.request().url();
+		calls.push(url);
+		if (url.endsWith('/repos/acme/parts/commits/main')) {
+			return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ sha: SHA }) });
+		}
+		if (url.includes(`/repos/acme/parts/contents/brackets/bracket.waffle?ref=${SHA}`)) {
+			return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ content: b64(JSON.stringify(sharedDocWithStep())), sha: 'b10b', encoding: 'base64' }) });
+		}
+		if (url.includes(`/repos/acme/parts/contents/parts/cube.step?ref=${SHA}`)) {
+			return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ content: b64(CUBE_STEP), sha: 'c0be', encoding: 'base64' }) });
+		}
+		return route.fulfill({ status: 404, contentType: 'application/json', body: '{"message":"Not Found"}' });
+	});
+	return calls;
+}
+
+rawTest.describe('Linked sources', () => {
+	rawTest('a linked document resolves its Relative STEP source against its own location and builds the body', async ({ page }) => {
+		const calls = await mockGitHubWithStep(page);
+		await page.goto(OPEN_URL);
+		await waitForEditor(page);
+		// The import feature must build — no SourceUnavailable error — once
+		// the host fetched the STEP at the same commit the document came from.
+		await page.waitForFunction(
+			() => window.__waffle.getMeshes().length === 1 && window.__waffle.getFeatureErrors().size === 0,
+			{ timeout: 30000 }
+		);
+		expect(calls.some((u) => u.includes(`/contents/parts/cube.step?ref=${SHA}`))).toBe(true);
+		const sources = await page.evaluate(() => window.__waffle.listSources());
+		const step = sources.find((s) => s.id === STEP_SRC_ID);
+		expect(step.available).toBe(true);
+		expect(step.resolved.commit).toBe(SHA);
+		expect(step.content_hash).toMatch(/^git-blob-sha1:[0-9a-f]{40}$/);
+		expect(step.locator.type).toBe('Relative');
+	});
+
+	rawTest('an unresolvable source is loud, and the document still opens', async ({ page }) => {
+		await page.route('https://api.github.com/**', async (route) => {
+			const url = route.request().url();
+			if (url.endsWith('/repos/acme/parts/commits/main')) {
+				return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ sha: SHA }) });
+			}
+			if (url.includes('/contents/brackets/bracket.waffle?ref=')) {
+				return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ content: b64(JSON.stringify(sharedDocWithStep())), sha: 'b10b', encoding: 'base64' }) });
+			}
+			return route.fulfill({ status: 404, contentType: 'application/json', body: '{"message":"Not Found"}' });
+		});
+		await page.goto(OPEN_URL);
+		await waitForEditor(page);
+		await page.waitForFunction(
+			() => (window.__waffle.getToasts() || []).some((t) => /Source unavailable/.test(t.message) && /cube\.step/.test(t.message)),
+			{ timeout: 20000 }
+		);
+		const errors = await page.evaluate(() => [...window.__waffle.getFeatureErrors().values()].map(String));
+		expect(errors.some((m) => /unavailable/i.test(m))).toBe(true);
+		expect(await page.evaluate(() => window.__waffle.getDocumentState().documentName)).toBe('Shared Bracket');
+		expect(await page.evaluate(() => window.__waffle.getMeshes().length)).toBe(0);
+	});
+
+	rawTest('Link STEP imports a file by URL as a linked, unpacked source pinned to the fetched commit', async ({ page }) => {
+		await page.route('https://api.github.com/**', async (route) => {
+			const url = route.request().url();
+			if (url.endsWith('/repos/acme/parts/commits/main')) {
+				return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ sha: SHA }) });
+			}
+			if (url.includes(`/repos/acme/parts/contents/parts/cube.step?ref=${SHA}`)) {
+				return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ content: b64(CUBE_STEP), sha: 'c0be', encoding: 'base64' }) });
+			}
+			return route.fulfill({ status: 404, contentType: 'application/json', body: '{"message":"Not Found"}' });
+		});
+		await page.goto('/');
+		await page.waitForFunction(() => window.__waffle?.getState()?.engineReady === true, { timeout: 30000 });
+
+		await page.locator('[data-testid="toolbar-btn-import-link"]').click();
+		const dialog = page.locator('[data-testid="import-link-dialog"]');
+		await expect(dialog).toBeVisible();
+		await page.locator('[data-testid="import-link-url"]').fill('https://github.com/acme/parts/blob/main/parts/cube.step');
+		await page.locator('[data-testid="import-link-submit"]').click();
+		await expect(dialog).toBeHidden({ timeout: 20000 });
+		await page.waitForFunction(() => window.__waffle.getMeshes().length === 1, { timeout: 30000 });
+		// Placement modal opens like a file import; apply it.
+		await page.locator('[data-testid="import-apply"]').click();
+
+		const json = JSON.parse(await page.evaluate(() => window.__waffle.buildDocumentJson()));
+		expect(json.sources).toHaveLength(1);
+		const src = json.sources[0];
+		expect(src.kind).toEqual({ type: 'Step' });
+		expect(src.locator).toEqual({ type: 'Git', remote: REMOTE, path: 'parts/cube.step', ref: { type: 'Branch', name: 'main' }, host: 'github' });
+		expect(src.embed ?? null).toBeNull();
+		expect(src.pack ?? false).toBe(false);
+		expect(src.resolved.commit).toBe(SHA);
+		expect(src.content_hash).toMatch(/^git-blob-sha1:[0-9a-f]{40}$/);
+		const feature = json.tabs[0].kind.features.features.find((f) => f.operation.type === 'ImportedBody');
+		expect(feature.operation.params.source_id).toBe(src.id);
+		expect(feature.operation.params.blob ?? null).toBeNull();
+		expect(json.tabs[0].kind.features.provenance[feature.id].origin).toEqual({ type: 'Import', source_id: src.id });
 	});
 });

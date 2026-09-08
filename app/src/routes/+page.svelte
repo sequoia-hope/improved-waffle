@@ -4,6 +4,7 @@
 	import { base } from '$app/paths';
 	import Toolbar from '$lib/ui/Toolbar.svelte';
 	import LinkedDocBanner from '$lib/ui/LinkedDocBanner.svelte';
+	import ImportLinkDialog from '$lib/ui/ImportLinkDialog.svelte';
 	import FeatureTree from '$lib/ui/FeatureTree.svelte';
 	import PropertyEditor from '$lib/ui/PropertyEditor.svelte';
 	import StatusBar from '$lib/ui/StatusBar.svelte';
@@ -184,6 +185,7 @@
 
 <RevolveDialog />
 <SketchPlaneDialog />
+<ImportLinkDialog />
 <ToastContainer />
 <TestCaseBrowser />
 <SaveTestCaseDialog />
