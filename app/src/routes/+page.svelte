@@ -5,6 +5,7 @@
 	import Toolbar from '$lib/ui/Toolbar.svelte';
 	import LinkedDocBanner from '$lib/ui/LinkedDocBanner.svelte';
 	import ImportLinkDialog from '$lib/ui/ImportLinkDialog.svelte';
+	import AssemblyPanel from '$lib/ui/AssemblyPanel.svelte';
 	import FeatureTree from '$lib/ui/FeatureTree.svelte';
 	import PropertyEditor from '$lib/ui/PropertyEditor.svelte';
 	import StatusBar from '$lib/ui/StatusBar.svelte';
@@ -27,6 +28,7 @@
 		: [{ id: 'default', name: 'Part 1' }]
 	);
 	let activeTab = $derived(getActiveTabId() || tabs[0]?.id);
+	let activeIsAssembly = $derived(getDocumentTabs().find((t) => t.id === getActiveTabId())?.kind?.type === 'Assembly');
 
 	let leftWidth = $state(200);
 	let rightWidth = $state(250);
@@ -110,7 +112,7 @@
 			activeTabId={activeTab}
 			onswitch={(id) => switchTab(id)}
 			onclose={(id) => closeTab(id)}
-			onadd={() => { const id = addTab(); switchTab(id); }}
+			onadd={(kind) => { const id = addTab(kind); switchTab(id); }}
 			onrename={(id, name) => renameTab(id, name)}
 		/>
 	</div>
@@ -124,7 +126,7 @@
 		<div class="mobile-backdrop" onclick={closeMobilePanel}></div>
 	{/if}
 	<div class="mobile-panel mobile-panel-left" class:open={activePanel === 'left'}>
-		<FeatureTree />
+		{#if activeIsAssembly}<AssemblyPanel />{:else}<FeatureTree />{/if}
 	</div>
 	<div class="mobile-panel mobile-panel-right" class:open={activePanel === 'right'}>
 		<PropertyEditor />
@@ -148,12 +150,12 @@
 			activeTabId={activeTab}
 			onswitch={(id) => switchTab(id)}
 			onclose={(id) => closeTab(id)}
-			onadd={() => { const id = addTab(); switchTab(id); }}
+			onadd={(kind) => { const id = addTab(kind); switchTab(id); }}
 			onrename={(id, name) => renameTab(id, name)}
 		/>
 	</div>
 	<div class="left-panel">
-		<FeatureTree />
+		{#if activeIsAssembly}<AssemblyPanel />{:else}<FeatureTree />{/if}
 	</div>
 	<div
 		class="divider"

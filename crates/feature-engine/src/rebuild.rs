@@ -1917,7 +1917,7 @@ fn resolve_plane_definition(
 /// internals, so the two on-face origin points may differ by an in-plane
 /// translation — they are guaranteed coplanar, which is the property the
 /// offset depends on.)
-fn resolve_face_plane(
+pub fn resolve_face_plane(
     base: &waffle_types::GeomRef,
     feature_results: &HashMap<Uuid, OpResult>,
     introspect: &dyn waffle_types::kernel::KernelIntrospect,

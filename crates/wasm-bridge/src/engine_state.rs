@@ -29,6 +29,9 @@ pub struct EngineState {
     pub document_extra: serde_json::Map<String, serde_json::Value>,
     /// Unknown envelope keys captured at load, re-emitted on save (§2.6).
     pub envelope_extra: serde_json::Map<String, serde_json::Value>,
+    /// The open `Assembly` tab, evaluated (Phase 3b). `None` while a Part tab
+    /// is active; its instance bodies are what the renderer shows.
+    pub assembly: Option<crate::assembly_view::AssemblyView>,
 }
 
 /// An active sketch editing session.
@@ -56,6 +59,7 @@ impl EngineState {
             sources: Vec::new(),
             document_extra: serde_json::Map::new(),
             envelope_extra: serde_json::Map::new(),
+            assembly: None,
         }
     }
 
@@ -180,6 +184,7 @@ impl EngineState {
 
     /// Reset to a clean state (new document).
     pub fn reset(&mut self) {
+        self.assembly = None;
         self.engine = Engine::new();
         self.active_sketch = None;
         self.selection.clear();

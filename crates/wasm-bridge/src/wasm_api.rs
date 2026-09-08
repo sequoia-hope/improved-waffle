@@ -536,36 +536,71 @@ fn with_edges<T>(feature_index: usize, f: impl FnOnce(&EdgeRenderData) -> T) -> 
 // body index is the position in `collect_renderable_bodies`, which is stable
 // for a given engine state and shared by every per-body accessor.
 
-/// Address of one renderable body: which feature and which of its outputs.
+/// Address of one renderable body: which feature and which of its outputs —
+/// and, in assembly mode, which instance (and which part engine) it belongs to.
 struct BodyAddr {
     feature_index: usize,
     feature_id: uuid::Uuid,
     output_index: usize,
+    /// `(instance id, index into the assembly view's parts)`; `None` for the
+    /// live part.
+    instance: Option<(uuid::Uuid, usize)>,
 }
 
-/// Flat, ordered list of renderable bodies: every mesh-bearing output of every
-/// feature that is not consumed by a later boolean. Order is feature order, then
-/// output order within a feature.
-fn collect_renderable_bodies(engine: &WasmEngine) -> Vec<BodyAddr> {
-    let consumed = &engine.state.engine.consumed_features;
+/// The engine a body address lives in.
+fn engine_of<'a>(engine: &'a WasmEngine, addr: &BodyAddr) -> Option<&'a feature_engine::Engine> {
+    match addr.instance {
+        None => Some(&engine.state.engine),
+        Some((_, part_idx)) => engine
+            .state
+            .assembly
+            .as_ref()
+            .and_then(|v| v.parts.get(part_idx))
+            .map(|(_, e)| e),
+    }
+}
+
+fn bodies_of_engine(
+    fe: &feature_engine::Engine,
+    instance: Option<(uuid::Uuid, usize)>,
+) -> Vec<BodyAddr> {
+    let consumed = &fe.consumed_features;
     let mut bodies = Vec::new();
-    for (fi, feature) in engine.state.engine.tree.features.iter().enumerate() {
+    for (fi, feature) in fe.tree.features.iter().enumerate() {
         if consumed.contains(&feature.id) {
             continue;
         }
-        if let Some(result) = engine.state.engine.feature_results.get(&feature.id) {
+        if let Some(result) = fe.feature_results.get(&feature.id) {
             for (oi, (_key, body)) in result.outputs.iter().enumerate() {
                 if body.mesh.is_some() {
                     bodies.push(BodyAddr {
                         feature_index: fi,
                         feature_id: feature.id,
                         output_index: oi,
+                        instance,
                     });
                 }
             }
         }
     }
     bodies
+}
+
+/// Flat, ordered list of renderable bodies: every mesh-bearing output of every
+/// feature that is not consumed by a later boolean. Order is feature order, then
+/// output order within a feature. In assembly mode: every non-suppressed
+/// instance's bodies, in instance order, each tagged with its instance.
+fn collect_renderable_bodies(engine: &WasmEngine) -> Vec<BodyAddr> {
+    if let Some(view) = engine.state.assembly.as_ref() {
+        let mut bodies = Vec::new();
+        for inst in view.tree.instances.iter().filter(|i| !i.suppressed) {
+            if let Some(idx) = view.part_index(&inst.source) {
+                bodies.extend(bodies_of_engine(&view.parts[idx].1, Some((inst.id, idx))));
+            }
+        }
+        return bodies;
+    }
+    bodies_of_engine(&engine.state.engine, None)
 }
 
 /// Access a body's mesh by flat body index.
@@ -576,7 +611,9 @@ fn with_body_mesh<T>(body_index: usize, f: impl FnOnce(&RenderMesh) -> T) -> Opt
         let addr = collect_renderable_bodies(engine)
             .into_iter()
             .nth(body_index)?;
-        let result = engine.state.engine.feature_results.get(&addr.feature_id)?;
+        let result = engine_of(engine, &addr)?
+            .feature_results
+            .get(&addr.feature_id)?;
         let (_key, body) = result.outputs.get(addr.output_index)?;
         body.mesh.as_ref().map(f)
     })
@@ -590,7 +627,9 @@ fn with_body_edges<T>(body_index: usize, f: impl FnOnce(&EdgeRenderData) -> T) -
         let addr = collect_renderable_bodies(engine)
             .into_iter()
             .nth(body_index)?;
-        let result = engine.state.engine.feature_results.get(&addr.feature_id)?;
+        let result = engine_of(engine, &addr)?
+            .feature_results
+            .get(&addr.feature_id)?;
         let (_key, body) = result.outputs.get(addr.output_index)?;
         body.edges.as_ref().map(f)
     })
@@ -625,7 +664,6 @@ pub fn get_body_metadata() -> String {
             Some(e) => e,
             None => return "[]".to_string(),
         };
-        let tree = &engine.state.engine.tree;
         let bodies = collect_renderable_bodies(engine);
 
         // How many rendered bodies each feature owns, for ordinal disambiguation.
@@ -639,9 +677,11 @@ pub fn get_body_metadata() -> String {
             std::collections::HashMap::new();
         let mut entries = Vec::new();
         for addr in &bodies {
-            let output_key = engine
-                .state
-                .engine
+            let Some(fe) = engine_of(engine, addr) else {
+                continue;
+            };
+            let tree = &fe.tree;
+            let output_key = fe
                 .feature_results
                 .get(&addr.feature_id)
                 .and_then(|r| r.outputs.get(addr.output_index))
@@ -649,7 +689,11 @@ pub fn get_body_metadata() -> String {
 
             let body_id = output_key
                 .as_ref()
-                .map(|k| feature_engine::types::FeatureTree::body_id(addr.feature_id, k));
+                .map(|k| feature_engine::types::FeatureTree::body_id(addr.feature_id, k))
+                .map(|id| match addr.instance {
+                    Some((inst, _)) => format!("{inst}/{id}"),
+                    None => id,
+                });
 
             // Ordinal among this feature's rendered bodies (1-based).
             let ordinal = {
@@ -661,7 +705,7 @@ pub fn get_body_metadata() -> String {
 
             let name = body_id
                 .as_deref()
-                .and_then(|id| engine.state.engine.display_body_name_override(id))
+                .and_then(|id| fe.display_body_name_override(id))
                 .map(|s| s.to_string())
                 .unwrap_or_else(|| {
                     let base = tree
@@ -677,14 +721,32 @@ pub fn get_body_metadata() -> String {
                     }
                 });
 
-            entries.push(serde_json::json!({
+            let mut entry = serde_json::json!({
                 "featureIndex": addr.feature_index,
                 "featureId": addr.feature_id,
                 "outputIndex": addr.output_index,
                 "outputKey": output_key,
                 "bodyId": body_id,
                 "name": name,
-            }));
+            });
+            if let (Some((inst_id, _)), Some(view)) =
+                (addr.instance, engine.state.assembly.as_ref())
+            {
+                let inst = view.tree.instance(inst_id);
+                entry["instanceId"] = serde_json::json!(inst_id);
+                entry["instanceName"] = serde_json::json!(inst.map(|i| i.name.clone()));
+                entry["partTabId"] = serde_json::json!(inst.map(|i| i.source.tab_id.clone()));
+                entry["transform"] = serde_json::to_value(view.placement(inst_id))
+                    .unwrap_or(serde_json::Value::Null);
+                if let Some(i) = inst {
+                    entry["name"] = serde_json::json!(format!(
+                        "{} · {}",
+                        i.name,
+                        entry["name"].as_str().unwrap_or("Body")
+                    ));
+                }
+            }
+            entries.push(entry);
         }
         serde_json::to_string(&entries).unwrap_or_else(|_| "[]".to_string())
     })
@@ -733,7 +795,10 @@ pub fn get_body_face_data(body_index: usize) -> String {
             Some(a) => a,
             None => return "[]".to_string(),
         };
-        let result = match engine.state.engine.feature_results.get(&addr.feature_id) {
+        let Some(fe) = engine_of(engine, &addr) else {
+            return "[]".to_string();
+        };
+        let result = match fe.feature_results.get(&addr.feature_id) {
             Some(r) => r,
             None => return "[]".to_string(),
         };
@@ -750,7 +815,7 @@ pub fn get_body_face_data(body_index: usize) -> String {
             key,
             mesh,
             &result.provenance.role_assignments,
-            &engine.state.engine,
+            fe,
             &engine.kernel,
         );
         serde_json::to_string(&entries).unwrap_or_else(|_| "[]".to_string())

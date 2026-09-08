@@ -27,7 +27,8 @@
 		isBodyPickingEnabled,
 		proposeHoverRef,
 		getSketchHover,
-		getFreshHoveredRef
+		getFreshHoveredRef,
+		setSelectedInstanceId
 	} from '$lib/engine/store.svelte.js';
 	import { SIDE_FACE_GROUP_THRESHOLD } from '$lib/config.js';
 	import { handleBodyFaceClick } from '$lib/sketch/tools.js';
@@ -275,9 +276,24 @@
 			geometry: buildGeometry(m),
 			faceRanges: m.faceRanges || [],
 			featureId: m.featureId,
-			bodyId: m.bodyId
+			bodyId: m.bodyId,
+			instanceId: m.instanceId ?? null,
+			...placementProps(m.transform)
 		}));
 	});
+
+	/**
+	 * Assembly instance placement (v4 Phase 3b) as Threlte props. The
+	 * quaternion is converted to Euler angles because the `quaternion` prop
+	 * does not take effect on T.Mesh (Threlte v8 quirk); `rotation` does.
+	 */
+	function placementProps(transform) {
+		if (!transform) return { position: [0, 0, 0], rotation: [0, 0, 0] };
+		const t = transform.translation_m ?? [0, 0, 0];
+		const q = transform.rotation_quat ?? [0, 0, 0, 1];
+		const euler = new THREE.Euler().setFromQuaternion(new THREE.Quaternion(q[0], q[1], q[2], q[3]));
+		return { position: [t[0], t[1], t[2]], rotation: [euler.x, euler.y, euler.z] };
+	}
 
 	/**
 	 * Build a single material that highlights an entire body. Returned as a
@@ -516,6 +532,10 @@
 		// Stop event from reaching datum planes behind this mesh
 		event.stopPropagation();
 
+		// Assembly mode: remember which instance the clicked body belongs to
+		// (mate connectors are created "on the selected face of an instance").
+		setSelectedInstanceId(mesh.instanceId ?? null);
+
 		// Canonicalize SideFace refs when grouping
 		if (shouldGroupSideFaces(mesh.faceRanges)) {
 			ref = canonicalizeSideFaceRef(ref, mesh.faceRanges);
@@ -590,6 +610,8 @@
 			<T.Mesh
 				geometry={mesh.geometry}
 				material={meshMaterials[i]?.length > 1 ? meshMaterials[i] : meshMaterials[i]?.[0]}
+				position={mesh.position}
+				rotation={mesh.rotation}
 				frustumCulled={false}
 				userData={{ waffleType: 'model' }}
 				raycast={() => {}}
@@ -598,6 +620,8 @@
 			<T.Mesh
 				geometry={mesh.geometry}
 				material={meshMaterials[i]?.length > 1 ? meshMaterials[i] : meshMaterials[i]?.[0]}
+				position={mesh.position}
+				rotation={mesh.rotation}
 				frustumCulled={false}
 				userData={{ waffleType: 'model' }}
 				onpointermove={(e) => handlePointerMove(e, i)}

@@ -470,6 +470,16 @@ export async function initEngine() {
 		// The document's `sources` table with availability (v4 §2.3) — the
 		// Sources panel's data; absent on the wire when the table is empty.
 		documentSources = msg.sources ?? [];
+		// Assembly evaluation (v4 Phase 3b): solved placements are derived
+		// hints written back into the tab so they are saved with it.
+		// Empty arrays are omitted on the wire; give the UI a stable shape.
+		assemblyStatus = msg.assembly ? { errors: [], warnings: [], parts: [], ...msg.assembly } : null;
+		if (msg.assembly?.placements) {
+			const tab = documentTabs.find(t => t.id === activeTabId);
+			if (tab?.kind?.type === 'Assembly') {
+				tab.kind.assembly.placements = JSON.parse(JSON.stringify(msg.assembly.placements));
+			}
+		}
 		lastError = null;
 		statusMessage = `Model updated (${meshes.length} ${meshes.length === 1 ? 'body' : 'bodies'})`;
 
@@ -714,6 +724,10 @@ export async function initEngine() {
 			evaluateExpression: (expr) => evaluateExpression(expr),
 			getMeshes: () => meshes.map(m => ({
 				featureId: m.featureId,
+				bodyId: m.bodyId ?? null,
+				instanceId: m.instanceId ?? null,
+				instanceName: m.instanceName ?? null,
+				transform: m.transform ? JSON.parse(JSON.stringify(m.transform)) : null,
 				vertexCount: m.vertices?.length / 3,
 				triangleCount: m.triangleCount,
 				hasNormals: m.normals?.length > 0,
@@ -787,6 +801,21 @@ export async function initEngine() {
 			resolveDocumentSources: () => resolveDocumentSources(),
 			listSources: async () => (await bridge.send({ type: 'ListSources' }))?.sources ?? [],
 			getSources: () => JSON.parse(JSON.stringify(documentSources)),
+			// Assemblies (v4 Phase 3)
+			getAssembly: () => { const a = getAssembly(); return a ? JSON.parse(JSON.stringify(a)) : null; },
+			getAssemblyStatus: () => assemblyStatus ? JSON.parse(JSON.stringify(assemblyStatus)) : null,
+			addTab: (kind) => addTab(kind),
+			switchTab: (id) => switchTab(id),
+			refreshAssembly: () => refreshAssembly(),
+			addInstance: (opts) => addInstance(opts),
+			updateInstance: (id, patch) => updateInstance(id, patch),
+			removeInstance: (id) => removeInstance(id),
+			addConnector: (opts) => addConnector(opts),
+			removeConnector: (id) => removeConnector(id),
+			addMate: (opts) => addMate(opts),
+			updateMate: (id, patch) => updateMate(id, patch),
+			removeMate: (id) => removeMate(id),
+			getSelectedInstanceId: () => selectedInstanceId,
 			setSourcePack: (id, pack) => setSourcePack(id, pack),
 			packAllSources: () => packAllSources(),
 			pinSource: (id) => pinSource(id),
@@ -1230,6 +1259,7 @@ export function getBodies() {
 			bodyId: m.bodyId,
 			featureId: m.featureId,
 			outputKey: m.outputKey ?? null,
+			instanceId: m.instanceId ?? null,
 			name
 		};
 	});
@@ -5568,6 +5598,7 @@ export async function loadPendingDocument() {
 		await loadProject(pendingJson, { silent: true });
 		log('system', `Loaded document ${pendingDocId}`);
 		await resolveDocumentSources();
+		if (activeAssemblyTab()) await refreshAssembly();
 	} catch (err) {
 		log('error', `Failed to load pending document: ${err}`);
 	}
@@ -5601,7 +5632,9 @@ export async function switchTab(tabId) {
 	// New document context: its rebuild warnings are "new" again.
 	lastRebuildWarnings = new Set();
 
-	if (bridge && engineReady && targetTab?.kind?.features) {
+	if (bridge && engineReady && targetTab?.kind?.type === 'Assembly') {
+		await refreshAssembly();
+	} else if (bridge && engineReady && targetTab?.kind?.features) {
 		// Deep-clone to unwrap Svelte 5 proxies (they can't be postMessage'd)
 		const features = JSON.parse(JSON.stringify(targetTab.kind.features));
 		await sendRebuild({
@@ -5613,13 +5646,205 @@ export async function switchTab(tabId) {
 	scheduleAutoSave();
 }
 
+// -- Assemblies (v4 Phase 3) --
+
+/**
+ * Evaluation result of the open Assembly tab (`ModelUpdated.assembly`):
+ * `{ placements, errors, warnings, parts }`, or null while a Part tab is open.
+ */
+let assemblyStatus = $state(null);
+export function getAssemblyStatus() { return assemblyStatus; }
+
+/** The active tab when it is an Assembly, else null. */
+function activeAssemblyTab() {
+	const tab = documentTabs.find(t => t.id === activeTabId);
+	return tab?.kind?.type === 'Assembly' ? tab : null;
+}
+
+/** The open assembly's tree (instances, connectors, mates, placements), or null. */
+export function getAssembly() {
+	const tab = activeAssemblyTab();
+	return tab ? tab.kind.assembly : null;
+}
+
+/**
+ * Re-evaluate the open Assembly tab: hand the engine the assembly and the
+ * feature trees of this document's Part tabs (`OpenAssembly`); the engine
+ * builds each part once, derives connector frames, solves placements and
+ * renders the instance bodies.
+ */
+export async function refreshAssembly() {
+	const tab = activeAssemblyTab();
+	if (!tab || !bridge || !engineReady) return false;
+	const part_trees = {};
+	for (const t of documentTabs) {
+		if (t.kind?.type === 'Part' && t.kind.features) {
+			part_trees[t.id] = JSON.parse(JSON.stringify(t.kind.features));
+		}
+	}
+	const assembly = JSON.parse(JSON.stringify(tab.kind.assembly));
+	// Placements are derived; the engine recomputes them.
+	delete assembly.placements;
+	try {
+		await sendRebuild({ type: 'OpenAssembly', assembly, part_trees });
+		return true;
+	} catch (err) {
+		log('error', `Assembly evaluation failed: ${err?.message || err}`);
+		showToast('error', `Assembly evaluation failed: ${err?.message || err}`);
+		return false;
+	}
+}
+
+/** Mutate the open assembly's tree, then re-evaluate and autosave. */
+async function editAssembly(fn) {
+	const tab = activeAssemblyTab();
+	if (!tab) return null;
+	const result = fn(tab.kind.assembly);
+	await refreshAssembly();
+	scheduleAutoSave();
+	return result;
+}
+
+/**
+ * Add an instance of a part: a Part tab of this document (`tabId`) or a
+ * tab of a linked `.waffle` source (`sourceId` + `tabId`).
+ * @param {{tabId: string, sourceId?: string|null, name?: string, transform?: object, fixed?: boolean}} opts
+ * @returns {Promise<string|null>} the instance id
+ */
+export async function addInstance({ tabId, sourceId = null, name, transform, fixed = false }) {
+	return editAssembly((asm) => {
+		const id = generateUUID();
+		const partTab = documentTabs.find(t => t.id === tabId);
+		const count = asm.instances.filter(i => i.source.tab_id === tabId && (i.source.source_id ?? null) === sourceId).length;
+		asm.instances.push({
+			id,
+			name: name || `${partTab?.name ?? 'Part'} ${count + 1}`,
+			source: sourceId ? { source_id: sourceId, tab_id: tabId } : { tab_id: tabId },
+			transform: transform || { translation_m: [0, 0, 0], rotation_quat: [0, 0, 0, 1] },
+			...(fixed ? { fixed: true } : {})
+		});
+		return id;
+	});
+}
+
+/** Patch an instance (`name`, `transform`, `fixed`, `suppressed`). */
+export async function updateInstance(instanceId, patch) {
+	return editAssembly((asm) => {
+		const inst = asm.instances.find(i => i.id === instanceId);
+		if (!inst) return false;
+		for (const k of ['name', 'transform', 'fixed', 'suppressed', 'external_key']) {
+			if (k in patch) inst[k] = JSON.parse(JSON.stringify(patch[k]));
+		}
+		return true;
+	});
+}
+
+/** Remove an instance and everything that references it. */
+export async function removeInstance(instanceId) {
+	return editAssembly((asm) => {
+		asm.instances = asm.instances.filter(i => i.id !== instanceId);
+		const gone = new Set((asm.connectors ?? []).filter(c => c.instance_path?.[0] === instanceId).map(c => c.id));
+		asm.connectors = (asm.connectors ?? []).filter(c => !gone.has(c.id));
+		asm.mates = (asm.mates ?? []).filter(m => !m.connectors.some(c => gone.has(c)));
+		if (asm.placements) delete asm.placements[instanceId];
+		return true;
+	});
+}
+
+/**
+ * Add a mate connector on an instance: from a face of the part (`geomRef`,
+ * the face's persistent reference in the PART's feature space — the frame
+ * is derived from the geometry at evaluation) or an explicit `frame`.
+ * @returns {Promise<string|null>} the connector id
+ */
+export async function addConnector({ instanceId, geomRef = null, frame = null, name }) {
+	return editAssembly((asm) => {
+		const id = generateUUID();
+		asm.connectors = asm.connectors ?? [];
+		const inst = asm.instances.find(i => i.id === instanceId);
+		asm.connectors.push({
+			id,
+			name: name || `${inst?.name ?? 'Instance'} connector ${asm.connectors.length + 1}`,
+			instance_path: [instanceId],
+			...(geomRef ? { geom_ref: JSON.parse(JSON.stringify(geomRef)) } : {}),
+			frame: frame ? JSON.parse(JSON.stringify(frame)) : { origin: [0, 0, 0], z_axis: [0, 0, 1], x_axis: [0, 0, 0] }
+		});
+		return id;
+	});
+}
+
+export async function removeConnector(connectorId) {
+	return editAssembly((asm) => {
+		asm.connectors = (asm.connectors ?? []).filter(c => c.id !== connectorId);
+		asm.mates = (asm.mates ?? []).filter(m => !m.connectors.includes(connectorId));
+		return true;
+	});
+}
+
+/**
+ * Fasten two connectors: `b`'s instance is placed so its frame coincides
+ * with `a`'s (rotated by `rotationDeg` about z; `flip` opposes the z axes —
+ * two outward face normals "stacked").
+ * @returns {Promise<string|null>} the mate id
+ */
+export async function addMate({ a, b, flip = true, rotationDeg = 0, name }) {
+	return editAssembly((asm) => {
+		const id = generateUUID();
+		asm.mates = asm.mates ?? [];
+		const kind = { type: 'Fastened' };
+		if (flip) kind.flip = true;
+		if (rotationDeg) kind.rotation_deg = rotationDeg;
+		asm.mates.push({ id, name: name || `Fastened ${asm.mates.length + 1}`, kind, connectors: [a, b] });
+		return id;
+	});
+}
+
+export async function updateMate(mateId, patch) {
+	return editAssembly((asm) => {
+		const m = (asm.mates ?? []).find(x => x.id === mateId);
+		if (!m) return false;
+		if ('name' in patch) m.name = patch.name;
+		if ('suppressed' in patch) m.suppressed = !!patch.suppressed;
+		if ('flip' in patch || 'rotationDeg' in patch) {
+			const kind = { type: 'Fastened' };
+			const flip = 'flip' in patch ? !!patch.flip : !!m.kind?.flip;
+			const rot = 'rotationDeg' in patch ? Number(patch.rotationDeg) || 0 : (m.kind?.rotation_deg ?? 0);
+			if (flip) kind.flip = true;
+			if (rot) kind.rotation_deg = rot;
+			m.kind = kind;
+		}
+		return true;
+	});
+}
+
+export async function removeMate(mateId) {
+	return editAssembly((asm) => {
+		asm.mates = (asm.mates ?? []).filter(m => m.id !== mateId);
+		return true;
+	});
+}
+
+/** The instance whose body was last clicked in the viewport (assembly mode). */
+let selectedInstanceId = $state(null);
+export function getSelectedInstanceId() { return selectedInstanceId; }
+export function setSelectedInstanceId(id) { selectedInstanceId = id; }
+
 /**
  * Add a new tab to the document.
  * @returns {string} The new tab's ID
  */
-export function addTab() {
+export function addTab(kind = 'Part') {
 	const id = generateUUID();
-	const name = `Part ${documentTabs.length + 1}`;
+	if (kind === 'Assembly') {
+		const n = documentTabs.filter(t => t.kind?.type === 'Assembly').length + 1;
+		documentTabs = [...documentTabs, {
+			id,
+			name: `Assembly ${n}`,
+			kind: { type: 'Assembly', assembly: { instances: [], connectors: [], mates: [] } }
+		}];
+		return id;
+	}
+	const name = `Part ${documentTabs.filter(t => t.kind?.type !== 'Assembly').length + 1}`;
 	documentTabs = [...documentTabs, {
 		id,
 		name,

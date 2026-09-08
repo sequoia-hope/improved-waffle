@@ -1,3 +1,4 @@
+pub mod assembly_view;
 pub mod dispatch;
 pub mod engine_state;
 pub mod messages;

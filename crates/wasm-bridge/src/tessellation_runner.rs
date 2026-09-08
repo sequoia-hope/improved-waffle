@@ -17,8 +17,19 @@ use modeling_ops::KernelBundle;
 /// Each tessellation/edge-extraction call is wrapped in `catch_unwind` to
 /// prevent panics in tessellation code from crashing the WASM module.
 pub fn tessellate_missing_meshes(state: &mut EngineState, kernel: &mut dyn KernelBundle) {
-    let consumed = state.engine.consumed_features.clone();
-    let feature_ids: Vec<uuid::Uuid> = state.engine.tree.features.iter().map(|f| f.id).collect();
+    tessellate_engine(&mut state.engine, kernel);
+    if let Some(view) = state.assembly.as_mut() {
+        for (_, engine) in view.parts.iter_mut() {
+            tessellate_engine(engine, kernel);
+        }
+    }
+}
+
+/// The same pass for one engine (the live part, or a part of an assembly).
+pub fn tessellate_engine(engine: &mut feature_engine::Engine, kernel: &mut dyn KernelBundle) {
+    let state = engine;
+    let consumed = state.consumed_features.clone();
+    let feature_ids: Vec<uuid::Uuid> = state.tree.features.iter().map(|f| f.id).collect();
 
     for fid in feature_ids {
         if consumed.contains(&fid) {
@@ -26,7 +37,6 @@ pub fn tessellate_missing_meshes(state: &mut EngineState, kernel: &mut dyn Kerne
         }
 
         let needs_work = state
-            .engine
             .feature_results
             .get(&fid)
             .map(|r| {
@@ -40,7 +50,7 @@ pub fn tessellate_missing_meshes(state: &mut EngineState, kernel: &mut dyn Kerne
             continue;
         }
 
-        if let Some(result) = state.engine.feature_results.get_mut(&fid) {
+        if let Some(result) = state.feature_results.get_mut(&fid) {
             for (_key, body) in &mut result.outputs {
                 if body.mesh.is_none() {
                     let handle = body.handle.clone();

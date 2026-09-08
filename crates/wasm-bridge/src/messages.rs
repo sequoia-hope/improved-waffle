@@ -50,6 +50,10 @@ fn default_normal() -> [f64; 3] {
 
 /// Messages from the UI (JavaScript main thread) to the engine (WASM Worker).
 /// Serialized as JSON for postMessage transfer.
+// One message at a time; the fat variants (an assembly, a document) are
+// the payload itself — boxing them would buy nothing (same call as
+// `Operation` / `TabKind`).
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum UiToEngine {
@@ -222,6 +226,18 @@ pub enum UiToEngine {
         #[serde(default)]
         resolved_commit: Option<String>,
     },
+    /// Open (or re-evaluate) an `Assembly` tab (Phase 3b): the UI hands over
+    /// the tab's assembly and the feature trees of this document's Part tabs
+    /// (the engine only ever holds one live tree); parts of linked `.waffle`
+    /// sources come from the source store. Every distinct part is built once,
+    /// connector frames are derived from the current geometry, placements
+    /// are solved and returned as `ModelUpdated.assembly`; the instance
+    /// bodies are then what the per-body accessors enumerate.
+    OpenAssembly {
+        assembly: feature_engine::assembly::AssemblyTree,
+        #[serde(default)]
+        part_trees: HashMap<String, FeatureTree>,
+    },
     /// Fork of a linked document (v4 §7.1): rewrite every `Relative` source
     /// into an absolute `Git` locator in `base`'s repository, pinned at
     /// `commit` (the commit the link was opened at), so the copy's links keep
@@ -311,6 +327,7 @@ pub enum UiToEngine {
 }
 
 /// Messages from the engine (WASM Worker) to the UI (JavaScript main thread).
+#[allow(clippy::large_enum_variant)] // see `UiToEngine`
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum EngineToUi {
@@ -332,6 +349,10 @@ pub enum EngineToUi {
         /// `SourcesListed`), so the UI's Sources panel is reactive.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         sources: Vec<SourceStatus>,
+        /// Present while an `Assembly` tab is open: solved placements and
+        /// the evaluation's problems (Phase 3b).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        assembly: Option<AssemblyStatus>,
     },
 
     /// Sketch constraint solver completed.
@@ -412,4 +433,19 @@ pub struct SourceStatus {
     pub pack: bool,
     /// Whether the engine's source store holds the content.
     pub available: bool,
+}
+
+/// The evaluated assembly as the UI needs it (Phase 3b).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AssemblyStatus {
+    /// Solved placement per non-suppressed instance (derived hints; the UI
+    /// writes them back into the tab for saving).
+    pub placements: std::collections::BTreeMap<Uuid, feature_engine::assembly::Transform>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub errors: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
+    /// Parts that were built (tab id, and source id for linked parts).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub parts: Vec<feature_engine::assembly::PartRef>,
 }

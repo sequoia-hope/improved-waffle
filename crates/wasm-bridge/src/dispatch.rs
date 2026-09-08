@@ -8,7 +8,7 @@ use waffle_types::kernel::RenderMesh;
 use waffle_types::OutputKey;
 
 use crate::engine_state::{BridgeError, EngineState};
-use crate::messages::{EngineToUi, SourceStatus, UiToEngine};
+use crate::messages::{AssemblyStatus, EngineToUi, SourceStatus, UiToEngine};
 
 /// Dispatch a UI message to the engine and return a response.
 ///
@@ -374,6 +374,7 @@ fn handle_message(
             state.document_extra = doc.document.extra;
             state.envelope_extra = doc.extra;
             state.engine.tree = tree;
+            state.assembly = None;
             state.engine.rebuild_from_scratch(kb);
             state.engine.warnings.extend(
                 loaded
@@ -430,8 +431,26 @@ fn handle_message(
             state.active_sketch = None;
             state.selection.clear();
             state.hover = None;
+            state.assembly = None;
             state.engine.tree = features;
             state.engine.rebuild_from_scratch(kb);
+            Ok(model_updated_response(state))
+        }
+
+        UiToEngine::OpenAssembly {
+            assembly,
+            part_trees,
+        } => {
+            state.active_sketch = None;
+            state.selection.clear();
+            state.hover = None;
+            // The live tree is not the assembly's content; keep the renderer
+            // on the instances only.
+            state.engine.tree = feature_engine::types::FeatureTree::new();
+            state.engine.rebuild_from_scratch(kb);
+            let view =
+                crate::assembly_view::evaluate(assembly, &part_trees, &state.engine.sources, kb);
+            state.assembly = Some(view);
             Ok(model_updated_response(state))
         }
 
@@ -721,6 +740,12 @@ fn model_updated_response(state: &EngineState) -> EngineToUi {
         warnings: state.engine.warnings.clone(),
         preview_mesh,
         sources: source_statuses(state),
+        assembly: state.assembly.as_ref().map(|v| AssemblyStatus {
+            placements: v.placements.clone(),
+            errors: v.errors.clone(),
+            warnings: v.warnings.clone(),
+            parts: v.parts.iter().map(|(p, _)| p.clone()).collect(),
+        }),
     }
 }
 
