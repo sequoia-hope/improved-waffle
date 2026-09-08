@@ -26,6 +26,7 @@ fn region_params(region: Region, depth: f64) -> ExtrudeParams {
         targets: None,
         sketch_id: Uuid::nil(), // overridden by extrude_advanced
         profile_index: 0,
+        profile_entity_ids: None,
         depth,
         direction: None,
         symmetric: false,
@@ -179,6 +180,7 @@ fn split_rectangle_multi_region_extrudes_one_merged_body() {
         targets: None,
         sketch_id: Uuid::nil(),
         profile_index: 0,
+        profile_entity_ids: None,
         depth,
         direction: None,
         symmetric: false,

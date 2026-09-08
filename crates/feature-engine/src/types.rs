@@ -377,6 +377,16 @@ fn default_depth_mode() -> DepthMode {
 pub struct ExtrudeParams {
     pub sketch_id: Uuid,
     pub profile_index: usize,
+    /// v4 §2.9 agent-friendly profile addressing. When present, the profile
+    /// is the solved loop whose entity-id set equals this set
+    /// (order-insensitive) and `profile_index` is ignored, so a writer that
+    /// has not run the solver can say "the loop bounded by entities 3,4,5,6"
+    /// (the same identity `Region::profile_entity_ids` carries). No such
+    /// loop, or two loops with the same set, is a loud per-feature error
+    /// (`EngineError::ProfileNotFound` / `ProfileAmbiguous`). The app's own
+    /// writers address by index and leave this `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile_entity_ids: Option<Vec<u32>>,
     pub depth: f64,
     /// Optional driving expression for `depth` (mm-space -> meters). When
     /// present, rebuild re-evaluates it against the design parameters and
@@ -544,6 +554,9 @@ pub(crate) fn normalize_revolve_combine(params: &RevolveParams) -> EffectiveComb
 pub struct RevolveParams {
     pub sketch_id: Uuid,
     pub profile_index: usize,
+    /// See `ExtrudeParams::profile_entity_ids`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile_entity_ids: Option<Vec<u32>>,
     pub axis_origin: [f64; 3],
     pub axis_direction: [f64; 3],
     pub angle: f64,
@@ -675,6 +688,20 @@ pub enum EngineError {
     #[error("profile index {index} out of range (sketch has {count} profiles)")]
     ProfileOutOfRange { index: usize, count: usize },
 
+    /// v4 §2.9: `profile_entity_ids` names a loop the solved sketch does not
+    /// have.
+    #[error("no profile is bounded by entities {entity_ids:?} (sketch has {count} profiles)")]
+    ProfileNotFound { entity_ids: Vec<u32>, count: usize },
+
+    /// v4 §2.9: `profile_entity_ids` matches more than one solved loop.
+    #[error(
+        "{matches} profiles are bounded by entities {entity_ids:?}; the reference is ambiguous"
+    )]
+    ProfileAmbiguous {
+        entity_ids: Vec<u32>,
+        matches: usize,
+    },
+
     #[error("GeomRef resolution failed: {reason}")]
     ResolutionFailed { reason: String },
 
@@ -753,6 +780,7 @@ mod combine_normalization_tests {
         ExtrudeParams {
             sketch_id: Uuid::new_v4(),
             profile_index: 0,
+            profile_entity_ids: None,
             depth: 0.01,
             depth_expr: None,
             direction: None,

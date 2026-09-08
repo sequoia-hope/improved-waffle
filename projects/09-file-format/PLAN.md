@@ -86,7 +86,7 @@ Schema golden `docs/schema/waffle-v4.schema.json` (`json-schema` feature,
 `tests/schema_golden.rs`, own CI step).
 
 - [x] **(2026-09-07)** Increment 6: JSON Schema golden (schemars derives across waffle-types/feature-engine/file-format; every repo `.waffle` validates after migration; CI step)
-- [ ] `profile_entity_ids` on Extrude/Revolve (agent-friendly profile addressing; 85 literal sites — mechanical)
+- [x] **(2026-09-08)** `profile_entity_ids` on Extrude/Revolve (§2.9): the loop named by its entity-id set, order-insensitive, overrides `profile_index`; `ProfileNotFound`/`ProfileAmbiguous` are loud per-feature errors (`rebuild::resolve_profile_index`; 82 literal sites swept; tests `feature-engine/tests/profile_entity_ids.rs` + v4 writer/rebuild oracle; schema golden regenerated)
 - [ ] `SolveStatus::Unsolved` default (56 match sites)
 - [ ] Phase 1b: opaque preservation of unknown `Operation` variants
 - [ ] Phase 2 (app storage): `document.id` as the storage key; `GitProvider` with GitHub/GitLab/Gitea adapters + per-host tokens; content cache; open-from-link (fixes the dead `?src=` share link); pack/unpack; pin/update-to-tip UI

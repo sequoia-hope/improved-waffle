@@ -121,6 +121,7 @@ fn extrude_op(sketch_id: Uuid, depth: f64, depth_expr: Option<&str>) -> Operatio
         params: ExtrudeParams {
             sketch_id,
             profile_index: 0,
+            profile_entity_ids: None,
             depth,
             depth_expr: depth_expr.map(str::to_string),
             direction: None,

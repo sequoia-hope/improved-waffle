@@ -333,8 +333,9 @@ Parameter payloads sit under `sketch` (for `Sketch`) or `params` (all others).
 
 | Field | Type | Req/default | Notes |
 |---|---|---|---|
-| `sketch_id` | UUID | ✔ | The sketch feature's *sketch* id (not the feature id). |
-| `profile_index` | usize | ✔ | Index into the sketch's solved profiles. Ignored when `region` is set. |
+| `sketch_id` | UUID | ✔ | The id of the **sketch feature** (`Feature.id`), not the `Sketch.id` inside it — `find_sketch_in_tree` matches on the feature id (rebuild.rs). |
+| `profile_index` | usize | ✔ | Index into the sketch's solved profiles. Ignored when `region` or `profile_entity_ids` is set (still range-checked). |
+| `profile_entity_ids` | u32[] \| null | opt (omitted when absent; **v4 §2.9**) | Agent-friendly profile addressing: the profile is the solved loop whose entity-id set equals this set (order-insensitive), so a writer that never ran the solver can name "the loop bounded by lines 10–13" — the same identity `Region.profile_entity_ids` carries (§10.3). Takes precedence over `profile_index`. No such loop, or two loops with the same set, is a loud per-feature rebuild error (`ProfileNotFound` / `ProfileAmbiguous`), never a silent fallback to the index. The app's own writers address by index and omit it; a UI re-pick of the profile drops it. |
 | `depth` | f64 (m) | ✔ | Primary blind depth. |
 | `direction` | [f64;3] \| null | opt | Override direction; `null` = sketch-plane normal. |
 | `symmetric` | bool | ✔ | Symmetric about the sketch plane. |
@@ -352,8 +353,9 @@ Parameter payloads sit under `sketch` (for `Sketch`) or `params` (all others).
 
 | Field | Type | Req/default | Notes |
 |---|---|---|---|
-| `sketch_id` | UUID | ✔ | |
+| `sketch_id` | UUID | ✔ | The sketch **feature's** id, as for extrude. |
 | `profile_index` | usize | ✔ | |
+| `profile_entity_ids` | u32[] \| null | opt (v4 §2.9) | As for extrude. |
 | `axis_origin` | [f64;3] (m) | ✔ | |
 | `axis_direction` | [f64;3] | ✔ | Unit direction; not scaled by migration. |
 | `angle` | f64 (deg) | ✔ | 360 = full revolution. |

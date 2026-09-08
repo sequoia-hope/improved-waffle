@@ -389,6 +389,7 @@ mod tests {
                 params: ExtrudeParams {
                     sketch_id: Uuid::new_v4(),
                     profile_index: 0,
+                    profile_entity_ids: None,
                     depth,
                     depth_expr: depth_expr.map(str::to_string),
                     direction: None,
@@ -473,6 +474,7 @@ mod tests {
                     params: RevolveParams {
                         sketch_id: Uuid::new_v4(),
                         profile_index: 0,
+                        profile_entity_ids: None,
                         axis_origin: [0.0; 3],
                         axis_direction: [0.0, 0.0, 1.0],
                         angle: 360.0,

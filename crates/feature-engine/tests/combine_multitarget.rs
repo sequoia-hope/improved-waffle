@@ -106,6 +106,7 @@ fn make_extrude(
             targets,
             sketch_id,
             profile_index: 0,
+            profile_entity_ids: None,
             depth,
             direction: None,
             symmetric: false,

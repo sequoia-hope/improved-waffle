@@ -675,3 +675,99 @@ fn timestamps_round_trip_in_javascript_form() {
     assert_eq!(v["created"], "2020-01-02T03:04:05.000Z");
     assert_eq!(v["modified"], "2020-01-02T03:04:05.500Z");
 }
+
+// ------------------------------------------ §2.9 profile addressing by ids
+
+/// A minimal Part tab whose sketch is one unit square (lines 10–13) and whose
+/// extrude addresses the loop by entity-id set with a deliberately wrong
+/// `profile_index`, the way a writer that never ran the solver would.
+fn agent_authored_square_extrude(profile_index: usize, ids: serde_json::Value) -> String {
+    let sketch_feature = Uuid::new_v4();
+    let extrude_feature = Uuid::new_v4();
+    let plane = serde_json::to_value(waffle_types::GeomRef {
+        kind: waffle_types::TopoKind::Face,
+        anchor: waffle_types::Anchor::Datum {
+            datum_id: Uuid::new_v4(),
+        },
+        selector: waffle_types::Selector::Role {
+            role: waffle_types::roles::Role::EndCapPositive,
+            index: 0,
+        },
+        policy: waffle_types::ResolvePolicy::Strict,
+    })
+    .unwrap();
+    let tree = serde_json::json!({
+        "features": [
+            { "id": sketch_feature, "name": "Sketch", "suppressed": false, "references": [],
+              "operation": { "type": "Sketch", "sketch": {
+                  "id": Uuid::new_v4(), "plane": plane,
+                  "entities": [
+                      { "type": "Point", "id": 1, "x": 0.0, "y": 0.0 },
+                      { "type": "Point", "id": 2, "x": 0.01, "y": 0.0 },
+                      { "type": "Point", "id": 3, "x": 0.01, "y": 0.01 },
+                      { "type": "Point", "id": 4, "x": 0.0, "y": 0.01 },
+                      { "type": "Line", "id": 10, "start_id": 1, "end_id": 2 },
+                      { "type": "Line", "id": 11, "start_id": 2, "end_id": 3 },
+                      { "type": "Line", "id": 12, "start_id": 3, "end_id": 4 },
+                      { "type": "Line", "id": 13, "start_id": 4, "end_id": 1 }
+                  ],
+                  "constraints": [],
+                  "solve_status": { "type": "FullyConstrained" }
+              } } },
+            { "id": extrude_feature, "name": "Extrude", "suppressed": false, "references": [],
+              "operation": { "type": "Extrude", "params": {
+                  "sketch_id": sketch_feature, "profile_index": profile_index,
+                  "profile_entity_ids": ids,
+                  "depth": 0.005, "direction": null, "symmetric": false, "cut": false,
+                  "target_body": null, "combine": { "type": "NewBody" }
+              } } }
+        ]
+    });
+    let mut doc: serde_json::Value =
+        serde_json::from_str(&save_document(&WaffleDocument::new("Agent"))).unwrap();
+    doc["tabs"][0]["kind"]["features"] = tree;
+    doc.to_string()
+}
+
+fn rebuild_errors(json: &str) -> Vec<(Uuid, String)> {
+    let (tree, _) = load_project(json).unwrap();
+    let mut kernel = MockKernel::new();
+    let mut engine = Engine::new();
+    engine.tree = tree;
+    engine.rebuild_from_scratch(&mut kernel);
+    engine.errors
+}
+
+#[test]
+fn profile_entity_ids_survive_the_writer_and_drive_the_rebuild() {
+    // The loop named by its edge set resolves although profile_index is bogus …
+    let json = agent_authored_square_extrude(7, serde_json::json!([13, 10, 12, 11]));
+    assert!(
+        rebuild_errors(&json).is_empty(),
+        "{:?}",
+        rebuild_errors(&json)
+    );
+
+    // … the field is preserved verbatim by a load → save cycle …
+    let saved = save_document(&load_document(&json).unwrap().document);
+    let out: serde_json::Value = serde_json::from_str(&saved).unwrap();
+    assert_eq!(
+        out["tabs"][0]["kind"]["features"]["features"][1]["operation"]["params"]
+            ["profile_entity_ids"],
+        serde_json::json!([13, 10, 12, 11])
+    );
+    assert!(rebuild_errors(&saved).is_empty());
+
+    // … and a set no loop has is a loud per-feature error, not a silent
+    // fallback to profile_index (which IS valid here).
+    let bad = agent_authored_square_extrude(0, serde_json::json!([10, 11, 12]));
+    let errors = rebuild_errors(&bad);
+    assert_eq!(errors.len(), 1, "{errors:?}");
+    assert!(
+        errors[0]
+            .1
+            .contains("no profile is bounded by entities [10, 11, 12]"),
+        "{}",
+        errors[0].1
+    );
+}

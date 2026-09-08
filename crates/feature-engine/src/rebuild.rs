@@ -372,18 +372,11 @@ fn execute_feature(
 
             let direction = params.direction.unwrap_or(sketch.plane_normal);
 
-            if sketch.solved_profiles.is_empty() {
-                return Err(EngineError::ProfileOutOfRange {
-                    index: params.profile_index,
-                    count: 0,
-                });
-            }
-            if params.profile_index >= sketch.solved_profiles.len() {
-                return Err(EngineError::ProfileOutOfRange {
-                    index: params.profile_index,
-                    count: sketch.solved_profiles.len(),
-                });
-            }
+            let profile_index = resolve_profile_index(
+                sketch,
+                params.profile_index,
+                params.profile_entity_ids.as_deref(),
+            )?;
 
             // Normalize the boolean-combine choice once (Constitution §7) and
             // resolve its target bodies up front: the cut-direction reversal
@@ -398,7 +391,8 @@ fn execute_feature(
                     // Auto default: bodies that share a face with the sketch.
                     TargetStrategy::ShareAFace => resolve_share_a_face(
                         params.sketch_id,
-                        params.profile_index,
+                        profile_index,
+                        None,
                         params.region.as_ref(),
                         &params.regions,
                         feature,
@@ -654,12 +648,12 @@ fn execute_feature(
 
                     if face_ids.is_empty() {
                         return Err(EngineError::ProfileOutOfRange {
-                            index: params.profile_index,
+                            index: profile_index,
                             count: 0,
                         });
                     }
 
-                    let face_index = params.profile_index.min(face_ids.len() - 1);
+                    let face_index = profile_index.min(face_ids.len() - 1);
                     face_ids[face_index]
                 };
 
@@ -689,18 +683,11 @@ fn execute_feature(
             sketch_expanded.recompute_derived();
             let sketch = &sketch_expanded;
 
-            if sketch.solved_profiles.is_empty() {
-                return Err(EngineError::ProfileOutOfRange {
-                    index: params.profile_index,
-                    count: 0,
-                });
-            }
-            if params.profile_index >= sketch.solved_profiles.len() {
-                return Err(EngineError::ProfileOutOfRange {
-                    index: params.profile_index,
-                    count: sketch.solved_profiles.len(),
-                });
-            }
+            let profile_index = resolve_profile_index(
+                sketch,
+                params.profile_index,
+                params.profile_entity_ids.as_deref(),
+            )?;
 
             let x_axis = tangent_x_from_normal(sketch.plane_normal);
             let face_ids = kb.make_faces_from_profiles(
@@ -713,12 +700,12 @@ fn execute_feature(
 
             if face_ids.is_empty() {
                 return Err(EngineError::ProfileOutOfRange {
-                    index: params.profile_index,
+                    index: profile_index,
                     count: 0,
                 });
             }
 
-            let face_index = params.profile_index.min(face_ids.len() - 1);
+            let face_index = profile_index.min(face_ids.len() - 1);
             let revolve_result = execute_revolve(
                 kb,
                 face_ids[face_index],
@@ -736,7 +723,8 @@ fn execute_feature(
                 _ => match &eff.targets {
                     TargetStrategy::ShareAFace => resolve_share_a_face(
                         params.sketch_id,
-                        params.profile_index,
+                        profile_index,
+                        None,
                         None,
                         &[],
                         feature,
@@ -1072,6 +1060,7 @@ pub(crate) fn find_consumed_feature_ids(
                         TargetStrategy::ShareAFace => resolve_share_a_face(
                             params.sketch_id,
                             params.profile_index,
+                            params.profile_entity_ids.as_deref(),
                             params.region.as_ref(),
                             &params.regions,
                             feature,
@@ -1113,6 +1102,7 @@ pub(crate) fn find_consumed_feature_ids(
                         TargetStrategy::ShareAFace => resolve_share_a_face(
                             params.sketch_id,
                             params.profile_index,
+                            params.profile_entity_ids.as_deref(),
                             None,
                             &[],
                             feature,
@@ -1528,6 +1518,52 @@ fn dispatch_combine(
     }
 }
 
+/// The solved profile an extrude/revolve addresses (v4 §2.9,
+/// `specs/waffle_v4_document_model.md`): by entity-id set when
+/// `profile_entity_ids` is present — order-insensitive, exactly one loop
+/// must match — else by `profile_index`, range-checked.
+pub(crate) fn resolve_profile_index(
+    sketch: &Sketch,
+    profile_index: usize,
+    profile_entity_ids: Option<&[u32]>,
+) -> Result<usize, EngineError> {
+    let count = sketch.solved_profiles.len();
+    if let Some(ids) = profile_entity_ids {
+        let want: std::collections::BTreeSet<u32> = ids.iter().copied().collect();
+        let matches: Vec<usize> = sketch
+            .solved_profiles
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| {
+                p.entity_ids
+                    .iter()
+                    .copied()
+                    .collect::<std::collections::BTreeSet<u32>>()
+                    == want
+            })
+            .map(|(i, _)| i)
+            .collect();
+        return match matches.as_slice() {
+            [only] => Ok(*only),
+            [] => Err(EngineError::ProfileNotFound {
+                entity_ids: ids.to_vec(),
+                count,
+            }),
+            many => Err(EngineError::ProfileAmbiguous {
+                entity_ids: ids.to_vec(),
+                matches: many.len(),
+            }),
+        };
+    }
+    if profile_index >= count {
+        return Err(EngineError::ProfileOutOfRange {
+            index: profile_index,
+            count,
+        });
+    }
+    Ok(profile_index)
+}
+
 /// Compute the "share-a-face" auto target set (spec §4.3).
 ///
 /// **N-mb-3a — anchor-ownership path (a):** the body whose face the sketch is
@@ -1535,10 +1571,16 @@ fn dispatch_combine(
 /// datum plane has a `Datum` anchor and yields no target (⇒ a new body). The
 /// geometric plane-coincidence + profile-overlap path (b) and multi-body
 /// coincidence are N-mb-3b. Consumed (non-live) bodies are excluded.
+///
+/// `profile_index` / `profile_entity_ids`: the execute path passes an
+/// already-resolved index and no id set; the consumption pre-pass passes the
+/// raw params (v4 §2.9). A profile the sketch cannot resolve has no footprint
+/// and yields no geometric targets — the execute path reports that error.
 #[allow(clippy::too_many_arguments)]
 fn resolve_share_a_face(
     sketch_id: Uuid,
     profile_index: usize,
+    profile_entity_ids: Option<&[u32]>,
     region: Option<&waffle_types::Region>,
     regions: &[waffle_types::Region],
     feature: &Feature,
@@ -1553,6 +1595,10 @@ fn resolve_share_a_face(
     };
     let mut sketch = sketch;
     sketch.recompute_derived(); // no-op if already populated
+    let Ok(profile_index) = resolve_profile_index(&sketch, profile_index, profile_entity_ids)
+    else {
+        return Vec::new();
+    };
 
     let mut out: Vec<(Uuid, waffle_types::kernel::KernelSolidHandle)> = Vec::new();
     let mut seen: std::collections::HashSet<Uuid> = std::collections::HashSet::new();
@@ -2788,6 +2834,7 @@ mod tests {
                             targets: None,
                             sketch_id,
                             profile_index: 0,
+                            profile_entity_ids: None,
                             depth: 0.01,
                             depth_expr: None,
                             direction: None,
@@ -3270,5 +3317,103 @@ mod tests {
             }
             _ => panic!("expected point"),
         }
+    }
+}
+
+#[cfg(test)]
+mod profile_addressing_tests {
+    //! `resolve_profile_index` (v4 §2.9): the returned INDEX is what the
+    //! integration tests cannot observe through the MockKernel.
+    use super::resolve_profile_index;
+    use crate::types::EngineError;
+    use uuid::Uuid;
+    use waffle_types::{
+        Anchor, ClosedProfile, GeomRef, ResolvePolicy, Selector, Sketch, SolveStatus, TopoKind,
+    };
+
+    fn profile(ids: &[u32]) -> ClosedProfile {
+        ClosedProfile {
+            entity_ids: ids.to_vec(),
+            is_outer: true,
+            vertex_ids: vec![],
+            circle: None,
+            spline_segments: vec![],
+            arc_segments: vec![],
+        }
+    }
+
+    fn sketch(profiles: Vec<ClosedProfile>) -> Sketch {
+        Sketch {
+            id: Uuid::new_v4(),
+            plane: GeomRef {
+                kind: TopoKind::Face,
+                anchor: Anchor::Datum {
+                    datum_id: Uuid::new_v4(),
+                },
+                selector: Selector::Role {
+                    role: waffle_types::roles::Role::EndCapPositive,
+                    index: 0,
+                },
+                policy: ResolvePolicy::Strict,
+            },
+            plane_origin: [0.0; 3],
+            plane_normal: [0.0, 0.0, 1.0],
+            entities: vec![],
+            constraints: vec![],
+            solve_status: SolveStatus::FullyConstrained,
+            solved_positions: Default::default(),
+            projected: vec![],
+            solved_profiles: profiles,
+        }
+    }
+
+    #[test]
+    fn resolves_the_index_of_the_loop_with_that_set_regardless_of_order() {
+        let s = sketch(vec![
+            profile(&[1, 2, 3]),
+            profile(&[7]),
+            profile(&[4, 5, 6, 8]),
+        ]);
+        assert_eq!(
+            resolve_profile_index(&s, 0, Some(&[8, 6, 4, 5])).unwrap(),
+            2
+        );
+        assert_eq!(resolve_profile_index(&s, 0, Some(&[7])).unwrap(), 1);
+        assert_eq!(resolve_profile_index(&s, 99, Some(&[3, 1, 2])).unwrap(), 0);
+        // Duplicates in the request collapse to the set.
+        assert_eq!(resolve_profile_index(&s, 0, Some(&[7, 7])).unwrap(), 1);
+    }
+
+    #[test]
+    fn index_path_is_unchanged() {
+        let s = sketch(vec![profile(&[1, 2, 3]), profile(&[7])]);
+        assert_eq!(resolve_profile_index(&s, 1, None).unwrap(), 1);
+        assert!(matches!(
+            resolve_profile_index(&s, 2, None),
+            Err(EngineError::ProfileOutOfRange { index: 2, count: 2 })
+        ));
+        let empty = sketch(vec![]);
+        assert!(matches!(
+            resolve_profile_index(&empty, 0, None),
+            Err(EngineError::ProfileOutOfRange { index: 0, count: 0 })
+        ));
+    }
+
+    #[test]
+    fn missing_and_ambiguous_sets_are_typed_errors() {
+        let s = sketch(vec![profile(&[1, 2, 3]), profile(&[3, 2, 1])]);
+        assert!(matches!(
+            resolve_profile_index(&s, 0, Some(&[1, 2])),
+            Err(EngineError::ProfileNotFound { ref entity_ids, count: 2 }) if entity_ids == &[1, 2]
+        ));
+        assert!(matches!(
+            resolve_profile_index(&s, 0, Some(&[1, 2, 3])),
+            Err(EngineError::ProfileAmbiguous { matches: 2, .. })
+        ));
+        // An empty set names no loop (a profile always has ≥1 entity).
+        assert!(matches!(
+            resolve_profile_index(&s, 0, Some(&[])),
+            Err(EngineError::ProfileNotFound { .. })
+        ));
     }
 }

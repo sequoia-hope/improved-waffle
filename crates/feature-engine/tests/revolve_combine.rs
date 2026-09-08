@@ -105,6 +105,7 @@ fn make_revolve(
         params: RevolveParams {
             sketch_id,
             profile_index: 0,
+            profile_entity_ids: None,
             axis_origin: [0.0, 0.0, 0.0],
             axis_direction: [0.0, 1.0, 0.0],
             angle: 360.0,

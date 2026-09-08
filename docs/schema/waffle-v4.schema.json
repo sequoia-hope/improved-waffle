@@ -505,6 +505,18 @@
           "description": "Auto-union with existing body. Defaults to true for boss extrudes.",
           "type": "boolean"
         },
+        "profile_entity_ids": {
+          "description": "v4 §2.9 agent-friendly profile addressing. When present, the profile\nis the solved loop whose entity-id set equals this set\n(order-insensitive) and `profile_index` is ignored, so a writer that\nhas not run the solver can say \"the loop bounded by entities 3,4,5,6\"\n(the same identity `Region::profile_entity_ids` carries). No such\nloop, or two loops with the same set, is a loud per-feature error\n(`EngineError::ProfileNotFound` / `ProfileAmbiguous`). The app's own\nwriters address by index and leave this `None`.",
+          "items": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
         "profile_index": {
           "format": "uint",
           "minimum": 0,
@@ -1945,6 +1957,18 @@
           "default": true,
           "description": "If true (and cut=false), auto-union with the most recent body.",
           "type": "boolean"
+        },
+        "profile_entity_ids": {
+          "description": "See `ExtrudeParams::profile_entity_ids`.",
+          "items": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
         },
         "profile_index": {
           "format": "uint",
