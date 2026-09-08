@@ -363,3 +363,117 @@ rawTest.describe('Linked sources', () => {
 		expect(json.tabs[0].kind.features.provenance[feature.id].origin).toEqual({ type: 'Import', source_id: src.id });
 	});
 });
+
+// ------------------------------------------------ P2-4: the Sources panel
+
+const SHA2 = '0a1b2c3d0a1b2c3d0a1b2c3d0a1b2c3d0a1b2c3d';
+
+/** GitHub mock whose `main` tip moves from SHA to SHA2 after `tipMovesAfter` resolves. */
+async function mockMovingTip(page, { tipMovesAfter = 1 } = {}) {
+	let resolves = 0;
+	await page.route('https://api.github.com/**', async (route) => {
+		const url = route.request().url();
+		if (url.endsWith('/repos/acme/parts/commits/main')) {
+			resolves++;
+			const sha = resolves > tipMovesAfter ? SHA2 : SHA;
+			return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ sha }) });
+		}
+		const m = /\/contents\/parts\/cube\.step\?ref=([0-9a-f]{40})$/.exec(url);
+		if (m && (m[1] === SHA || m[1] === SHA2)) {
+			// The same geometry at both commits; a different blob id tells them apart.
+			return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ content: b64(CUBE_STEP), sha: m[1] === SHA ? 'c0be' : 'c0bf', encoding: 'base64' }) });
+		}
+		return route.fulfill({ status: 404, contentType: 'application/json', body: '{"message":"Not Found"}' });
+	});
+}
+
+async function linkCube(page) {
+	await page.goto('/');
+	await page.waitForFunction(() => window.__waffle?.getState()?.engineReady === true, { timeout: 30000 });
+	const ok = await page.evaluate(() => window.__waffle.importStepFromLink('https://github.com/acme/parts/blob/main/parts/cube.step'));
+	expect(ok).toBe(true);
+	await page.waitForFunction(() => window.__waffle.getMeshes().length === 1, { timeout: 30000 });
+	await page.locator('[data-testid="import-apply"]').click();
+	await expect(page.locator('[data-testid="source-item-0"]')).toBeVisible();
+}
+
+rawTest.describe('Sources panel', () => {
+	rawTest('lists the linked source, pins it to the resolved commit, and pack embeds it', async ({ page }) => {
+		await mockMovingTip(page, { tipMovesAfter: 99 });
+		await linkCube(page);
+		await expect(page.locator('[data-testid="source-status-0"]')).toContainText(`main @ ${SHA.slice(0, 7)}`);
+
+		// Pin → ref becomes Commit{resolved}; content kept (body still there).
+		await page.locator('[data-testid="source-pin-0"]').click();
+		await expect(page.locator('[data-testid="source-status-0"]')).toContainText(`pinned ${SHA.slice(0, 7)}`);
+		await expect(page.locator('[data-testid="source-pin-0"]')).toHaveCount(0);
+		let json = JSON.parse(await page.evaluate(() => window.__waffle.buildDocumentJson()));
+		expect(json.sources[0].locator.ref).toEqual({ type: 'Commit', sha: SHA });
+		expect(json.sources[0].resolved.commit).toBe(SHA);
+		expect(json.sources[0].embed ?? null).toBeNull();
+		expect(await page.evaluate(() => window.__waffle.getMeshes().length)).toBe(1);
+
+		// Pack → the file carries the content; unpack → linked again.
+		await page.locator('[data-testid="source-pack-0"]').check();
+		await page.waitForFunction(() => window.__waffle.getSources()[0].pack === true, { timeout: 10000 });
+		json = JSON.parse(await page.evaluate(() => window.__waffle.buildDocumentJson()));
+		expect(json.sources[0].pack).toBe(true);
+		expect(json.sources[0].embed.encoding).toBe('deflate-base64');
+		expect(json.sources[0].locator.type).toBe('Git');
+		await page.locator('[data-testid="source-pack-0"]').uncheck();
+		await page.waitForFunction(() => window.__waffle.getSources()[0].pack === false, { timeout: 10000 });
+		json = JSON.parse(await page.evaluate(() => window.__waffle.buildDocumentJson()));
+		expect(json.sources[0].embed ?? null).toBeNull();
+	});
+
+	rawTest('update-to-tip re-resolves the ref and fetches at the new commit; a pinned source never moves', async ({ page }) => {
+		await mockMovingTip(page, { tipMovesAfter: 1 });
+		await linkCube(page);
+		await expect(page.locator('[data-testid="source-status-0"]')).toContainText(`main @ ${SHA.slice(0, 7)}`);
+
+		await page.locator('[data-testid="source-update-0"]').click();
+		await expect(page.locator('[data-testid="source-status-0"]')).toContainText(`main @ ${SHA2.slice(0, 7)}`, { timeout: 15000 });
+		const json = JSON.parse(await page.evaluate(() => window.__waffle.buildDocumentJson()));
+		expect(json.sources[0].locator.ref).toEqual({ type: 'Branch', name: 'main' });
+		expect(json.sources[0].resolved.commit).toBe(SHA2);
+		expect(json.sources[0].content_hash).toMatch(/^git-blob-sha1:/);
+		await page.waitForFunction(
+			() => (window.__waffle.getToasts() || []).some((t) => /updated .* → 0a1b2c3/.test(t.message)),
+			{ timeout: 5000 }
+		);
+
+		// Pinned ⇒ "update" is not offered and the API refuses to move it.
+		await page.locator('[data-testid="source-pin-0"]').click();
+		await expect(page.locator('[data-testid="source-update-0"]')).toHaveCount(0);
+		const r = await page.evaluate(() => window.__waffle.updateSourceToTip(window.__waffle.getSources()[0].id));
+		expect(r).toBe('unchanged');
+		expect((await page.evaluate(() => window.__waffle.getSources()))[0].resolved.commit).toBe(SHA2);
+	});
+
+	rawTest('an embedded source cannot be unpacked; pack-all embeds every linked one', async ({ page }) => {
+		await mockMovingTip(page, { tipMovesAfter: 99 });
+		await page.goto('/');
+		await page.waitForFunction(() => window.__waffle?.getState()?.engineReady === true, { timeout: 30000 });
+		// One embedded (file picker) source …
+		await page.evaluate((text) => window.__waffle.importStepFromText('cube.step', text), CUBE_STEP);
+		await page.waitForFunction(() => window.__waffle.getMeshes().length === 1, { timeout: 30000 });
+		await page.locator('[data-testid="import-apply"]').click();
+		// … and one linked.
+		await page.evaluate(() => window.__waffle.importStepFromLink('https://github.com/acme/parts/blob/main/parts/cube.step'));
+		await page.waitForFunction(() => window.__waffle.getMeshes().length === 2, { timeout: 30000 });
+		await page.locator('[data-testid="import-apply"]').click();
+
+		await expect(page.locator('[data-testid="source-item-1"]')).toBeVisible();
+		await expect(page.locator('[data-testid="source-pack-0"]')).toBeDisabled();
+		await expect(page.locator('[data-testid="source-pack-0"]')).toBeChecked();
+		await expect(page.locator('[data-testid="source-status-0"]')).toContainText('embedded');
+
+		await page.locator('[data-testid="sources-pack-all"]').click();
+		await page.waitForFunction(() => window.__waffle.getSources().every((s) => s.pack), { timeout: 10000 });
+		await expect(page.locator('[data-testid="sources-pack-all"]')).toHaveCount(0);
+		const json = JSON.parse(await page.evaluate(() => window.__waffle.buildDocumentJson()));
+		expect(json.sources).toHaveLength(2);
+		expect(json.sources.every((s) => s.embed?.encoding === 'deflate-base64')).toBe(true);
+		expect(json.sources.map((s) => s.locator.type).sort()).toEqual(['Embedded', 'Git']);
+	});
+});

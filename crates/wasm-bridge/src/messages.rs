@@ -190,6 +190,21 @@ pub enum UiToEngine {
         #[serde(default)]
         resolved_commit: Option<String>,
     },
+    /// Edit a `sources` entry's policy or addressing (v4 §2.4 pin semantics,
+    /// Phase 2 P2-4). `pack`: writer policy (refused `false` on an `Embedded`
+    /// source — it has no origin to unpack to). `git_ref`: retarget a `Git`
+    /// locator — pinning to the commit already resolved keeps the content;
+    /// any other ref drops the content and `resolved` so the host re-resolves
+    /// (never content from one commit labelled with another). "Update to tip"
+    /// is not here: the host re-resolves the ref and answers `ProvideSource`
+    /// with the new `resolved_commit`.
+    UpdateSourceEntry {
+        source_id: Uuid,
+        #[serde(default)]
+        pack: Option<bool>,
+        #[serde(default)]
+        git_ref: Option<file_format::GitRef>,
+    },
     /// The document's `sources` table with per-entry availability (whether
     /// the engine's store holds the content). The host resolves the missing
     /// ones through their locators and answers with `ProvideSource`
@@ -313,6 +328,10 @@ pub enum EngineToUi {
         /// Decimated preview mesh for thumbnail rendering (optional).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         preview_mesh: Option<feature_engine::preview_mesh::PreviewMesh>,
+        /// The document's `sources` table with availability (same rows as
+        /// `SourcesListed`), so the UI's Sources panel is reactive.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        sources: Vec<SourceStatus>,
     },
 
     /// Sketch constraint solver completed.

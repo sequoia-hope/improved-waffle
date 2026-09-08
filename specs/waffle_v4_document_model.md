@@ -381,7 +381,7 @@ of the file bytes, but the locator design above is shaped by it.
 | Browser-local | IndexedDB `documents` store, 8-char provider ids | Stays the default for personal work. Adopt `document.id` as the record key (provider id becomes an alias during a one-time migration). Add a **content cache** store keyed by `content_hash` for fetched sources. Not linkable from elsewhere. |
 | Personal git repo | GitHub provider: one repo, `<slug>.waffle` at root + `.waffle-index.json` | Generalize to a `GitProvider` with host adapters (§7.2). Allow **folders**; the index maps `document.id` → path. A document saved here has a location `{remote, path, ref: Branch(default)}` — which is exactly what makes it linkable and what `Relative` links resolve against. |
 | Someone else's repo / a public repo | share link `?src=<raw url>` (emitted but unhandled — dead until 2026-09-08) | **LANDED 2026-09-08 (P2-2):** "Open from link" (`/open?remote=&path=&ref=`, `?url=`, legacy `?src=` mapped) accepts a `Git` or `Url` locator, creates a **linked** local document that is read-only until "Fork to edit" (copy, new `document.id`, all `Relative` links rewritten to absolute `Git` locators at the pinned commit — bridge `RebaseSources`). |
-| Offline / attachment | — | "Pack" = set `pack: true` on every source, embedding content; the resulting single file opens anywhere with no network. |
+| Offline / attachment | — | **LANDED 2026-09-08 (P2-4):** "Pack" = set `pack: true` on every source, embedding content; the resulting single file opens anywhere with no network (Sources panel "pack all" / per-source checkbox; `UpdateSourceEntry`). |
 | Desktop (future host) | — | `Relative` and `Git` locators resolve against the filesystem and local git; the same file is valid. |
 
 ### 7.2 Host adapters (browser host)
@@ -409,7 +409,10 @@ proxy pattern extends to GitLab/Gitea OAuth or PAT entry.
   updated on the next sync.
 - `Commit`- and `Tag`-pinned sources are read-only by construction.
 - "Update to tip" and "Pin" are explicit actions with a visible diff of
-  `resolved.commit` (old → new).
+  `resolved.commit` (old → new). **LANDED 2026-09-08 (P2-4)** in the Sources
+  panel: pin = `UpdateSourceEntry{git_ref: Commit{resolved.commit}}`; update =
+  the host re-resolves the ref, fetches at the new commit and answers
+  `ProvideSource{resolved_commit}` (toast shows old → new).
 
 ### 7.4 What a share link is
 
@@ -461,7 +464,7 @@ capability; that spec must carry its own §7a.
 |---|---|---|
 | **1 (this spec)** | LANDED: `document.id`; `sources` table + git-aware locators; unknown tab/source/locator kinds preserved; unknown keys preserved (§2.6); provenance table; ImportedBody → sources with dedup; single Rust writer via bridge `SaveDocument`; engine source store + `ProvideSource`; inflation cap; JS-form timestamps; exact float parsing; corpus back-compat pin; JSON Schema golden (`docs/schema/waffle-v4.schema.json`, CI-pinned, every repo file validates); `docs/FILE_FORMAT.md` v4 section; `profile_entity_ids` (§2.9) and `solve_status` default (§2.10), 2026-09-08 | v4, `MIN_READER_VERSION` 4 |
 | 1b | **LANDED 2026-09-08.** Opaque preservation of unknown `Operation` variants (feature kept, rebuild error, re-emitted) so future ops stop bumping the reader floor | none |
-| 2 | App storage. **P2-1 (git substrate: adapters, hashing, locators, per-host tokens, content cache) and P2-2 (open-from-link → linked read-only record → fork with `RebaseSources`; legacy `?src=` fixed; GitHub share URL = `/open` locator) LANDED 2026-09-08.** **P2-3 (source resolution at open: `ListSources` → cache/adapters at the recorded commit → `ProvideSource`; "Link STEP" import-from-link) LANDED 2026-09-08.** Open: pack/unpack + pin/update UI (P2-4), `document.id` as storage key + `GitProvider` generalization (P2-5) — `projects/09-file-format/PLAN.md` | none (uses Phase-1 fields) |
+| 2 | App storage. **P2-1 (git substrate: adapters, hashing, locators, per-host tokens, content cache) and P2-2 (open-from-link → linked read-only record → fork with `RebaseSources`; legacy `?src=` fixed; GitHub share URL = `/open` locator) LANDED 2026-09-08.** **P2-3 (source resolution at open: `ListSources` → cache/adapters at the recorded commit → `ProvideSource`; "Link STEP" import-from-link) LANDED 2026-09-08.** **P2-4 (Sources panel: pack/unpack, pin, update-to-tip, fetch; `UpdateSourceEntry`; `ModelUpdated.sources`) LANDED 2026-09-08.** Open: `document.id` as storage key + `GitProvider` generalization (P2-5) — `projects/09-file-format/PLAN.md` | none (uses Phase-1 fields) |
 | 3 | `Assembly` tab kind: instances `{id, name, source: {source_id?, tab_id}, transform: {translation_m, rotation_quat}, external_key?, parameter_overrides?}`, mate connectors `{id, name, geom_ref(scoped), frame}`, mates (Fastened first), persisted solved placements as derived hints; `scope` on `GeomRef` lands here | new tab kind (no bump); `scope` field (bump for Part-side use) |
 | 3b | KiCad: `KicadPcb` source kind; derived board sketch/extrude (`Derived` provenance); one instance per footprint keyed by footprint UUID; component models as `Step` sources resolved through a KiCad path-variable table; mounting holes → connectors | none beyond Phase 3 |
 | 4 | `Drawing` tab kind: sheet, views `{source(scoped), projection kind, direction/up, placement, scale, style}`, annotations `{kind, refs(scoped), value, placement}`; kernel projection/HLR/section as a separate FIP spec | new tab kind (no bump) |

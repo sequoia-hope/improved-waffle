@@ -8,7 +8,7 @@
 
 use feature_engine::types::*;
 use file_format::{
-    git_blob_sha1, load_document, DocumentMetadata, Locator, SourceEntry, SourceKind, Tab,
+    git_blob_sha1, load_document, DocumentMetadata, GitRef, Locator, SourceEntry, SourceKind, Tab,
     WaffleDocument,
 };
 use kernel_v2::KernelV2Adapter;
@@ -489,6 +489,206 @@ fn import_step_from_locator_creates_a_linked_source_that_builds_and_saves_unpack
             },
             data: CUBE_STEP.to_string(),
             resolved_commit: None,
+        },
+        &mut kernel,
+    );
+    assert!(matches!(bad, EngineToUi::Error { .. }), "{bad:?}");
+}
+
+// ── v4 Phase 2 P2-4: pack policy and pin/retarget at the bridge ───────────
+
+fn linked_cube(state: &mut EngineState, kernel: &mut KernelV2Adapter, sha: &str) -> Uuid {
+    dispatch(
+        state,
+        UiToEngine::ImportStepFromLocator {
+            file_name: "cube.step".into(),
+            locator: Locator::git_branch(
+                "https://github.com/acme/parts",
+                "parts/cube.step",
+                "main",
+            ),
+            data: CUBE_STEP.to_string(),
+            resolved_commit: Some(sha.to_string()),
+        },
+        kernel,
+    );
+    let Operation::ImportedBody { params } = &state.engine.tree.features[0].operation else {
+        panic!()
+    };
+    params.source_id.unwrap()
+}
+
+#[test]
+fn model_updated_carries_the_sources_table() {
+    let mut state = EngineState::new();
+    let mut kernel = KernelV2Adapter::new();
+    let resp = import_cube(&mut state, &mut kernel);
+    let EngineToUi::ModelUpdated { sources, .. } = resp else {
+        panic!("{resp:?}")
+    };
+    assert_eq!(sources.len(), 1);
+    assert!(sources[0].available && sources[0].pack);
+    assert!(matches!(sources[0].locator, Locator::Embedded));
+}
+
+#[test]
+fn pack_policy_toggles_the_embed_and_embedded_sources_cannot_be_unpacked() {
+    let mut state = EngineState::new();
+    let mut kernel = KernelV2Adapter::new();
+    let sha = "9fceb02a".repeat(5);
+    let id = linked_cube(&mut state, &mut kernel, &sha);
+
+    // Linked ⇒ unpacked by default.
+    let doc = load_document(&save_document(&mut state, &mut kernel))
+        .unwrap()
+        .document;
+    assert!(doc.source(id).unwrap().embed.is_none());
+
+    // pack: true ⇒ the file carries the content (self-contained), origin kept.
+    let resp = dispatch(
+        &mut state,
+        UiToEngine::UpdateSourceEntry {
+            source_id: id,
+            pack: Some(true),
+            git_ref: None,
+        },
+        &mut kernel,
+    );
+    let EngineToUi::ModelUpdated { sources, .. } = resp else {
+        panic!("{resp:?}")
+    };
+    assert!(sources[0].pack && sources[0].available);
+    let doc = load_document(&save_document(&mut state, &mut kernel))
+        .unwrap()
+        .document;
+    let entry = doc.source(id).unwrap();
+    assert!(entry.embed.is_some());
+    assert!(matches!(entry.locator, Locator::Git { .. }));
+    assert_eq!(
+        entry.resolved.as_ref().map(|r| r.commit.as_str()),
+        Some(sha.as_str())
+    );
+
+    // pack: false ⇒ linked again.
+    dispatch(
+        &mut state,
+        UiToEngine::UpdateSourceEntry {
+            source_id: id,
+            pack: Some(false),
+            git_ref: None,
+        },
+        &mut kernel,
+    );
+    let doc = load_document(&save_document(&mut state, &mut kernel))
+        .unwrap()
+        .document;
+    assert!(doc.source(id).unwrap().embed.is_none());
+
+    // An Embedded source (file picker) has no origin: unpacking is refused.
+    let mut state2 = EngineState::new();
+    import_cube(&mut state2, &mut kernel);
+    let embedded_id = state2.sources[0].id;
+    let bad = dispatch(
+        &mut state2,
+        UiToEngine::UpdateSourceEntry {
+            source_id: embedded_id,
+            pack: Some(false),
+            git_ref: None,
+        },
+        &mut kernel,
+    );
+    assert!(matches!(bad, EngineToUi::Error { .. }), "{bad:?}");
+    assert!(state2.sources[0].effective_pack());
+}
+
+#[test]
+fn pinning_to_the_resolved_commit_keeps_content_and_any_other_ref_drops_it() {
+    let mut state = EngineState::new();
+    let mut kernel = KernelV2Adapter::new();
+    let sha = "9fceb02a".repeat(5);
+    let id = linked_cube(&mut state, &mut kernel, &sha);
+
+    // Pin (UI: "pin" = ref ← resolved.commit): content and hash survive.
+    let resp = dispatch(
+        &mut state,
+        UiToEngine::UpdateSourceEntry {
+            source_id: id,
+            pack: None,
+            git_ref: Some(GitRef::Commit {
+                sha: sha.to_uppercase(),
+            }),
+        },
+        &mut kernel,
+    );
+    let EngineToUi::ModelUpdated { sources, .. } = resp else {
+        panic!("{resp:?}")
+    };
+    assert!(sources[0].available);
+    assert!(
+        matches!(&sources[0].locator, Locator::Git { git_ref: GitRef::Commit { sha: s }, .. } if *s == sha)
+    );
+    assert_eq!(
+        sources[0].resolved.as_ref().map(|r| r.commit.as_str()),
+        Some(sha.as_str())
+    );
+    assert!(state.engine.errors.is_empty());
+
+    // Retarget to a branch: the bytes we hold came from `sha`, not from
+    // wherever `dev` points — content, hash and resolved are dropped, the
+    // feature is loudly unavailable until the host provides it again.
+    let resp = dispatch(
+        &mut state,
+        UiToEngine::UpdateSourceEntry {
+            source_id: id,
+            pack: None,
+            git_ref: Some(GitRef::Branch { name: "dev".into() }),
+        },
+        &mut kernel,
+    );
+    let EngineToUi::ModelUpdated {
+        sources, errors, ..
+    } = resp
+    else {
+        panic!("{resp:?}")
+    };
+    assert!(!sources[0].available);
+    assert!(sources[0].resolved.is_none() && sources[0].content_hash.is_none());
+    assert!(
+        errors
+            .iter()
+            .any(|(_, m)| m.to_lowercase().contains("unavailable")),
+        "{errors:?}"
+    );
+
+    // An invalid ref name is refused and leaves the entry as it was.
+    let bad = dispatch(
+        &mut state,
+        UiToEngine::UpdateSourceEntry {
+            source_id: id,
+            pack: None,
+            git_ref: Some(GitRef::Branch {
+                name: "-bad..name".into(),
+            }),
+        },
+        &mut kernel,
+    );
+    assert!(matches!(bad, EngineToUi::Error { .. }), "{bad:?}");
+    assert!(
+        matches!(&state.sources[0].locator, Locator::Git { git_ref: GitRef::Branch { name }, .. } if name == "dev")
+    );
+
+    // git_ref on a non-git source is refused.
+    let mut state2 = EngineState::new();
+    import_cube(&mut state2, &mut kernel);
+    let embedded_id = state2.sources[0].id;
+    let bad = dispatch(
+        &mut state2,
+        UiToEngine::UpdateSourceEntry {
+            source_id: embedded_id,
+            pack: None,
+            git_ref: Some(GitRef::Branch {
+                name: "main".into(),
+            }),
         },
         &mut kernel,
     );

@@ -121,22 +121,76 @@ fn handle_message(
             Ok(model_updated_response(state))
         }
 
-        UiToEngine::ListSources => {
-            let sources = state
+        UiToEngine::ListSources => Ok(EngineToUi::SourcesListed {
+            sources: source_statuses(state),
+        }),
+
+        UiToEngine::UpdateSourceEntry {
+            source_id,
+            pack,
+            git_ref,
+        } => {
+            let entry = state
                 .sources
-                .iter()
-                .map(|e| SourceStatus {
-                    id: e.id,
-                    name: e.name.clone(),
-                    kind: source_kind_tag(&e.kind),
-                    locator: e.locator.clone(),
-                    content_hash: e.content_hash.clone(),
-                    resolved: e.resolved.clone(),
-                    pack: e.effective_pack(),
-                    available: state.engine.sources.contains(e.id),
-                })
-                .collect();
-            Ok(EngineToUi::SourcesListed { sources })
+                .iter_mut()
+                .find(|s| s.id == source_id)
+                .ok_or_else(|| BridgeError::InvalidRequest {
+                    reason: format!("UpdateSourceEntry: {source_id} is not in the sources table"),
+                })?;
+            if let Some(p) = pack {
+                if !p && matches!(entry.locator, file_format::Locator::Embedded) {
+                    return Err(BridgeError::InvalidRequest {
+                        reason: format!(
+                            "source `{}` is embedded (no origin); it cannot be unpacked",
+                            entry.name
+                        ),
+                    });
+                }
+                entry.pack = Some(p);
+            }
+            let mut drop_content = false;
+            if let Some(new_ref) = git_ref {
+                let file_format::Locator::Git { git_ref, .. } = &mut entry.locator else {
+                    return Err(BridgeError::InvalidRequest {
+                        reason: format!("source `{}` is not a git source", entry.name),
+                    });
+                };
+                let keeps_content = matches!(
+                    (&new_ref, &entry.resolved),
+                    (file_format::GitRef::Commit { sha }, Some(r)) if r.commit.eq_ignore_ascii_case(sha)
+                );
+                let previous = std::mem::replace(git_ref, new_ref);
+                let problems = entry.locator.validate();
+                if !problems.is_empty() {
+                    if let file_format::Locator::Git { git_ref, .. } = &mut entry.locator {
+                        *git_ref = previous;
+                    }
+                    return Err(BridgeError::InvalidRequest {
+                        reason: problems.join("; "),
+                    });
+                }
+                if let file_format::Locator::Git {
+                    git_ref: file_format::GitRef::Commit { sha },
+                    ..
+                } = &mut entry.locator
+                {
+                    *sha = sha.to_ascii_lowercase();
+                }
+                if !keeps_content {
+                    // Content from one commit must never be labelled with
+                    // another: drop it and let the host re-resolve.
+                    entry.resolved = None;
+                    entry.content_hash = None;
+                    entry.embed = None;
+                    entry.fetched_at = None;
+                    drop_content = true;
+                }
+            }
+            if drop_content {
+                state.engine.sources.remove(source_id);
+                state.engine.rebuild_from_scratch(kb);
+            }
+            Ok(model_updated_response(state))
         }
 
         // -- Feature operations --
@@ -573,6 +627,24 @@ fn add_import_feature(
     Ok(id)
 }
 
+/// The `sources` table as the host sees it (`SourceStatus` rows).
+fn source_statuses(state: &EngineState) -> Vec<SourceStatus> {
+    state
+        .sources
+        .iter()
+        .map(|e| SourceStatus {
+            id: e.id,
+            name: e.name.clone(),
+            kind: source_kind_tag(&e.kind),
+            locator: e.locator.clone(),
+            content_hash: e.content_hash.clone(),
+            resolved: e.resolved.clone(),
+            pack: e.effective_pack(),
+            available: state.engine.sources.contains(e.id),
+        })
+        .collect()
+}
+
 /// The `type` tag of a source kind as written in the file.
 fn source_kind_tag(kind: &SourceKind) -> String {
     serde_json::to_value(kind)
@@ -642,6 +714,7 @@ fn model_updated_response(state: &EngineState) -> EngineToUi {
         errors: state.engine.errors.clone(),
         warnings: state.engine.warnings.clone(),
         preview_mesh,
+        sources: source_statuses(state),
     }
 }
 

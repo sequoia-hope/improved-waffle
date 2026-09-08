@@ -467,6 +467,9 @@ export async function initEngine() {
 		if (msg.meshes) {
 			meshes = msg.meshes;
 		}
+		// The document's `sources` table with availability (v4 §2.3) — the
+		// Sources panel's data; absent on the wire when the table is empty.
+		documentSources = msg.sources ?? [];
 		lastError = null;
 		statusMessage = `Model updated (${meshes.length} ${meshes.length === 1 ? 'body' : 'bodies'})`;
 
@@ -781,6 +784,12 @@ export async function initEngine() {
 			importStepFromLink: (url) => importStepFromLink(url),
 			resolveDocumentSources: () => resolveDocumentSources(),
 			listSources: async () => (await bridge.send({ type: 'ListSources' }))?.sources ?? [],
+			getSources: () => JSON.parse(JSON.stringify(documentSources)),
+			setSourcePack: (id, pack) => setSourcePack(id, pack),
+			packAllSources: () => packAllSources(),
+			pinSource: (id) => pinSource(id),
+			updateSourceToTip: (id) => updateSourceToTip(id),
+			fetchSource: (id) => fetchSource(id),
 			getImportDialogState: () => importDialogState,
 			showImportDialogForEdit: (featureId) => showImportDialogForEdit(featureId),
 			hideImportDialog: () => hideImportDialog(),
@@ -6688,6 +6697,143 @@ export async function importStepFromLink(url) {
 	} catch (err) {
 		log('error', `STEP link import failed: ${err?.message || err}`);
 		showToast('error', `STEP link import failed: ${err?.message || err}`);
+		return false;
+	}
+}
+
+/**
+ * The document's `sources` table as the engine reports it on every model
+ * update (`SourceStatus[]`: id, name, kind, locator, content_hash, resolved,
+ * pack, available). Drives the Sources panel; actions below edit it through
+ * the bridge (`UpdateSourceEntry`, `ProvideSource`).
+ * @type {Array<object>}
+ */
+let documentSources = $state([]);
+export function getSources() { return documentSources; }
+
+/**
+ * Writer policy for one source (v4 §2.3 `pack`): true embeds the content in
+ * the file (self-contained), false keeps it linked. Refused by the engine for
+ * an Embedded source (nothing to unpack to).
+ * @param {string} sourceId
+ * @param {boolean} pack
+ */
+export async function setSourcePack(sourceId, pack) {
+	if (!bridge || !engineReady) return false;
+	try {
+		await sendRebuild({ type: 'UpdateSourceEntry', source_id: sourceId, pack });
+		scheduleAutoSave();
+		return true;
+	} catch (err) {
+		showToast('error', `Pack setting failed: ${err?.message || err}`);
+		return false;
+	}
+}
+
+/**
+ * "Pack and go": embed every linked source that the engine holds content for.
+ * @returns {Promise<number>} how many entries were packed
+ */
+export async function packAllSources() {
+	let n = 0;
+	for (const s of documentSources) {
+		if (s.pack || !s.available || s.locator?.type === 'Embedded') continue;
+		if (await setSourcePack(s.id, true)) n++;
+	}
+	if (n > 0) showToast('success', `Packed ${n} source${n === 1 ? '' : 's'} into the document`);
+	return n;
+}
+
+/**
+ * Pin a floating git source to the commit it currently resolves to
+ * (v4 §2.4 "Pin": `ref ← Commit{resolved.commit}`; content kept).
+ * @param {string} sourceId
+ */
+export async function pinSource(sourceId) {
+	if (!bridge || !engineReady) return false;
+	const s = documentSources.find((x) => x.id === sourceId);
+	if (!s || s.locator?.type !== 'Git') return false;
+	if (s.locator.ref?.type === 'Commit') return true;
+	if (!s.resolved?.commit) {
+		showToast('warning', `${s.name}: nothing resolved yet — fetch it first`);
+		return false;
+	}
+	try {
+		await sendRebuild({
+			type: 'UpdateSourceEntry',
+			source_id: sourceId,
+			git_ref: { type: 'Commit', sha: s.resolved.commit }
+		});
+		showToast('success', `${s.name}: pinned to ${s.resolved.commit.slice(0, 7)}`);
+		scheduleAutoSave();
+		return true;
+	} catch (err) {
+		showToast('error', `Pin failed: ${err?.message || err}`);
+		return false;
+	}
+}
+
+/**
+ * "Update to tip" (v4 §2.4): re-resolve a floating git source's ref, fetch
+ * the content AT the new commit, and record both (`ProvideSource` with
+ * `resolved_commit`). A pinned source is never changed. `Relative` sources
+ * resolve against the document's location first.
+ * @param {string} sourceId
+ * @returns {Promise<'updated'|'unchanged'|false>}
+ */
+export async function updateSourceToTip(sourceId) {
+	if (!bridge || !engineReady) return false;
+	const s = documentSources.find((x) => x.id === sourceId);
+	if (!s) return false;
+	const { fetchGitAt } = await import('$lib/storage/sources.js');
+	const { resolveRelative } = await import('$lib/storage/git/locator.js');
+	const { cachePut } = await import('$lib/storage/git/cache.js');
+	const { gitBlobSha1 } = await import('$lib/storage/git/hash.js');
+	let loc = JSON.parse(JSON.stringify(s.locator));
+	if (loc?.type === 'Relative') loc = resolveRelative(await documentLocation(), loc.path);
+	if (loc?.type !== 'Git') {
+		showToast('warning', `${s.name}: not a git source`);
+		return false;
+	}
+	if (loc.ref?.type === 'Commit') {
+		showToast('info', `${s.name} is pinned; unpin (retarget) before updating`);
+		return 'unchanged';
+	}
+	try {
+		const { text, commit } = await fetchGitAt(loc, null);
+		if (s.resolved?.commit && commit === s.resolved.commit && s.available) {
+			showToast('info', `${s.name} is already at the tip (${commit.slice(0, 7)})`);
+			return 'unchanged';
+		}
+		await cachePut(await gitBlobSha1(text), text);
+		await sendRebuild({ type: 'ProvideSource', source_id: sourceId, data: text, resolved_commit: commit });
+		const from = s.resolved?.commit ? `${s.resolved.commit.slice(0, 7)} → ` : '';
+		showToast('success', `${s.name}: updated ${from}${commit.slice(0, 7)}`);
+		scheduleAutoSave();
+		return 'updated';
+	} catch (err) {
+		showToast('error', `${s.name}: update failed: ${err?.message || err}`);
+		return false;
+	}
+}
+
+/**
+ * Retry resolving one unavailable source (cache → locator), e.g. after
+ * entering a host token.
+ * @param {string} sourceId
+ */
+export async function fetchSource(sourceId) {
+	if (!bridge || !engineReady) return false;
+	const s = documentSources.find((x) => x.id === sourceId);
+	if (!s) return false;
+	const { resolveSourceContent } = await import('$lib/storage/sources.js');
+	try {
+		const { text, resolvedCommit } = await resolveSourceContent(JSON.parse(JSON.stringify(s)), await documentLocation());
+		await sendRebuild({ type: 'ProvideSource', source_id: sourceId, data: text, resolved_commit: resolvedCommit });
+		showToast('success', `${s.name}: fetched`);
+		return true;
+	} catch (err) {
+		showToast('error', `${s.name}: ${err?.message || err}`);
 		return false;
 	}
 }

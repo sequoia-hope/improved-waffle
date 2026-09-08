@@ -38,9 +38,16 @@
 		isBodyVisible,
 		toggleBodyVisibility,
 		getParameters,
-		setParameters
+		setParameters,
+		getSources,
+		setSourcePack,
+		packAllSources,
+		pinSource,
+		updateSourceToTip,
+		fetchSource
 	} from '$lib/engine/store.svelte.js';
 	import { BUILTIN_PLANES, makePlaneRef } from '$lib/engine/planes.js';
+	import { describeLocator } from '$lib/storage/git/locator.js';
 	import { longPressContextMenu } from './longPressContextMenu.js';
 
 	let tree = $derived(getFeatureTree());
@@ -141,6 +148,44 @@
 
 	// Bodies section state
 	let bodiesExpanded = $state(true);
+
+	// Sources section (v4 §2.3): the document's linked/embedded content.
+	let sources = $derived(getSources());
+	let sourcesExpanded = $state(true);
+	let sourceBusy = $state(null);
+
+	/** Short status: where the content comes from and at which commit. */
+	function sourceStatus(s) {
+		const loc = s.locator ?? {};
+		let where;
+		switch (loc.type) {
+			case 'Git': {
+				const r = loc.ref ?? {};
+				const at = s.resolved?.commit ? s.resolved.commit.slice(0, 7) : '?';
+				where = r.type === 'Commit' ? `pinned ${r.sha.slice(0, 7)}` : `${r.type === 'Tag' ? 'tag ' : ''}${r.name} @ ${at}`;
+				break;
+			}
+			case 'Relative': where = `./${loc.path}`; break;
+			case 'Url': where = 'url'; break;
+			case 'Embedded': where = 'embedded'; break;
+			case 'Local': where = 'this browser'; break;
+			default: where = `${loc.type ?? '?'} (unsupported)`;
+		}
+		return s.available ? where : `missing · ${where}`;
+	}
+
+	function isFloatingGit(s) {
+		return s.locator?.type === 'Git' && s.locator.ref?.type !== 'Commit';
+	}
+
+	async function withBusy(id, fn) {
+		sourceBusy = id;
+		try {
+			await fn();
+		} finally {
+			sourceBusy = null;
+		}
+	}
 
 	/** Inline-rename state for the Bodies list. Keyed by bodyId so only the
 	 * edited row shows an input even when one feature owns several bodies. Body
@@ -658,6 +703,57 @@
 			{/each}
 		{/if}
 
+		<!-- Sources section (v4 §2.3) -->
+		{#if sources.length > 0}
+			<div class="bodies-section sources-section">
+				<button
+					class="origin-header"
+					onclick={() => sourcesExpanded = !sourcesExpanded}
+					data-testid="sources-toggle"
+				>
+					<span class="expand-icon">{sourcesExpanded ? '▾' : '▸'}</span>
+					<span class="origin-label">Sources ({sources.length})</span>
+				</button>
+				{#if sourcesExpanded}
+					{#if sources.some((s) => !s.pack && s.available && s.locator?.type !== 'Embedded')}
+						<div class="source-tools">
+							<button
+								class="src-action"
+								data-testid="sources-pack-all"
+								title="Embed every fetched source in the file so it opens anywhere without network"
+								onclick={() => withBusy('*', packAllSources)}
+								disabled={sourceBusy !== null}
+							>pack all</button>
+						</div>
+					{/if}
+					{#each sources as s, i (s.id)}
+						<div class="source-item" data-testid="source-item-{i}" title={describeLocator(s.locator)}>
+							<span class="tree-icon" class:src-missing={!s.available}>{s.available ? '⛁' : '⚠'}</span>
+							<span class="tree-label src-name">{s.name}</span>
+							<span class="src-meta" data-testid="source-status-{i}">{sourceStatus(s)}</span>
+							{#if !s.available}
+								<button class="src-action" data-testid="source-fetch-{i}" title="Fetch through the link" disabled={sourceBusy !== null} onclick={() => withBusy(s.id, () => fetchSource(s.id))}>fetch</button>
+							{/if}
+							{#if isFloatingGit(s)}
+								<button class="src-action" data-testid="source-update-{i}" title="Re-resolve the branch/tag tip and fetch the content there" disabled={sourceBusy !== null} onclick={() => withBusy(s.id, () => updateSourceToTip(s.id))}>update</button>
+								<button class="src-action" data-testid="source-pin-{i}" title="Pin to the commit currently resolved" disabled={sourceBusy !== null || !s.resolved?.commit} onclick={() => withBusy(s.id, () => pinSource(s.id))}>pin</button>
+							{/if}
+							<label class="src-pack" title="Embed the content in the file (self-contained)">
+								<input
+									type="checkbox"
+									data-testid="source-pack-{i}"
+									checked={s.pack}
+									disabled={sourceBusy !== null || s.locator?.type === 'Embedded' || !s.available}
+									onchange={(e) => withBusy(s.id, () => setSourcePack(s.id, e.currentTarget.checked))}
+								/>
+								pack
+							</label>
+						</div>
+					{/each}
+				{/if}
+			</div>
+		{/if}
+
 		<!-- Bodies section -->
 		{#if bodies.length > 0}
 			<div class="bodies-section">
@@ -994,6 +1090,58 @@
 		gap: 6px;
 		cursor: pointer;
 		user-select: none;
+	}
+
+	.source-item {
+		display: flex;
+		align-items: center;
+		padding: 3px 12px;
+		gap: 6px;
+		font-size: 12px;
+		user-select: none;
+	}
+	.source-item .src-name {
+		flex: 0 1 auto;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.src-meta {
+		flex: 1 1 auto;
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		color: var(--text-secondary, #a6adc8);
+		font-family: monospace;
+		font-size: 11px;
+	}
+	.src-missing {
+		color: var(--warning, #f9e2af);
+	}
+	.src-action {
+		padding: 0 6px;
+		border-radius: 3px;
+		border: 1px solid var(--border-color, #45475a);
+		background: transparent;
+		color: var(--accent, #89b4fa);
+		font-size: 11px;
+		cursor: pointer;
+	}
+	.src-action:disabled {
+		opacity: 0.5;
+		cursor: default;
+	}
+	.src-pack {
+		display: inline-flex;
+		align-items: center;
+		gap: 3px;
+		font-size: 11px;
+		color: var(--text-secondary, #a6adc8);
+	}
+	.source-tools {
+		padding: 2px 12px;
 	}
 
 	.body-item:hover {
