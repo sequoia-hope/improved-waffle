@@ -23,6 +23,12 @@ pub fn tessellate_missing_meshes(state: &mut EngineState, kernel: &mut dyn Kerne
             tessellate_engine(engine, kernel);
         }
     }
+    // The ghost instances of an edit context render too.
+    if let Some(cv) = state.context_view.as_mut() {
+        for (_, engine) in cv.view.parts.iter_mut() {
+            tessellate_engine(engine, kernel);
+        }
+    }
 }
 
 /// The same pass for one engine (the live part, or a part of an assembly).

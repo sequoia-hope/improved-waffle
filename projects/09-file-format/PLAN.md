@@ -82,7 +82,7 @@ preservation at structural levels; `FeatureTree.provenance`; engine
 `SourceStore` + bridge `ProvideSource`; ImportedBody → `source_id` (v3 blobs
 migrated into sources, deduped); single Rust writer; JS-form timestamps; exact
 float parsing; corpus back-compat pin (312 assay cases + fixtures); JSON
-Schema golden `docs/schema/waffle-v4.schema.json` (`json-schema` feature,
+Schema golden `docs/schema/waffle-v5.schema.json` (`json-schema` feature,
 `tests/schema_golden.rs`, own CI step).
 
 - [x] **(2026-09-07)** Increment 6: JSON Schema golden (schemars derives across waffle-types/feature-engine/file-format; every repo `.waffle` validates after migration; CI step)
@@ -96,7 +96,8 @@ Schema golden `docs/schema/waffle-v4.schema.json` (`json-schema` feature,
   - [x] **(2026-09-08)** P2-4 Sources panel (FeatureTree, below Bodies): per source name / status (`main @ 9fceb02`, `pinned …`, `missing · …`), **pin** (`UpdateSourceEntry{git_ref: Commit{resolved}}`, content kept), **update** to tip (host re-resolves the ref, fetches AT the new commit, `ProvideSource{resolved_commit}`; pinned sources never move), **fetch** (retry a missing one), **pack** checkbox + **pack all** (self-contained file; Embedded sources cannot be unpacked); `ModelUpdated.sources` drives it. Spec `open-from-link.spec.js` "Sources panel" (3 cases).
   - [x] **(2026-09-08)** P2-5a `document.id` as the local storage key: new documents, File→Open (the file's identity; a legacy file gets a fresh one), forks and the direct-`/` bootstrap key their record by `document.id`; `IndexedDBStore.get` resolves a key, then a `document.id` inside any record (own records before linked copies); old 8-char records are left as they are (no migration). Spec `document-identity.spec.js`.
   - [x] **(2026-09-08)** P2-5b `GitProvider` (`git-provider.js`): any GitHub/GitLab/Gitea repository + branch + folder as a storage provider through the adapters' write-back API (`repoExists/getFile/putFile/deleteFile`); per-host tokens; saved configs (`providers.js`, `waffle-git-providers`) registered at startup (`git-init.js`); "Connect GitLab / Gitea repository…" dialog (PAT) in the home header, disconnect in the dropdown; `GitHubStore` is now that provider with repo auto-creation; the `/doc/[id]` route reads the ACTIVE provider first (provider documents could not be opened from their cards before); "Copy share link" on document cards. Spec `git-provider.spec.js` (mocked GitLab).
-- [ ] Phase 3/3b/4: Assembly tab kind (+ `scope` on GeomRef), KiCad board source, Drawing tab kind — see the spec §9
+- [x] **(2026-09-08)** Format **v5**: `GeomRef.scope` (spec §2.8, in-context editing — `projects/10-assemblies/PLAN.md` 3d-4). `FORMAT_VERSION`/`MIN_READER_VERSION` 5 in `save.rs` and `app/src/lib/engine/format.js`; v4 files parse as-is (no migration; absent `scope` ⇒ local); schema golden renamed `docs/schema/waffle-v5.schema.json`; `docs/FILE_FORMAT.md` §3.1/§4/§8/§9.1/§12/§13.
+- [ ] Phase 3b/4: KiCad board source, Drawing tab kind — see the spec §9 (the Assembly tab kind landed 2026-09-08, `projects/10-assemblies/PLAN.md`)
 
 ## Blockers
 

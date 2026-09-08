@@ -218,6 +218,7 @@ mod tests {
                 index: 0,
             },
             policy: ResolvePolicy::BestEffort,
+            scope: None,
         }
     }
 

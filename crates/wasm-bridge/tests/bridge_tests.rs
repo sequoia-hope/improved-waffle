@@ -26,6 +26,7 @@ fn make_sketch_op() -> Operation {
                 index: 0,
             },
             policy: ResolvePolicy::Strict,
+            scope: None,
         },
         plane_origin: [0.0, 0.0, 0.0],
         plane_normal: [0.0, 0.0, 1.0],
@@ -106,6 +107,7 @@ fn make_geom_ref() -> GeomRef {
             index: 0,
         },
         policy: ResolvePolicy::Strict,
+        scope: None,
     }
 }
 
@@ -179,6 +181,7 @@ fn serde_roundtrip_model_updated() {
         preview_mesh: None,
         sources: Vec::new(),
         assembly: None,
+        context: None,
     };
     let json = serde_json::to_string(&msg).unwrap();
     let deserialized: EngineToUi = serde_json::from_str(&json).unwrap();
@@ -1432,6 +1435,7 @@ fn serde_roundtrip_model_updated_with_errors() {
         preview_mesh: None,
         sources: Vec::new(),
         assembly: None,
+        context: None,
     };
     let json = serde_json::to_string(&msg).unwrap();
     assert!(json.contains("rebuild failed"));
@@ -1455,6 +1459,7 @@ fn serde_model_updated_empty_errors_skipped() {
         preview_mesh: None,
         sources: Vec::new(),
         assembly: None,
+        context: None,
     };
     let json = serde_json::to_string(&msg).unwrap();
     // skip_serializing_if = "Vec::is_empty" should omit the errors field
@@ -1667,6 +1672,7 @@ fn finish_sketch_persists_projected_bindings() {
                     z: 0.0,
                 },
                 policy: ResolvePolicy::BestEffort,
+                scope: None,
             },
             kind: ProjectedKind::Vertex,
         },

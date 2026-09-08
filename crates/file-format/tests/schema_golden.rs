@@ -1,6 +1,6 @@
 //! `.waffle` v4 JSON Schema golden (`specs/waffle_v4_document_model.md` §5):
 //! the schema generated from the Rust types must equal the committed
-//! `docs/schema/waffle-v4.schema.json` (regenerate with `UPDATE_SCHEMA=1`),
+//! `docs/schema/waffle-v5.schema.json` (regenerate with `UPDATE_SCHEMA=1`),
 //! and every `.waffle` file in the repository — migrated to v4 by the loader
 //! and re-saved — must validate against it, so the schema is neither stale
 //! nor stricter than the writer.
@@ -19,7 +19,7 @@ fn repo_root() -> PathBuf {
 }
 
 fn golden_path() -> PathBuf {
-    repo_root().join("docs/schema/waffle-v4.schema.json")
+    repo_root().join("docs/schema/waffle-v5.schema.json")
 }
 
 #[test]
@@ -41,14 +41,14 @@ fn schema_is_current() {
     let committed: serde_json::Value = serde_json::from_str(&committed).unwrap();
     assert_eq!(
         committed, schema,
-        "docs/schema/waffle-v4.schema.json is stale; regenerate with UPDATE_SCHEMA=1 cargo test -p file-format --features json-schema --test schema_golden"
+        "docs/schema/waffle-v5.schema.json is stale; regenerate with UPDATE_SCHEMA=1 cargo test -p file-format --features json-schema --test schema_golden"
     );
 }
 
 #[test]
 fn schema_has_the_v4_shape() {
     let schema = waffle_file_schema();
-    assert_eq!(schema["title"], "Waffle Iron .waffle document (format v4)");
+    assert_eq!(schema["title"], "Waffle Iron .waffle document (format v5)");
     let required = schema["required"].as_array().unwrap();
     for key in [
         "format",

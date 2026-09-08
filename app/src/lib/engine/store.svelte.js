@@ -474,6 +474,9 @@ export async function initEngine() {
 		// hints written back into the tab so they are saved with it.
 		// Empty arrays are omitted on the wire; give the UI a stable shape.
 		assemblyStatus = msg.assembly ? { errors: [], warnings: [], parts: [], ...msg.assembly } : null;
+		// In-context editing (v4 Phase 3d-4): present while a Part is open in
+		// an assembly's context; the engine drops it on any tab switch.
+		editContext = msg.context ? { instances: [], errors: [], warnings: [], ...msg.context } : null;
 		if (msg.assembly?.placements) {
 			const tab = documentTabs.find(t => t.id === activeTabId);
 			if (tab?.kind?.type === 'Assembly') {
@@ -728,6 +731,9 @@ export async function initEngine() {
 				instanceId: m.instanceId ?? null,
 				instancePath: m.instancePath ? [...m.instancePath] : null,
 				instanceName: m.instanceName ?? null,
+				leafPartTabId: m.leafPartTabId ?? null,
+				leafPartSourceId: m.leafPartSourceId ?? null,
+				context: m.context === true,
 				transform: m.transform ? JSON.parse(JSON.stringify(m.transform)) : null,
 				vertexCount: m.vertices?.length / 3,
 				triangleCount: m.triangleCount,
@@ -739,6 +745,7 @@ export async function initEngine() {
 					start_index: r.start_index,
 					end_index: r.end_index,
 					created_by_feature: r.created_by_feature ?? null,
+					plane: r.plane ?? null,
 				})),
 				edgeRanges: (m.edges?.ranges || []).map(r => ({
 					geom_ref: r.geom_ref,
@@ -808,6 +815,19 @@ export async function initEngine() {
 			addTab: (kind) => addTab(kind),
 			switchTab: (id) => switchTab(id),
 			refreshAssembly: () => refreshAssembly(),
+			// In-context editing (v4 Phase 3d-4)
+			openPartInContext: (path) => openPartInContext(path),
+			updateEditContext: () => updateEditContext(),
+			exitEditContext: () => exitEditContext(),
+			getEditContext: () => editContext ? JSON.parse(JSON.stringify(editContext)) : null,
+			// Test SETUP: start a sketch on a face by its ref (the plane the
+			// toolbar's Sketch button would compute for the selected face).
+			enterSketchOnFace: async (ref) => {
+				const plane = computeFacePlane(ref);
+				if (!plane) return false;
+				await enterSketchMode(plane.origin, plane.normal, ref);
+				return true;
+			},
 			addInstance: (opts) => addInstance(opts),
 			updateInstance: (id, patch) => updateInstance(id, patch),
 			removeInstance: (id) => removeInstance(id),
@@ -1251,7 +1271,9 @@ export function getMeshes() {
  * Returns `[{ bodyId, featureId, outputKey, name }]` in render order.
  */
 export function getBodies() {
-	return meshes.map((m) => {
+	// Ghost bodies of an edit context belong to OTHER parts: never this part's
+	// bodies (not renameable, not boolean targets).
+	return meshes.filter((m) => !m.context).map((m) => {
 		// Engine-resolved name (preferred); fall back to the feature name for the
 		// legacy per-feature worker path, which doesn't resolve names.
 		let name = m.name;
@@ -1574,7 +1596,10 @@ export function geomRefEquals(a, b) {
 		a.anchor?.plane === b.anchor?.plane &&
 		a.anchor?.id === b.anchor?.id &&
 		a.selector?.type === b.selector?.type &&
-		canonicalJson(a.selector) === canonicalJson(b.selector)
+		canonicalJson(a.selector) === canonicalJson(b.selector) &&
+		// In-context refs (v4 §2.8): the same face of two instances of one part
+		// differs only by scope.
+		canonicalJson(a.scope ?? null) === canonicalJson(b.scope ?? null)
 	);
 }
 
@@ -1705,15 +1730,22 @@ export async function enterSketchMode(origin = [0, 0, 0], normal = [0, 0, 1], fa
 	// Notify the engine about the new sketch session
 	if (bridge && engineReady) {
 		const datumId = generateUUID();
+		// A face of ANOTHER instance (in-context editing, v4 §2.8) is recorded
+		// as the sketch's plane reference so the engine re-derives the plane
+		// from that instance on rebuild. A local face keeps the historical
+		// placeholder anchor (the snapshot origin/normal are authoritative).
+		const plane = faceGeomRef?.scope
+			? JSON.parse(JSON.stringify(faceGeomRef))
+			: {
+				kind: { type: 'Face' },
+				anchor: { type: 'Datum', datum_id: datumId },
+				selector: { type: 'Role', role: { type: 'EndCapPositive' }, index: 0 },
+				policy: { type: 'BestEffort' },
+			};
 		try {
 			await bridge.send({
 				type: 'BeginSketch',
-				plane: {
-					kind: { type: 'Face' },
-					anchor: { type: 'Datum', datum_id: datumId },
-					selector: { type: 'Role', role: { type: 'EndCapPositive' }, index: 0 },
-					policy: { type: 'BestEffort' },
-				}
+				plane
 			});
 		} catch (err) {
 			log('error', `BeginSketch failed: ${err}`);
@@ -4509,6 +4541,14 @@ export function computeFacePlane(geomRef) {
 			if (!range.geom_ref) continue;
 			if (!geomRefEquals(range.geom_ref, geomRef)) continue;
 
+			// A ghost face (in-context editing) carries the engine's plane —
+			// face centroid + normal in this part's frame — which is exactly
+			// what the engine re-derives on rebuild, so a sketch started here
+			// does not slide when its plane is re-resolved.
+			if (range.plane?.origin && range.plane?.normal) {
+				return { origin: [...range.plane.origin], normal: [...range.plane.normal] };
+			}
+
 			// Get first triangle from this face range
 			// start_index is already an index into the indices array
 			const triStart = range.start_index;
@@ -5703,6 +5743,138 @@ export async function refreshAssembly() {
 		showToast('error', `Assembly evaluation failed: ${err?.message || err}`);
 		return false;
 	}
+}
+
+// -- In-context editing (v4 Phase 3d-4) --
+
+/**
+ * The context the open Part is being edited in (`ModelUpdated.context`):
+ * `{ assembly_tab_id, instance_path, instance_name, placement, instances,
+ * errors, warnings }`, or null.
+ */
+let editContext = $state(null);
+export function getEditContext() { return editContext; }
+
+/**
+ * The `OpenPartInContext` payload for editing `partTabId` as the instance at
+ * `instancePath` of the assembly tab `assemblyTabId`: the part's tree (the
+ * LIVE tree when that part is the active tab), the assembly (derived
+ * placements stripped) and this document's other trees, as `OpenAssembly`
+ * takes them.
+ */
+function contextPayload(assemblyTabId, instancePath, partTabId) {
+	const asmTab = documentTabs.find((t) => t.id === assemblyTabId);
+	if (asmTab?.kind?.type !== 'Assembly') return null;
+	const partTab = documentTabs.find((t) => t.id === partTabId);
+	if (partTab?.kind?.type !== 'Part') return null;
+	const liveIsPart = activeTabId === partTabId;
+	const features = JSON.parse(JSON.stringify(liveIsPart ? featureTree : (partTab.kind.features ?? { features: [], active_index: null })));
+	const part_trees = {};
+	const assembly_trees = {};
+	for (const t of documentTabs) {
+		if (t.kind?.type === 'Part') {
+			part_trees[t.id] = t.id === partTabId ? features : JSON.parse(JSON.stringify(t.kind.features ?? { features: [], active_index: null }));
+		} else if (t.kind?.type === 'Assembly' && t.id !== assemblyTabId && t.kind.assembly) {
+			const a = JSON.parse(JSON.stringify(t.kind.assembly));
+			delete a.placements;
+			assembly_trees[t.id] = a;
+		}
+	}
+	const assembly = JSON.parse(JSON.stringify(asmTab.kind.assembly));
+	delete assembly.placements;
+	return {
+		type: 'OpenPartInContext',
+		features,
+		assembly_tab_id: assemblyTabId,
+		instance_path: [...instancePath],
+		assembly,
+		part_trees,
+		assembly_trees
+	};
+}
+
+/**
+ * Which same-document Part tab the instance at `path` of the open assembly is
+ * of, or null (a linked part, a sub-assembly, an unknown path).
+ */
+function partTabOfInstance(path) {
+	if (!path?.length) return null;
+	// The rendered leaf knows its part (also for a sub-assembly member).
+	const key = JSON.stringify(path);
+	const leaf = meshes.find((m) => JSON.stringify(m.instancePath ?? null) === key);
+	if (leaf?.leafPartTabId) {
+		return leaf.leafPartSourceId ? null : leaf.leafPartTabId;
+	}
+	if (path.length === 1) {
+		const inst = getAssembly()?.instances.find((i) => i.id === path[0]);
+		if (inst?.source && !inst.source.source_id) {
+			const tab = documentTabs.find((t) => t.id === inst.source.tab_id);
+			return tab?.kind?.type === 'Part' ? tab.id : null;
+		}
+	}
+	return null;
+}
+
+/**
+ * Edit the part of instance `instancePath` of the open Assembly tab in that
+ * assembly's context: switch to the Part tab and open it with the other
+ * instances as ghosts (`OpenPartInContext`). Sketching on a ghost face records
+ * a scoped plane reference. Returns true when the part opened in context.
+ * @param {string[]} instancePath
+ */
+export async function openPartInContext(instancePath) {
+	const asmTab = activeAssemblyTab();
+	if (!asmTab || !bridge || !engineReady) return false;
+	const partTabId = partTabOfInstance(instancePath);
+	if (!partTabId) {
+		showToast('error', 'Only a part of this document can be edited in context (linked parts are read-only)');
+		return false;
+	}
+	if (autoSaveTimer) {
+		clearTimeout(autoSaveTimer);
+		autoSaveTimer = null;
+	}
+	const payload = contextPayload(asmTab.id, instancePath, partTabId);
+	if (!payload) return false;
+	activeTabId = partTabId;
+	lastRebuildWarnings = new Set();
+	try {
+		await sendRebuild(payload);
+		log('action', 'Open part in context', { assembly: asmTab.id, instancePath, partTabId });
+		scheduleAutoSave();
+		return true;
+	} catch (err) {
+		// Fall back to a plain open of the part so the user is not stranded.
+		log('error', `Open in context failed: ${err?.message || err}`);
+		showToast('error', `Could not open in context: ${err?.message || err}`);
+		await sendRebuild({ type: 'SwitchTab', features: payload.features }).catch(() => {});
+		scheduleAutoSave();
+		return false;
+	}
+}
+
+/**
+ * Re-take the context snapshot from the assembly's current state (its other
+ * parts and placements may have changed): scoped sketch planes re-derive.
+ */
+export async function updateEditContext() {
+	if (!editContext || !bridge || !engineReady) return false;
+	const payload = contextPayload(editContext.assembly_tab_id, editContext.instance_path, activeTabId);
+	if (!payload) return false;
+	try {
+		await sendRebuild(payload);
+		return true;
+	} catch (err) {
+		showToast('error', `Could not update the context: ${err?.message || err}`);
+		return false;
+	}
+}
+
+/** Leave the context: the part stays open on its own (ghosts gone). */
+export async function exitEditContext() {
+	if (!editContext || !bridge || !engineReady) return false;
+	await sendRebuild({ type: 'SwitchTab', features: JSON.parse(JSON.stringify(featureTree)) });
+	return true;
 }
 
 /**

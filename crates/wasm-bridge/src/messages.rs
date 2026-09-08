@@ -247,6 +247,29 @@ pub enum UiToEngine {
     ListSourceTabs {
         source_id: Uuid,
     },
+    /// Open a Part tab IN THE CONTEXT of an assembly (Phase 3d-4, in-context
+    /// editing, v4 §2.8). `features` is the part's tree (it becomes the live
+    /// tree); the assembly and this document's trees are evaluated exactly as
+    /// for `OpenAssembly` — `part_trees` must therefore carry `features` under
+    /// the edited part's tab id, so the assembly builds the part being edited
+    /// from the same recipe. The instance at `instance_path` is the one being
+    /// edited: the engine snapshots every OTHER leaf's geometry relative to
+    /// its placement as the part's edit context (scoped `GeomRef`s resolve
+    /// through it), renders those leaves as ghost bodies in the edited part's
+    /// frame (their face and edge refs carry the scope), and reports
+    /// `ModelUpdated.context`. Send it again to update the context; any
+    /// `SwitchTab`/`OpenAssembly`/`LoadProject` drops it. The instance must be
+    /// a same-document Part (a linked part is read-only).
+    OpenPartInContext {
+        features: FeatureTree,
+        assembly_tab_id: String,
+        instance_path: Vec<Uuid>,
+        assembly: feature_engine::assembly::AssemblyTree,
+        #[serde(default)]
+        part_trees: HashMap<String, FeatureTree>,
+        #[serde(default)]
+        assembly_trees: HashMap<String, feature_engine::assembly::AssemblyTree>,
+    },
     /// Fork of a linked document (v4 §7.1): rewrite every `Relative` source
     /// into an absolute `Git` locator in `base`'s repository, pinned at
     /// `commit` (the commit the link was opened at), so the copy's links keep
@@ -362,6 +385,10 @@ pub enum EngineToUi {
         /// the evaluation's problems (Phase 3b).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         assembly: Option<AssemblyStatus>,
+        /// Present while a Part is open in the context of an assembly
+        /// (`OpenPartInContext`, Phase 3d-4).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        context: Option<ContextStatus>,
     },
 
     /// Sketch constraint solver completed.
@@ -463,6 +490,35 @@ pub struct AssemblyStatus {
     /// Parts that were built (tab id, and source id for linked parts).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub parts: Vec<feature_engine::assembly::PartRef>,
+}
+
+/// The edit context a Part is open in (Phase 3d-4), as the UI needs it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContextStatus {
+    pub assembly_tab_id: String,
+    /// The edited instance (its path in the assembly) and its display name.
+    pub instance_path: Vec<Uuid>,
+    pub instance_name: String,
+    /// World placement of the edited instance at snapshot time.
+    pub placement: feature_engine::assembly::Transform,
+    /// The other instances rendered as ghosts.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub instances: Vec<ContextInstanceInfo>,
+    /// The assembly evaluation's problems (same as `AssemblyStatus`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub errors: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
+}
+
+/// One ghost instance of an edit context.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContextInstanceInfo {
+    pub path: Vec<Uuid>,
+    pub name: String,
+    pub part_tab_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub part_source_id: Option<Uuid>,
 }
 
 /// One tab of a linked document.

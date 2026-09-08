@@ -24,6 +24,7 @@
 		getSources,
 		getSourceTabs,
 		getActiveTabId,
+		openPartInContext,
 		MATE_KINDS
 	} from '$lib/engine/store.svelte.js';
 	import { eulerDegToQuat, quatToEulerDeg } from '$lib/engine/rotation.js';
@@ -48,6 +49,10 @@
 	});
 	let selectedInstance = $derived(getSelectedInstanceId());
 	let selectedPath = $derived(getSelectedInstancePath());
+	/** A same-document Part instance can be edited in this assembly's context. */
+	function editableInContext(inst) {
+		return !inst.source?.source_id && partTabs.some((t) => t.id === inst.source?.tab_id);
+	}
 	let selectedFace = $derived(getSelectedRefs().find((r) => r?.kind?.type === 'Face') ?? null);
 
 	let newInstanceKey = $state('');
@@ -156,6 +161,9 @@
 							onchange={(e) => run(() => updateInstance(inst.id, { name: e.currentTarget.value }))}
 						/>
 						<span class="meta" data-testid="asm-instance-part-{i}">{partName(inst)}</span>
+						{#if editableInContext(inst)}
+							<button class="act" title="Edit this part in the context of the assembly (the other instances show as ghosts)" data-testid="asm-instance-edit-context-{i}" disabled={busy} onclick={() => run(() => openPartInContext([inst.id]))}>edit</button>
+						{/if}
 						<button class="act" title="Remove instance" data-testid="asm-instance-remove-{i}" disabled={busy} onclick={() => run(() => removeInstance(inst.id))}>×</button>
 					</div>
 					<div class="row-sub">
@@ -177,6 +185,12 @@
 					</div>
 				</div>
 			{/each}
+			{#if selectedPath && selectedPath.length > 1}
+				<div class="row">
+					<span class="meta">selected: {pathLabel(selectedPath)}</span>
+					<button class="act" title="Edit the selected member's part in the context of this assembly" data-testid="asm-edit-selected-context" disabled={busy} onclick={() => run(() => openPartInContext(selectedPath))}>edit in context</button>
+				</div>
+			{/if}
 			<div class="row add">
 				<select data-testid="asm-add-instance-part" bind:value={newInstanceKey} disabled={sourceOptions.length === 0}>
 					{#each ['Parts', 'Assemblies', 'Linked'] as group}

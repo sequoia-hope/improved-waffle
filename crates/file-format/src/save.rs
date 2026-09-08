@@ -12,7 +12,10 @@ use crate::sources::SourceEntry;
 /// v3: multi-tab document model
 /// v4: document identity, `sources` table, opaque unknown tab/source kinds,
 ///     unknown-key preservation (`specs/waffle_v4_document_model.md`)
-pub const FORMAT_VERSION: u32 = 4;
+/// v5: `GeomRef.scope` — references into another tab's instance (in-context
+///     editing, spec §2.8). A v4 reader would drop the field and resolve the
+///     anchor locally, so the reader floor moved with it.
+pub const FORMAT_VERSION: u32 = 5;
 
 /// Oldest reader (by its `FORMAT_VERSION`) that can parse files we write.
 ///
@@ -27,7 +30,7 @@ pub const FORMAT_VERSION: u32 = 4;
 /// opaquely. Purely additive defaulted fields never require a bump. Files
 /// without the field (all pre-2026-08-28 files, including the assay corpus)
 /// default to 0 and always pass. See `docs/FILE_FORMAT.md` §13.
-pub const MIN_READER_VERSION: u32 = 4;
+pub const MIN_READER_VERSION: u32 = 5;
 
 // Keep the constants coherent: we can never require a reader newer than the
 // version we claim to write.

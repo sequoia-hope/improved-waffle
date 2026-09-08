@@ -11,6 +11,7 @@ use feature_engine::assembly::{
 };
 use feature_engine::types::*;
 use kernel_v2::KernelV2Adapter;
+use modeling_ops::KernelBundle;
 use serde_json::Map;
 use uuid::Uuid;
 use waffle_types::{Anchor, GeomRef, OutputKey, ResolvePolicy, Selector, TopoKind};
@@ -177,6 +178,7 @@ fn connector_frames_come_from_the_parts_geometry_and_fastened_stacks_the_cubes()
             },
         },
         policy: ResolvePolicy::BestEffort,
+        scope: None,
     };
     let ca = connector("A top", ida, Some(top_face), Frame::default());
     let cb = connector(
@@ -228,6 +230,7 @@ fn a_part_the_document_lacks_and_a_bad_face_are_loud_but_the_rest_renders() {
             index: 0,
         },
         policy: ResolvePolicy::Strict,
+        scope: None,
     };
     let c = connector(
         "A ?",
@@ -467,4 +470,398 @@ fn list_source_tabs_reads_a_linked_document_and_its_parts_can_be_instanced() {
         &mut kernel,
     );
     assert!(matches!(bad, EngineToUi::Error { .. }));
+}
+
+// ── In-context editing (Phase 3d-4) ────────────────────────────────────────
+
+/// A sketch feature on `plane` (with a deliberately stale snapshot plane) —
+/// the unit square, so an extrude of it builds.
+fn sketch_on(plane: GeomRef) -> Operation {
+    let mut solved_positions = HashMap::new();
+    solved_positions.insert(1, (0.0, 0.0));
+    solved_positions.insert(2, (0.002, 0.0));
+    solved_positions.insert(3, (0.002, 0.002));
+    solved_positions.insert(4, (0.0, 0.002));
+    Operation::Sketch {
+        sketch: waffle_types::Sketch {
+            id: Uuid::new_v4(),
+            plane,
+            plane_origin: [9.0, 9.0, 9.0],
+            plane_normal: [1.0, 0.0, 0.0],
+            entities: vec![
+                waffle_types::SketchEntity::Point {
+                    id: 1,
+                    x: 0.0,
+                    y: 0.0,
+                    construction: false,
+                },
+                waffle_types::SketchEntity::Point {
+                    id: 2,
+                    x: 0.002,
+                    y: 0.0,
+                    construction: false,
+                },
+                waffle_types::SketchEntity::Point {
+                    id: 3,
+                    x: 0.002,
+                    y: 0.002,
+                    construction: false,
+                },
+                waffle_types::SketchEntity::Point {
+                    id: 4,
+                    x: 0.0,
+                    y: 0.002,
+                    construction: false,
+                },
+            ],
+            constraints: Vec::new(),
+            solve_status: waffle_types::SolveStatus::FullyConstrained,
+            solved_positions,
+            solved_profiles: vec![waffle_types::ClosedProfile {
+                entity_ids: vec![1, 2, 3, 4],
+                is_outer: true,
+                vertex_ids: vec![],
+                circle: None,
+                spline_segments: vec![],
+                arc_segments: vec![],
+            }],
+            projected: vec![],
+        },
+    }
+}
+
+/// The +z face of the imported cube, as a reference scoped to `path` of `asm`.
+fn cube_top_face(import_id: Uuid, scope: Option<waffle_types::RefScope>) -> GeomRef {
+    GeomRef {
+        kind: TopoKind::Face,
+        anchor: Anchor::FeatureOutput {
+            feature_id: import_id,
+            output_key: OutputKey::Main,
+        },
+        selector: Selector::Signature {
+            signature: waffle_types::TopoSignature {
+                surface_type: Some("planar".into()),
+                normal: Some([0.0, 0.0, 1.0]),
+                ..waffle_types::TopoSignature::empty()
+            },
+        },
+        policy: ResolvePolicy::BestEffort,
+        scope,
+    }
+}
+
+fn open_in_context(
+    state: &mut EngineState,
+    kernel: &mut KernelV2Adapter,
+    features: &FeatureTree,
+    tree: &AssemblyTree,
+    parts: &HashMap<String, FeatureTree>,
+    path: Vec<Uuid>,
+) -> Result<ContextStatus, String> {
+    let r = dispatch(
+        state,
+        UiToEngine::OpenPartInContext {
+            features: features.clone(),
+            assembly_tab_id: "asm".into(),
+            instance_path: path,
+            assembly: tree.clone(),
+            part_trees: parts.clone(),
+            assembly_trees: HashMap::new(),
+        },
+        kernel,
+    );
+    match r {
+        EngineToUi::ModelUpdated { context, .. } => {
+            Ok(context.expect("context status while a part is open in context"))
+        }
+        EngineToUi::Error { message, .. } => Err(message),
+        other => panic!("{other:?}"),
+    }
+}
+
+fn sketch_plane(state: &EngineState, sid: Uuid) -> ([f64; 3], [f64; 3]) {
+    let Operation::Sketch { sketch } = &state.engine.tree.find_feature(sid).unwrap().operation
+    else {
+        unreachable!()
+    };
+    (sketch.plane_origin, sketch.plane_normal)
+}
+
+fn near3(a: [f64; 3], b: [f64; 3], tol: f64) -> bool {
+    (0..3).all(|i| (a[i] - b[i]).abs() < tol)
+}
+
+#[test]
+fn open_part_in_context_snapshots_the_other_instances_and_scoped_planes_follow_them() {
+    let mut state = EngineState::new();
+    let mut kernel = KernelV2Adapter::new();
+    let part = cube_part(&mut state, &mut kernel);
+    let import_id = part.features[0].id;
+    let parts: HashMap<String, FeatureTree> = HashMap::from([("part".to_string(), part.clone())]);
+
+    let a = instance("A", "part", Transform::identity(), true);
+    let b = instance("B", "part", Transform::translation([0.03, 0.0, 0.0]), true);
+    let (ida, idb) = (a.id, b.id);
+    let tree = AssemblyTree {
+        instances: vec![a, b],
+        ..Default::default()
+    };
+
+    // Open B in context: the live tree is B's part, the view holds A as the
+    // one ghost at A relative to B, and the engine's snapshot agrees.
+    let status = open_in_context(&mut state, &mut kernel, &part, &tree, &parts, vec![idb]).unwrap();
+    assert_eq!(status.assembly_tab_id, "asm");
+    assert_eq!(status.instance_path, vec![idb]);
+    assert_eq!(status.instance_name, "B");
+    assert!(status.errors.is_empty(), "{:?}", status.errors);
+    assert_eq!(status.instances.len(), 1);
+    assert_eq!(status.instances[0].path, vec![ida]);
+    assert_eq!(status.instances[0].name, "A");
+    assert_eq!(status.instances[0].part_tab_id, "part");
+    assert!(status
+        .placement
+        .approx_eq(&Transform::translation([0.03, 0.0, 0.0]), 1e-12));
+    assert!(state.assembly.is_none());
+    assert_eq!(
+        state.engine.tree.features.len(),
+        1,
+        "the live tree is the part"
+    );
+    let ctx = state.engine.context.as_ref().expect("engine context");
+    assert_eq!(ctx.instances.len(), 1);
+    assert!(ctx.instances[0]
+        .relative
+        .approx_eq(&Transform::translation([-0.03, 0.0, 0.0]), 1e-12));
+    assert!(
+        ctx.instances[0].feature_results.values().all(|r| r
+            .outputs
+            .iter()
+            .all(|(_, b)| b.mesh.is_none() && b.edges.is_none())),
+        "the snapshot carries handles, not meshes"
+    );
+    let cv = state.context_view.as_ref().unwrap();
+    assert_eq!(cv.ghosts.len(), 1);
+
+    // A sketch on A's top face, scoped: the engine derives the plane from the
+    // context — A's face centroid (5, 5, 10) mm in A's frame, at x − 30 mm in
+    // B's — replacing the stale snapshot the feature arrived with.
+    let scope = waffle_types::RefScope::in_assembly("asm", vec![ida]);
+    let r = dispatch(
+        &mut state,
+        UiToEngine::AddFeature {
+            operation: sketch_on(cube_top_face(import_id, Some(scope.clone()))),
+        },
+        &mut kernel,
+    );
+    assert!(matches!(r, EngineToUi::ModelUpdated { .. }), "{r:?}");
+    assert!(state.engine.errors.is_empty(), "{:?}", state.engine.errors);
+    let sid = state.engine.tree.features[1].id;
+    let (o, n) = sketch_plane(&state, sid);
+    assert!(near3(o, [-0.025, 0.005, 0.01], 1e-9), "{o:?}");
+    assert!(near3(n, [0.0, 0.0, 1.0], 1e-9), "{n:?}");
+
+    // Extrude it: a second body of B, built in B's frame on the derived plane.
+    let r = dispatch(
+        &mut state,
+        UiToEngine::AddFeature {
+            operation: Operation::Extrude {
+                params: ExtrudeParams {
+                    combine: None,
+                    targets: Some(vec![]),
+                    sketch_id: sid,
+                    profile_index: 0,
+                    profile_entity_ids: None,
+                    depth: 0.004,
+                    direction: None,
+                    symmetric: false,
+                    cut: false,
+                    merge: false,
+                    target_body: None,
+                    depth_mode: DepthMode::Blind,
+                    second_direction: None,
+                    region: None,
+                    regions: Vec::new(),
+                    depth_expr: None,
+                },
+            },
+        },
+        &mut kernel,
+    );
+    assert!(matches!(r, EngineToUi::ModelUpdated { .. }), "{r:?}");
+    assert!(state.engine.errors.is_empty(), "{:?}", state.engine.errors);
+    let xid = state.engine.tree.features[2].id;
+    let xr = &state.engine.feature_results[&xid];
+    assert_eq!(xr.outputs.len(), 1);
+    let top = feature_engine::rebuild::resolve_face_plane(
+        &cube_top_face(xid, None),
+        &state.engine.feature_results,
+        kernel.as_introspect(),
+    )
+    .unwrap();
+    assert!(
+        (top.0[2] - 0.014).abs() < 1e-9,
+        "extrude top at z = {}",
+        top.0[2]
+    );
+
+    // The live tree is what the UI saves; the scoped reference is in it.
+    let live = state.engine.tree.clone();
+    let Operation::Sketch { sketch } = &live.features[1].operation else {
+        unreachable!()
+    };
+    assert_eq!(sketch.plane.scope.as_ref(), Some(&scope));
+
+    // Update the context after A moved (+20 mm in y): re-open B with the
+    // current trees — the plane follows A, the extrude rebuilds on it.
+    let mut moved = tree.clone();
+    moved.instances[0].transform = Transform::translation([0.0, 0.02, 0.0]);
+    let parts_now: HashMap<String, FeatureTree> =
+        HashMap::from([("part".to_string(), live.clone())]);
+    let status = open_in_context(
+        &mut state,
+        &mut kernel,
+        &live,
+        &moved,
+        &parts_now,
+        vec![idb],
+    )
+    .unwrap();
+    assert!(status.errors.is_empty(), "{:?}", status.errors);
+    assert!(state.engine.errors.is_empty(), "{:?}", state.engine.errors);
+    let (o, _) = sketch_plane(&state, sid);
+    assert!(near3(o, [-0.025, 0.025, 0.01], 1e-9), "{o:?}");
+    let top = feature_engine::rebuild::resolve_face_plane(
+        &cube_top_face(xid, None),
+        &state.engine.feature_results,
+        kernel.as_introspect(),
+    )
+    .unwrap();
+    // The 2 mm square's centroid sits 1 mm from the plane origin along the
+    // sketch basis's v axis (whose sign is the plane basis convention, not
+    // this feature's concern).
+    assert!(
+        ((top.0[1] - 0.025).abs() - 0.001).abs() < 1e-9,
+        "extrude follows: top centroid y = {}",
+        top.0[1]
+    );
+
+    // Opening the part on its own (SwitchTab) drops the context: the sketch
+    // keeps its last derived plane and says what it depends on, loudly.
+    let live_now = state.engine.tree.clone();
+    let r = dispatch(
+        &mut state,
+        UiToEngine::SwitchTab { features: live_now },
+        &mut kernel,
+    );
+    let EngineToUi::ModelUpdated {
+        warnings, context, ..
+    } = r
+    else {
+        panic!("{r:?}")
+    };
+    assert!(context.is_none());
+    assert!(state.engine.context.is_none() && state.context_view.is_none());
+    assert!(
+        warnings.iter().any(|w| w.contains("of assembly `asm`")
+            && w.contains("open the part in that assembly's context")),
+        "{warnings:?}"
+    );
+    assert!(state.engine.errors.is_empty(), "{:?}", state.engine.errors);
+    let (o, _) = sketch_plane(&state, sid);
+    assert!(near3(o, [-0.025, 0.025, 0.01], 1e-9), "{o:?}");
+
+    // Back in the assembly, BOTH instances carry the new extrude (propagation
+    // is by recipe: every instance of the part rebuilds from the same tree).
+    let status = open(&mut state, &mut kernel, &moved, &parts_now);
+    assert!(status.errors.is_empty(), "{:?}", status.errors);
+    let view = state.assembly.as_ref().unwrap();
+    assert_eq!(view.parts.len(), 1);
+    assert_eq!(view.parts[0].1.feature_results.len(), 3);
+    assert_eq!(view.leaves.len(), 2);
+}
+
+#[test]
+fn open_part_in_context_refuses_what_it_cannot_edit() {
+    let mut state = EngineState::new();
+    let mut kernel = KernelV2Adapter::new();
+    let part = cube_part(&mut state, &mut kernel);
+    let parts: HashMap<String, FeatureTree> = HashMap::from([("part".to_string(), part.clone())]);
+    let mut a = instance("A", "part", Transform::identity(), true);
+    let ida = a.id;
+    let tree = AssemblyTree {
+        instances: vec![a.clone()],
+        ..Default::default()
+    };
+
+    // An instance that is not in the assembly.
+    let err = open_in_context(
+        &mut state,
+        &mut kernel,
+        &part,
+        &tree,
+        &parts,
+        vec![Uuid::new_v4()],
+    )
+    .unwrap_err();
+    assert!(
+        err.contains("not a rendered part of assembly `asm`"),
+        "{err}"
+    );
+    assert!(state.engine.context.is_none() && state.context_view.is_none());
+
+    // A suppressed instance is not rendered either.
+    a.suppressed = true;
+    let hidden = AssemblyTree {
+        instances: vec![a],
+        ..Default::default()
+    };
+    let err =
+        open_in_context(&mut state, &mut kernel, &part, &hidden, &parts, vec![ida]).unwrap_err();
+    assert!(err.contains("not a rendered part"), "{err}");
+
+    // A scoped reference to an instance the context does not have: a loud
+    // per-feature error, the part still opens and builds.
+    open_in_context(&mut state, &mut kernel, &part, &tree, &parts, vec![ida]).unwrap();
+    let import_id = part.features[0].id;
+    dispatch(
+        &mut state,
+        UiToEngine::AddFeature {
+            operation: sketch_on(cube_top_face(
+                import_id,
+                Some(waffle_types::RefScope::in_assembly(
+                    "asm",
+                    vec![Uuid::new_v4()],
+                )),
+            )),
+        },
+        &mut kernel,
+    );
+    let sid = state.engine.tree.features[1].id;
+    let (fid, msg) = state
+        .engine
+        .errors
+        .iter()
+        .find(|(id, _)| *id == sid)
+        .expect("the sketch reports its missing instance");
+    assert_eq!(*fid, sid);
+    assert!(msg.contains("not in the open context"), "{msg}");
+    // A reference to the edited instance ITSELF is refused too (it must be local).
+    dispatch(
+        &mut state,
+        UiToEngine::AddFeature {
+            operation: sketch_on(cube_top_face(
+                import_id,
+                Some(waffle_types::RefScope::in_assembly("asm", vec![ida])),
+            )),
+        },
+        &mut kernel,
+    );
+    let sid2 = state.engine.tree.features[2].id;
+    let (_, msg) = state
+        .engine
+        .errors
+        .iter()
+        .find(|(id, _)| *id == sid2)
+        .expect("self-scoped reference is an error");
+    assert!(msg.contains("edited instance itself"), "{msg}");
 }

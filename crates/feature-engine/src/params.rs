@@ -634,6 +634,7 @@ mod tests {
                     z: 0.0,
                 },
                 policy: waffle_types::ResolvePolicy::BestEffort,
+                scope: None,
             },
             plane_origin: [0.0, 0.0, 0.0],
             plane_normal: [0.0, 0.0, 1.0],

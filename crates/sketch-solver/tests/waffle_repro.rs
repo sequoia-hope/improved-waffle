@@ -22,6 +22,7 @@ fn dummy_geom_ref() -> GeomRef {
             index: 0,
         },
         policy: ResolvePolicy::Strict,
+        scope: None,
     }
 }
 fn pt(id: u32, x: f64, y: f64, c: bool) -> SketchEntity {

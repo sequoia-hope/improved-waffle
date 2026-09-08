@@ -23,7 +23,7 @@ step-import = { path = "../step-import" }
 schemars = { version = "1.2", features = ["uuid1", "chrono04"], optional = true }
 
 [features]
-# JSON Schema of the `.waffle` v4 file (`docs/schema/waffle-v4.schema.json`),
+# JSON Schema of the `.waffle` v5 file (`docs/schema/waffle-v5.schema.json`),
 # generated from the Rust types and pinned by `tests/schema_golden.rs`.
 # Off by default; enable with `--features json-schema`.
 json-schema = ["dep:schemars", "feature-engine/json-schema", "waffle-types/json-schema"]

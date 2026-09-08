@@ -33,6 +33,7 @@ fn create_rect_sketch(
             index: 0,
         },
         policy: ResolvePolicy::Strict,
+        scope: None,
     };
 
     wasm_bridge::dispatch(state, UiToEngine::BeginSketch { plane }, kernel);
@@ -426,6 +427,7 @@ fn extrude_then_fillet_increases_face_count() {
                             index: 0,
                         },
                         policy: ResolvePolicy::BestEffort,
+                        scope: None,
                     }],
                     radius: 0.5,
                 },
@@ -991,6 +993,7 @@ fn extrude_sketch_with_no_profiles_returns_error() {
             index: 0,
         },
         policy: ResolvePolicy::Strict,
+        scope: None,
     };
     wasm_bridge::dispatch(&mut state, UiToEngine::BeginSketch { plane }, &mut kernel);
     wasm_bridge::dispatch(
@@ -1493,6 +1496,7 @@ fn body_target_ref(feature_id: Uuid) -> GeomRef {
             index: 0,
         },
         policy: ResolvePolicy::BestEffort,
+        scope: None,
     }
 }
 

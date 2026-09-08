@@ -335,6 +335,10 @@ function __wbg_get_imports() {
             const ret = new Date();
             return ret;
         },
+        __wbg_new_from_slice_ff2c15e8e05ffdfc: function(arg0, arg1) {
+            const ret = new Float32Array(getArrayF32FromWasm0(arg0, arg1));
+            return ret;
+        },
         __wbg_new_with_length_3437fa6f550bd3d8: function(arg0) {
             const ret = new Uint32Array(arg0 >>> 0);
             return ret;

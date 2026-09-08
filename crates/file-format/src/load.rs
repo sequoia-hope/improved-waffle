@@ -77,9 +77,10 @@ fn parse_err(e: impl std::fmt::Display) -> LoadError {
     LoadError::ParseError(e.to_string())
 }
 
-/// Load any supported version (v1–v4) as a v4 document. Older files are
+/// Load any supported version (v1–v5) as a current document. Older files are
 /// migrated on the way in (v1→v2 value scaling, v2→v3 tab wrapping, v3→v4
-/// identity/sources — `crate::migrate`). Non-fatal findings come back as
+/// identity/sources — `crate::migrate`; v4→v5 is purely additive:
+/// `GeomRef.scope` defaults to absent, so a v4 file parses as-is). Non-fatal findings come back as
 /// warnings.
 pub fn load_document(json: &str) -> Result<LoadedDocument, LoadError> {
     let value: Value = serde_json::from_str(json).map_err(parse_err)?;
@@ -124,7 +125,7 @@ pub fn load_document(json: &str) -> Result<LoadedDocument, LoadError> {
 
 /// Single-tree API: the active tab's feature tree (falling back to the first
 /// tab) with any packed source content inlined as legacy payloads, plus
-/// project metadata. Handles v1–v4.
+/// project metadata. Handles v1–v5.
 pub fn load_project(json: &str) -> Result<(FeatureTree, ProjectMetadata), LoadError> {
     let loaded = load_document(json)?;
     let doc = loaded.document;

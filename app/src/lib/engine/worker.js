@@ -231,7 +231,14 @@ function collectBodies() {
 			instancePath: meta.instancePath ?? null,
 			instanceName: meta.instanceName ?? null,
 			partTabId: meta.partTabId ?? null,
+			// The leaf's own part (differs from partTabId for a sub-assembly member).
+			leafPartTabId: meta.leafPartTabId ?? null,
+			leafPartSourceId: meta.leafPartSourceId ?? null,
 			transform: meta.transform ?? null,
+			// In-context editing (v4 Phase 3d-4): a ghost body of ANOTHER
+			// instance, baked into the edited part's frame; its face/edge refs
+			// carry a `scope`.
+			context: meta.context === true,
 			vertices,
 			normals,
 			indices,

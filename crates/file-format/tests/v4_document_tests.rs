@@ -63,7 +63,7 @@ fn v4_envelope_round_trip_keeps_identity_sources_and_tabs() {
     let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
     assert_eq!(parsed["version"], FORMAT_VERSION);
     assert_eq!(parsed["min_reader_version"], MIN_READER_VERSION);
-    assert_eq!(FORMAT_VERSION, 4);
+    assert_eq!(FORMAT_VERSION, 5);
     assert_eq!(parsed["document"]["id"], doc.document.id.to_string());
     assert_eq!(parsed["sources"].as_array().unwrap().len(), 1);
     // `.git` is normalized away on the way in; host is inferred, not written.
@@ -327,7 +327,7 @@ fn v3_to_v4_mints_identity_rewrites_default_tab_and_lifts_step_payloads() {
     // The migrated document writes as v4 and round-trips.
     let v4 = save_document(&doc);
     let parsed: serde_json::Value = serde_json::from_str(&v4).unwrap();
-    assert_eq!(parsed["version"], 4);
+    assert_eq!(parsed["version"], FORMAT_VERSION);
     assert!(
         !v4.contains("\"blob_encoding\""),
         "no inline payloads remain in features"
@@ -421,7 +421,7 @@ fn save_project_lifts_and_load_project_inlines_step_payloads() {
     let meta = ProjectMetadata::new("Single").with_display_unit("mm");
     let json = save_project(&tree, &meta);
     let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
-    assert_eq!(parsed["version"], 4);
+    assert_eq!(parsed["version"], FORMAT_VERSION);
     assert_eq!(parsed["sources"].as_array().unwrap().len(), 1);
     assert!(
         parsed["tabs"][0]["kind"]["features"]["features"][0]["operation"]["params"]
@@ -694,6 +694,7 @@ fn agent_authored_square_extrude(profile_index: usize, ids: serde_json::Value) -
             index: 0,
         },
         policy: waffle_types::ResolvePolicy::Strict,
+        scope: None,
     })
     .unwrap();
     let tree = serde_json::json!({

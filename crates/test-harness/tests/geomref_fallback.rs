@@ -50,6 +50,7 @@ fn gf1_role_and_signature_resolve_same_entity() {
         },
         selector: Selector::Signature { signature: sig },
         policy: ResolvePolicy::Strict,
+        scope: None,
     };
 
     let sig_resolved = resolve_geom_ref(&sig_ref, &results).unwrap();
@@ -92,6 +93,7 @@ fn gf2_best_effort_falls_back_on_missing_role() {
             index: 0,
         },
         policy: ResolvePolicy::BestEffort,
+        scope: None,
     };
 
     let resolved = resolve_with_fallback(&nonexistent_ref, &results);
@@ -134,6 +136,7 @@ fn gf3_strict_fails_on_missing_role() {
             index: 0,
         },
         policy: ResolvePolicy::Strict,
+        scope: None,
     };
 
     let result = resolve_with_fallback(&strict_ref, &results);
@@ -235,6 +238,7 @@ fn gf5_signature_resolution_with_perturbed_values() {
             signature: sig.clone(),
         },
         policy: ResolvePolicy::BestEffort,
+        scope: None,
     };
 
     let resolved = resolve_geom_ref(&perturbed_ref, &results).unwrap();
@@ -304,6 +308,7 @@ fn gf7_best_effort_clamps_out_of_range_index() {
             index: 5,
         },
         policy: ResolvePolicy::BestEffort,
+        scope: None,
     };
 
     let resolved = resolve_geom_ref(&oob_ref, &results);
@@ -329,6 +334,7 @@ fn gf7_best_effort_clamps_out_of_range_index() {
             index: 5,
         },
         policy: ResolvePolicy::Strict,
+        scope: None,
     };
 
     let strict_result = resolve_geom_ref(&strict_oob_ref, &results);

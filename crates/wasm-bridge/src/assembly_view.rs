@@ -9,6 +9,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use feature_engine::assembly::{AssemblyTree, Frame, PartRef, Transform};
 use feature_engine::assembly_solver::solve_mates;
+use feature_engine::context::{ContextInstance, EditContext};
 use feature_engine::rebuild::resolve_face_plane;
 use feature_engine::types::FeatureTree;
 use feature_engine::Engine;
@@ -65,6 +66,103 @@ impl AssemblyView {
             .copied()
             .or_else(|| self.tree.instance(instance_id).map(|i| i.transform))
             .unwrap_or_default()
+    }
+
+    /// Display name of a leaf: its top-level instance's name, ` › …` when the
+    /// leaf is a member of a sub-assembly instance.
+    pub fn leaf_name(&self, path: &[Uuid]) -> String {
+        let top = path
+            .first()
+            .and_then(|id| self.tree.instance(*id))
+            .map(|i| i.name.clone())
+            .unwrap_or_else(|| "?".to_string());
+        if path.len() > 1 {
+            format!("{top} › …")
+        } else {
+            top
+        }
+    }
+}
+
+/// A Part open in the context of an assembly (Phase 3d-4): the evaluated
+/// assembly, which leaf is the part being edited, and every other leaf as a
+/// ghost with its placement RELATIVE to the edited instance — the frame the
+/// live part is modelled in, so ghost geometry is baked into that frame for
+/// the renderer and scoped references resolve into it.
+pub struct ContextView {
+    pub view: AssemblyView,
+    pub assembly_tab_id: String,
+    /// The edited instance's path.
+    pub instance_path: Vec<Uuid>,
+    /// World placement of the edited instance at snapshot time.
+    pub placement: Transform,
+    /// `(leaf index, inv(placement) ∘ leaf placement)` for every OTHER leaf.
+    pub ghosts: Vec<(usize, Transform)>,
+}
+
+impl ContextView {
+    /// Split an evaluated assembly into the edited instance and its ghosts,
+    /// and take the engine's resolution snapshot. Fails (loudly) when the
+    /// instance is not a rendered same-document part.
+    pub fn new(
+        view: AssemblyView,
+        assembly_tab_id: String,
+        instance_path: Vec<Uuid>,
+    ) -> Result<(ContextView, EditContext), String> {
+        let (self_idx, leaf) = view
+            .leaves
+            .iter()
+            .enumerate()
+            .find(|(_, l)| l.path == instance_path)
+            .ok_or_else(|| {
+                format!(
+                    "instance {} is not a rendered part of assembly `{assembly_tab_id}` (suppressed, not built, or not a part)",
+                    instance_path
+                        .iter()
+                        .map(|u| u.to_string())
+                        .collect::<Vec<_>>()
+                        .join(" › ")
+                )
+            })?;
+        let part = &view.parts[leaf.part].0;
+        if part.source_id.is_some() {
+            return Err(format!(
+                "instance `{}` is of a linked document's part (tab `{}`); linked parts are read-only and cannot be edited in context",
+                view.leaf_name(&instance_path),
+                part.tab_id
+            ));
+        }
+        let placement = leaf.transform;
+        let inverse = placement.inverse();
+        let mut context =
+            EditContext::new(assembly_tab_id.clone(), instance_path.clone(), placement);
+        let mut ghosts = Vec::new();
+        for (li, other) in view.leaves.iter().enumerate() {
+            if li == self_idx {
+                continue;
+            }
+            let relative = inverse.compose(&other.transform);
+            let (part, engine) = &view.parts[other.part];
+            context.instances.push(ContextInstance::new(
+                other.path.clone(),
+                view.leaf_name(&other.path),
+                part.tab_id.clone(),
+                part.source_id,
+                relative,
+                &engine.feature_results,
+            ));
+            ghosts.push((li, relative));
+        }
+        Ok((
+            ContextView {
+                view,
+                assembly_tab_id,
+                instance_path,
+                placement,
+                ghosts,
+            },
+            context,
+        ))
     }
 }
 

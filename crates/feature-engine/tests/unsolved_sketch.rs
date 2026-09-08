@@ -54,6 +54,7 @@ fn unsolved_square(constraints: Vec<SketchConstraint>) -> Sketch {
                 index: 0,
             },
             policy: ResolvePolicy::Strict,
+            scope: None,
         },
         plane_origin: [0.0, 0.0, 0.0],
         plane_normal: [0.0, 0.0, 1.0],

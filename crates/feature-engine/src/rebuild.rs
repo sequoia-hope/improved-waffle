@@ -7,6 +7,7 @@ use modeling_ops::{
 use uuid::Uuid;
 use waffle_types::kernel::units::TAU_WORK;
 
+use crate::context::EditContext;
 use crate::resolve::{resolve_by_position, resolve_with_fallback};
 use crate::sources::SourceStore;
 use crate::types::{
@@ -31,16 +32,24 @@ pub(crate) fn reproject_sketch(
     sketch: &mut Sketch,
     feature_results: &HashMap<Uuid, OpResult>,
     introspect: &dyn KernelIntrospect,
+    context: Option<&EditContext>,
 ) {
     if sketch.projected.is_empty() {
         return;
     }
     let basis = SketchPlaneBasis::from_origin_normal(sketch.plane_origin, sketch.plane_normal);
 
-    // Resolve all bindings first, then apply (avoids overlapping borrows).
+    // Resolve all bindings first, then apply (avoids overlapping borrows). A
+    // source scoped to another instance (in-context) resolves through the
+    // open context, into this part's frame; without one it stays put.
     let mut updates: Vec<(u32, f64, f64)> = Vec::new();
     for binding in &sketch.projected {
-        if let Some(p3) = resolve_projected_point(&binding.source, feature_results, introspect) {
+        let resolved = if binding.source.geom_ref.scope.is_some() {
+            context.and_then(|c| c.projected_point(&binding.source, introspect))
+        } else {
+            resolve_projected_point(&binding.source, feature_results, introspect)
+        };
+        if let Some(p3) = resolved {
             let (u, v) = basis.world_to_local(p3);
             updates.push((binding.point_id, u, v));
         }
@@ -59,7 +68,7 @@ pub(crate) fn reproject_sketch(
 
 /// Resolve a projected source to a 3D world point: the source vertex's position,
 /// or a point sampled along the source edge at parameter `t`.
-fn resolve_projected_point(
+pub(crate) fn resolve_projected_point(
     source: &ProjectedSource,
     feature_results: &HashMap<Uuid, OpResult>,
     introspect: &dyn KernelIntrospect,
@@ -116,6 +125,7 @@ pub fn rebuild(
     from_index: usize,
     existing_results: &HashMap<Uuid, OpResult>,
     sources: &SourceStore,
+    context: Option<&EditContext>,
 ) -> RebuildState {
     let mut state = RebuildState {
         feature_results: HashMap::new(),
@@ -185,6 +195,7 @@ pub fn rebuild(
             tree,
             &state.consumed_features,
             sources,
+            context,
         ) {
             Ok(result) => {
                 for w in &result.diagnostics.warnings {
@@ -300,6 +311,7 @@ fn execute_feature(
     tree: &FeatureTree,
     already_consumed: &std::collections::HashSet<Uuid>,
     sources: &SourceStore,
+    context: Option<&EditContext>,
 ) -> Result<OpResult, EngineError> {
     match &feature.operation {
         Operation::Unknown(_) => Err(EngineError::UnsupportedOperation {
@@ -367,7 +379,12 @@ fn execute_feature(
             // features built so far, then force a fresh recompute of derived data
             // (positions + profiles) from the updated points.
             if !sketch_expanded.projected.is_empty() {
-                reproject_sketch(&mut sketch_expanded, feature_results, kb.as_introspect());
+                reproject_sketch(
+                    &mut sketch_expanded,
+                    feature_results,
+                    kb.as_introspect(),
+                    context,
+                );
                 sketch_expanded.solved_positions.clear();
                 sketch_expanded.solved_profiles.clear();
             }
@@ -427,6 +444,7 @@ fn execute_feature(
                 tree,
                 already_consumed,
                 kb,
+                context,
             )?;
 
             // Determine second direction: explicit field takes precedence,
@@ -452,6 +470,7 @@ fn execute_feature(
                         tree,
                         already_consumed,
                         kb,
+                        context,
                     )?)
                 }
                 Some(SecondDirection::UpTo { reference }) => {
@@ -468,6 +487,7 @@ fn execute_feature(
                         tree,
                         already_consumed,
                         kb,
+                        context,
                     )?)
                 }
                 None => None,
@@ -680,7 +700,12 @@ fn execute_feature(
             // features built so far, then force a fresh recompute of derived data
             // (positions + profiles) from the updated points.
             if !sketch_expanded.projected.is_empty() {
-                reproject_sketch(&mut sketch_expanded, feature_results, kb.as_introspect());
+                reproject_sketch(
+                    &mut sketch_expanded,
+                    feature_results,
+                    kb.as_introspect(),
+                    context,
+                );
                 sketch_expanded.solved_positions.clear();
                 sketch_expanded.solved_profiles.clear();
             }
@@ -842,6 +867,7 @@ fn resolve_depth(
     tree: &FeatureTree,
     already_consumed: &std::collections::HashSet<Uuid>,
     kb: &mut dyn KernelBundle,
+    context: Option<&EditContext>,
 ) -> Result<f64, EngineError> {
     match mode {
         DepthMode::Blind => Ok(blind_depth),
@@ -866,7 +892,8 @@ fn resolve_depth(
 
         DepthMode::UpTo { reference } => {
             // Resolve the reference to a 3D position
-            let ref_position = resolve_reference_position(reference, feature_results, tree, kb)?;
+            let ref_position =
+                resolve_reference_position(reference, feature_results, tree, kb, context)?;
 
             // Project reference position and sketch origin onto direction
             let dir_len = (direction[0] * direction[0]
@@ -948,7 +975,22 @@ fn resolve_reference_position(
     feature_results: &HashMap<Uuid, OpResult>,
     tree: &FeatureTree,
     kb: &dyn KernelBundle,
+    context: Option<&EditContext>,
 ) -> Result<[f64; 3], EngineError> {
+    // A reference into another instance of the open assembly (in-context
+    // editing) resolves through the context, into this part's frame; without
+    // the context it is a loud failure, never a guess.
+    if let Some(scope) = &reference.scope {
+        return match context {
+            Some(ctx) => ctx.centroid(reference, kb.as_introspect()),
+            None => Err(EngineError::ResolutionFailed {
+                reason: format!(
+                    "UpTo reference is on {}; open the part in that assembly's context",
+                    crate::context::describe_scope(scope, None)
+                ),
+            }),
+        };
+    }
     // Try to resolve the reference via the feature engine's resolve system
     match &reference.anchor {
         waffle_types::Anchor::FeatureOutput { feature_id, .. } => {
@@ -1608,11 +1650,15 @@ fn resolve_share_a_face(
     let mut seen: std::collections::HashSet<Uuid> = std::collections::HashSet::new();
 
     // (a) Anchor ownership: the sketch is drawn on a body's face → that body,
-    // unless it was already consumed by an earlier feature (not live).
-    if let waffle_types::Anchor::FeatureOutput {
-        feature_id,
-        output_key,
-    } = &sketch.plane.anchor
+    // unless it was already consumed by an earlier feature (not live). A plane
+    // scoped to another instance (in-context) owns no body of THIS part.
+    if let (
+        None,
+        waffle_types::Anchor::FeatureOutput {
+            feature_id,
+            output_key,
+        },
+    ) = (&sketch.plane.scope, &sketch.plane.anchor)
     {
         if !already_consumed.contains(feature_id) {
             if let Some(result) = feature_results.get(feature_id) {
@@ -2392,6 +2438,7 @@ mod tests {
             &tree,
             &std::collections::HashSet::new(),
             &SourceStore::new(),
+            None,
         );
         assert!(result.is_ok(), "PointNormal datum plane should succeed");
         assert!(
@@ -2424,6 +2471,7 @@ mod tests {
             &tree,
             &std::collections::HashSet::new(),
             &SourceStore::new(),
+            None,
         );
         assert!(result.is_ok(), "Offset from built-in should succeed");
 
@@ -2500,7 +2548,7 @@ mod tests {
         let (tree, extrude_id) = make_sketch_extrude_tree(sketch);
         let mut kb = waffle_types::kernel::MockKernel::new();
         let existing = HashMap::new();
-        let state = rebuild(&tree, &mut kb, 0, &existing, &SourceStore::new());
+        let state = rebuild(&tree, &mut kb, 0, &existing, &SourceStore::new(), None);
         (tree, extrude_id, state)
     }
 
@@ -2522,7 +2570,7 @@ mod tests {
         // Build the kernel fresh and re-resolve so we hold a live introspect.
         let mut kb = waffle_types::kernel::MockKernel::new();
         let existing = HashMap::new();
-        let state = rebuild(&tree, &mut kb, 0, &existing, &SourceStore::new());
+        let state = rebuild(&tree, &mut kb, 0, &existing, &SourceStore::new(), None);
         let extrude_result = state
             .feature_results
             .get(&extrude_id)
@@ -2549,6 +2597,7 @@ mod tests {
                 signature: face.signature.clone(),
             },
             policy: ResolvePolicy::Strict,
+            scope: None,
         };
 
         let introspect = kb.as_introspect();
@@ -2646,7 +2695,7 @@ mod tests {
         // Re-run on a fresh kernel so the handle is live in `kb`.
         let mut kb = waffle_types::kernel::MockKernel::new();
         let existing = HashMap::new();
-        let state = rebuild(&_tree, &mut kb, 0, &existing, &SourceStore::new());
+        let state = rebuild(&_tree, &mut kb, 0, &existing, &SourceStore::new(), None);
         let handle = state
             .feature_results
             .get(&extrude_id)
@@ -2703,6 +2752,7 @@ mod tests {
             },
             selector: Selector::Signature { signature: cyl_sig },
             policy: ResolvePolicy::Strict,
+            scope: None,
         };
 
         let err = resolve_face_plane(&cyl_ref, &results, kb.as_introspect()).unwrap_err();
@@ -2741,6 +2791,7 @@ mod tests {
             &tree,
             &std::collections::HashSet::new(),
             &SourceStore::new(),
+            None,
         );
         assert!(result.is_err(), "Zero normal should fail");
         let err = result.unwrap_err().to_string();
@@ -2775,6 +2826,7 @@ mod tests {
             &tree,
             &std::collections::HashSet::new(),
             &SourceStore::new(),
+            None,
         );
         assert!(result.is_err(), "Missing base plane should fail");
         let err = result.unwrap_err().to_string();
@@ -2803,6 +2855,7 @@ mod tests {
                     index: 0,
                 },
                 policy: waffle_types::ResolvePolicy::Strict,
+                scope: None,
             },
             plane_origin: [0.0, 0.0, 0.0],
             plane_normal: [0.0, 0.0, 1.0],
@@ -2892,7 +2945,7 @@ mod tests {
 
         let mut kb = waffle_types::kernel::MockKernel::new();
         let existing = HashMap::new();
-        let state = rebuild(&tree, &mut kb, 0, &existing, &SourceStore::new());
+        let state = rebuild(&tree, &mut kb, 0, &existing, &SourceStore::new(), None);
 
         // The extrude should succeed — profiles should have been recomputed from entities.
         // Currently this fails because solved_profiles is empty after deserialization.
@@ -2975,7 +3028,7 @@ mod tests {
 
         let mut kb = waffle_types::kernel::MockKernel::new();
         let existing = HashMap::new();
-        let state = rebuild(&tree, &mut kb, 0, &existing, &SourceStore::new());
+        let state = rebuild(&tree, &mut kb, 0, &existing, &SourceStore::new(), None);
 
         // The extrude should succeed — profiles should have been recomputed.
         // Currently this fails because solved_profiles is empty after deserialization.
@@ -3016,7 +3069,7 @@ mod tests {
 
         let mut kb = waffle_types::kernel::MockKernel::new();
         let existing = HashMap::new();
-        let state = rebuild(&tree, &mut kb, 0, &existing, &SourceStore::new());
+        let state = rebuild(&tree, &mut kb, 0, &existing, &SourceStore::new(), None);
 
         // Gear sketches should work because expand_gears() populates profiles.
         let extrude_failed = state.errors.iter().any(|(id, _)| *id == extrude_id);
@@ -3074,6 +3127,7 @@ mod tests {
             &tree,
             &std::collections::HashSet::new(),
             &SourceStore::new(),
+            None,
         )
         .unwrap();
         results.insert(first_plane.id, r1);
@@ -3173,6 +3227,7 @@ mod tests {
                 z: 5.0,
             },
             policy: ResolvePolicy::BestEffort,
+            scope: None,
         };
         let make_sketch = || Sketch {
             id: Uuid::new_v4(),
@@ -3232,7 +3287,7 @@ mod tests {
         // Box 1.
         let (k1, h1) = box_kernel([(0.0, 0.0), (2.0, 0.0), (2.0, 3.0), (0.0, 3.0)], 5.0);
         let mut s1 = make_sketch();
-        reproject_sketch(&mut s1, &results_with(h1.clone()), k1.as_introspect());
+        reproject_sketch(&mut s1, &results_with(h1.clone()), k1.as_introspect(), None);
         let (eu1, ev1) = basis.world_to_local(nearest_pos(&k1, &h1));
         let p1 = point_xy(&s1);
         assert!(
@@ -3245,7 +3300,7 @@ mod tests {
         // resolves to the (moved) nearest vertex, so the projected point follows.
         let (k2, h2) = box_kernel([(0.0, 0.0), (2.5, 0.0), (2.5, 3.2), (0.0, 3.2)], 5.0);
         let mut s2 = make_sketch();
-        reproject_sketch(&mut s2, &results_with(h2.clone()), k2.as_introspect());
+        reproject_sketch(&mut s2, &results_with(h2.clone()), k2.as_introspect(), None);
         let (eu2, ev2) = basis.world_to_local(nearest_pos(&k2, &h2));
         let p2 = point_xy(&s2);
         assert!(
@@ -3284,6 +3339,7 @@ mod tests {
                 z: 3.0,
             },
             policy: ResolvePolicy::BestEffort,
+            scope: None,
         };
         let mut sketch = Sketch {
             id: Uuid::new_v4(),
@@ -3312,7 +3368,7 @@ mod tests {
         // Empty feature_results → the source feature is unresolvable.
         let empty: HashMap<Uuid, OpResult> = HashMap::new();
         let kernel = MockKernel::new();
-        reproject_sketch(&mut sketch, &empty, kernel.as_introspect());
+        reproject_sketch(&mut sketch, &empty, kernel.as_introspect(), None);
 
         // The point keeps its last (x, y) — nothing moved, no panic.
         match &sketch.entities[0] {
@@ -3359,6 +3415,7 @@ mod profile_addressing_tests {
                     index: 0,
                 },
                 policy: ResolvePolicy::Strict,
+                scope: None,
             },
             plane_origin: [0.0; 3],
             plane_normal: [0.0, 0.0, 1.0],

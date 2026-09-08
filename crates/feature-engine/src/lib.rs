@@ -1,5 +1,6 @@
 pub mod assembly;
 pub mod assembly_solver;
+pub mod context;
 pub mod expr;
 pub mod opaque;
 pub mod params;
@@ -49,6 +50,11 @@ pub struct Engine {
     /// keyed by source id. Document-scoped: not part of the tree, not
     /// undoable, survives tab switches. See [`crate::sources::SourceStore`].
     pub sources: SourceStore,
+    /// The assembly context this part is being edited in (v4 §2.8, in-context
+    /// editing), if any. Runtime-only: set by the host when the part is opened
+    /// in context, dropped on tab switch. Scoped `GeomRef`s resolve through it;
+    /// see [`context::EditContext`].
+    pub context: Option<context::EditContext>,
     /// Undo/redo history.
     undo_stack: UndoStack,
 }
@@ -65,6 +71,7 @@ impl Engine {
             pid_to_feature: HashMap::new(),
             inherited_body_names: HashMap::new(),
             sources: SourceStore::new(),
+            context: None,
             undo_stack: UndoStack::new(),
         }
     }
@@ -546,6 +553,14 @@ impl Engine {
         let from_index = param_outcome
             .first_changed
             .map_or(from_index, |c| c.min(from_index));
+        // Context pass (in-context editing): re-derive every sketch plane that
+        // is a scoped reference from the open assembly context; a moved plane
+        // widens the rebuild to that sketch.
+        let context_outcome =
+            context::apply_context(&mut self.tree, self.context.as_ref(), kb.as_introspect());
+        let from_index = context_outcome
+            .first_changed
+            .map_or(from_index, |c| c.min(from_index));
 
         // Clear results from the rebuild point onward (active features)
         let active = self.tree.active_features();
@@ -565,12 +580,15 @@ impl Engine {
             from_index,
             &self.feature_results,
             &self.sources,
+            self.context.as_ref(),
         );
         self.feature_results.extend(state.feature_results);
         self.warnings = state.warnings;
+        self.warnings.extend(context_outcome.warnings);
         // Parameter/expression errors surface ahead of rebuild errors — a bad
         // expression is usually the CAUSE of the downstream failures.
         self.errors = param_outcome.errors;
+        self.errors.extend(context_outcome.errors);
         self.errors.extend(state.errors);
         self.consumed_features = state.consumed_features;
         // KV13 F6: accumulate the pid→feature map. A full rebuild (from 0)

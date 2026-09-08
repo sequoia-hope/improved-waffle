@@ -1300,6 +1300,7 @@ impl ModelBuilder {
                 },
             },
             policy: ResolvePolicy::BestEffort,
+            scope: None,
         })
     }
 

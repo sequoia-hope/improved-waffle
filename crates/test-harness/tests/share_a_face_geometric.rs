@@ -74,6 +74,7 @@ fn datum_rect_sketch(
             index: 0,
         },
         policy: ResolvePolicy::Strict,
+        scope: None,
     };
     dispatch(state, UiToEngine::BeginSketch { plane }, kernel);
 

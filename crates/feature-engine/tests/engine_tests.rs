@@ -25,6 +25,7 @@ fn make_sketch_op() -> Operation {
                 index: 0,
             },
             policy: ResolvePolicy::Strict,
+            scope: None,
         },
         plane_origin: [0.0, 0.0, 0.0],
         plane_normal: [0.0, 0.0, 1.0],
@@ -423,6 +424,7 @@ fn resolve_by_role_finds_entity() {
             index: 0,
         },
         policy: ResolvePolicy::Strict,
+        scope: None,
     };
 
     let resolved = resolve_geom_ref(&geom_ref, &engine.feature_results);
@@ -465,6 +467,7 @@ fn resolve_nonexistent_role_fails() {
             index: 0,
         },
         policy: ResolvePolicy::Strict,
+        scope: None,
     };
 
     let resolved = resolve_geom_ref(&geom_ref, &engine.feature_results);
@@ -503,6 +506,7 @@ fn resolve_with_fallback_role_succeeds() {
             index: 0,
         },
         policy: ResolvePolicy::Strict,
+        scope: None,
     };
 
     let resolved = resolve_with_fallback(&geom_ref, &engine.feature_results);
@@ -541,6 +545,7 @@ fn resolve_with_fallback_best_effort_fallback() {
             index: 0,
         },
         policy: ResolvePolicy::BestEffort,
+        scope: None,
     };
 
     let resolved = resolve_with_fallback(&geom_ref, &engine.feature_results);
@@ -585,6 +590,7 @@ fn resolve_with_fallback_strict_no_fallback() {
             index: 0,
         },
         policy: ResolvePolicy::Strict,
+        scope: None,
     };
 
     let resolved = resolve_with_fallback(&geom_ref, &engine.feature_results);
@@ -951,6 +957,7 @@ fn make_boolean_union(extrude_a_id: Uuid, extrude_b_id: Uuid) -> Operation {
                     index: 0,
                 },
                 policy: ResolvePolicy::Strict,
+                scope: None,
             },
             body_b: GeomRef {
                 kind: TopoKind::Face,
@@ -963,6 +970,7 @@ fn make_boolean_union(extrude_a_id: Uuid, extrude_b_id: Uuid) -> Operation {
                     index: 0,
                 },
                 policy: ResolvePolicy::Strict,
+                scope: None,
             },
             operation: BooleanOp::Union,
         },
@@ -1340,6 +1348,7 @@ fn make_fillet_op(extrude_id: Uuid, radius: f64) -> Operation {
                     index: 0,
                 },
                 policy: ResolvePolicy::BestEffort,
+                scope: None,
             }],
             radius,
         },
@@ -1361,6 +1370,7 @@ fn make_chamfer_op(extrude_id: Uuid, distance: f64) -> Operation {
                     index: 0,
                 },
                 policy: ResolvePolicy::BestEffort,
+                scope: None,
             }],
             distance,
         },
@@ -1382,6 +1392,7 @@ fn make_shell_op(extrude_id: Uuid, thickness: f64) -> Operation {
                     index: 0,
                 },
                 policy: ResolvePolicy::Strict,
+                scope: None,
             }],
             thickness,
         },
@@ -2013,6 +2024,7 @@ fn make_boolean_subtract(extrude_a_id: Uuid, extrude_b_id: Uuid) -> Operation {
                     index: 0,
                 },
                 policy: ResolvePolicy::Strict,
+                scope: None,
             },
             body_b: GeomRef {
                 kind: TopoKind::Face,
@@ -2025,6 +2037,7 @@ fn make_boolean_subtract(extrude_a_id: Uuid, extrude_b_id: Uuid) -> Operation {
                     index: 0,
                 },
                 policy: ResolvePolicy::Strict,
+                scope: None,
             },
             operation: BooleanOp::Subtract,
         },
@@ -2046,6 +2059,7 @@ fn make_boolean_intersect(extrude_a_id: Uuid, extrude_b_id: Uuid) -> Operation {
                     index: 0,
                 },
                 policy: ResolvePolicy::Strict,
+                scope: None,
             },
             body_b: GeomRef {
                 kind: TopoKind::Face,
@@ -2058,6 +2072,7 @@ fn make_boolean_intersect(extrude_a_id: Uuid, extrude_b_id: Uuid) -> Operation {
                     index: 0,
                 },
                 policy: ResolvePolicy::Strict,
+                scope: None,
             },
             operation: BooleanOp::Intersect,
         },
@@ -2366,6 +2381,7 @@ fn depth_mode_upto_behind_sketch_plane_errors() {
                         index: 0,
                     },
                     policy: ResolvePolicy::Strict,
+                    scope: None,
                 },
             },
             second_direction: None,
@@ -2519,6 +2535,7 @@ fn resolve_datum_anchor_returns_error() {
             index: 0,
         },
         policy: ResolvePolicy::Strict,
+        scope: None,
     };
 
     let result = resolve_geom_ref(&geom_ref, &feature_results);
@@ -2558,6 +2575,7 @@ fn resolve_query_selector_succeeds() {
             },
         },
         policy: ResolvePolicy::Strict,
+        scope: None,
     };
 
     let result = resolve_geom_ref(&geom_ref, &engine.feature_results);
@@ -2587,6 +2605,7 @@ fn resolve_missing_feature_in_results_errors() {
             index: 0,
         },
         policy: ResolvePolicy::Strict,
+        scope: None,
     };
 
     let result = resolve_geom_ref(&geom_ref, &feature_results);
@@ -2625,6 +2644,7 @@ fn resolve_role_index_out_of_range_strict_errors() {
             index: 99,
         },
         policy: ResolvePolicy::Strict,
+        scope: None,
     };
 
     let result = resolve_geom_ref(&geom_ref, &engine.feature_results);
@@ -2663,6 +2683,7 @@ fn resolve_role_index_out_of_range_best_effort_clamps() {
             index: 99,
         },
         policy: ResolvePolicy::BestEffort,
+        scope: None,
     };
 
     let result = resolve_geom_ref(&geom_ref, &engine.feature_results);
@@ -2712,6 +2733,7 @@ fn resolve_signature_good_match_no_warning() {
             signature: target_sig,
         },
         policy: ResolvePolicy::Strict,
+        scope: None,
     };
 
     let result = resolve_geom_ref(&geom_ref, &engine.feature_results);
@@ -2762,6 +2784,7 @@ fn resolve_signature_medium_match_warns() {
             signature: medium_sig,
         },
         policy: ResolvePolicy::Strict,
+        scope: None,
     };
 
     let result = resolve_geom_ref(&geom_ref, &engine.feature_results);
@@ -2815,6 +2838,7 @@ fn resolve_signature_low_match_strict_errors() {
         },
         selector: Selector::Signature { signature: low_sig },
         policy: ResolvePolicy::Strict,
+        scope: None,
     };
 
     let result = resolve_geom_ref(&geom_ref, &engine.feature_results);
@@ -2860,6 +2884,7 @@ fn resolve_signature_low_match_best_effort_succeeds() {
         },
         selector: Selector::Signature { signature: low_sig },
         policy: ResolvePolicy::BestEffort,
+        scope: None,
     };
 
     let result = resolve_geom_ref(&geom_ref, &engine.feature_results);
@@ -2910,6 +2935,7 @@ fn resolve_signature_no_entities_errors() {
         },
         selector: Selector::Signature { signature: sig },
         policy: ResolvePolicy::Strict,
+        scope: None,
     };
 
     let result = resolve_geom_ref(&geom_ref, &engine.feature_results);
@@ -2953,6 +2979,7 @@ fn resolve_with_fallback_signature_selector_no_fallback() {
         },
         selector: Selector::Signature { signature: sig },
         policy: ResolvePolicy::BestEffort,
+        scope: None,
     };
 
     let result = resolve_with_fallback(&geom_ref, &engine.feature_results);
@@ -2979,6 +3006,7 @@ fn resolve_with_fallback_datum_anchor_in_role_fallback() {
             index: 0,
         },
         policy: ResolvePolicy::BestEffort,
+        scope: None,
     };
 
     let result = resolve_with_fallback(&geom_ref, &feature_results);
@@ -3007,6 +3035,7 @@ fn resolve_with_fallback_missing_feature_in_fallback() {
             index: 0,
         },
         policy: ResolvePolicy::BestEffort,
+        scope: None,
     };
 
     let result = resolve_with_fallback(&geom_ref, &feature_results);
@@ -3042,6 +3071,7 @@ fn resolve_with_fallback_best_effort_no_kind_match() {
             index: 0,
         },
         policy: ResolvePolicy::BestEffort,
+        scope: None,
     };
 
     // BestEffort must not fail here: the role lookup misses, so it falls back
@@ -3329,6 +3359,7 @@ fn depth_mode_upto_success() {
                         index: 0,
                     },
                     policy: ResolvePolicy::Strict,
+                    scope: None,
                 },
             },
             second_direction: None,
@@ -3383,6 +3414,7 @@ fn depth_mode_upto_datum_reference() {
                         index: 0,
                     },
                     policy: ResolvePolicy::Strict,
+                    scope: None,
                 },
             },
             second_direction: None,
@@ -3453,6 +3485,7 @@ fn second_direction_upto_produces_solid() {
                         index: 0,
                     },
                     policy: ResolvePolicy::Strict,
+                    scope: None,
                 },
             }),
             region: None,
@@ -3660,6 +3693,7 @@ fn boolean_with_datum_anchor_errors() {
                     index: 0,
                 },
                 policy: ResolvePolicy::Strict,
+                scope: None,
             },
             body_b: GeomRef {
                 kind: TopoKind::Face,
@@ -3671,6 +3705,7 @@ fn boolean_with_datum_anchor_errors() {
                     index: 0,
                 },
                 policy: ResolvePolicy::Strict,
+                scope: None,
             },
             operation: BooleanOp::Union,
         },
@@ -3718,6 +3753,7 @@ fn boolean_with_wrong_output_key_errors() {
                     index: 0,
                 },
                 policy: ResolvePolicy::Strict,
+                scope: None,
             },
             body_b: GeomRef {
                 kind: TopoKind::Face,
@@ -3730,6 +3766,7 @@ fn boolean_with_wrong_output_key_errors() {
                     index: 0,
                 },
                 policy: ResolvePolicy::Strict,
+                scope: None,
             },
             operation: BooleanOp::Union,
         },
@@ -3861,7 +3898,14 @@ fn rebuild_carries_forward_existing_results() {
 
     // Rebuild from index 2, carrying forward s1 and e1 results
     let existing = engine.feature_results.clone();
-    let state = rebuild(&engine.tree, &mut kernel, 2, &existing, &engine.sources);
+    let state = rebuild(
+        &engine.tree,
+        &mut kernel,
+        2,
+        &existing,
+        &engine.sources,
+        None,
+    );
 
     assert!(state.feature_results.contains_key(&s1));
     assert!(state.feature_results.contains_key(&e1));
@@ -4262,6 +4306,7 @@ fn feature_with_populated_references() {
             index: 0,
         },
         policy: ResolvePolicy::Strict,
+        scope: None,
     });
 
     engine.rebuild_from_scratch(&mut kernel);
@@ -4292,6 +4337,7 @@ fn feature_with_failing_reference_produces_warning() {
             index: 0,
         },
         policy: ResolvePolicy::Strict,
+        scope: None,
     });
 
     engine.rebuild_from_scratch(&mut kernel);

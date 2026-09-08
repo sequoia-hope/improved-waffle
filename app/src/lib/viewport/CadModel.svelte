@@ -58,6 +58,9 @@
 	});
 	const HOVER_COLOR = new THREE.Color(0xaabbdd);
 	const SELECTED_COLOR = new THREE.Color(0x44aaff);
+	// Ghost bodies of an edit context (other instances of the assembly the
+	// open part is edited in): translucent and tinted, faces still pickable.
+	const CONTEXT_GHOST_COLOR = new THREE.Color(0x9fb8a8);
 	const PICK_HOVER_COLOR = new THREE.Color(0x55cc88);
 	const BODY_SELECTED_COLOR = new THREE.Color(0x44aaff);
 	const GHOST_PREVIEW_COLOR = new THREE.Color(0x4aa3ff);
@@ -179,10 +182,13 @@
 	 * Uses shared material instances to avoid creating thousands of materials for
 	 * complex geometry (e.g., gear profiles with 1600+ face ranges).
 	 */
-	function buildMaterials(faceRanges, hoveredRef, selectedRefs, inSketchMode, selectedFeatureId) {
+	function buildMaterials(faceRanges, hoveredRef, selectedRefs, inSketchMode, selectedFeatureId, ghost = false) {
 		const projectActive = isProjectToolActive();
-		const transparent = inSketchMode && !projectActive;
-		const opacity = transparent ? 0.2 : (projectActive ? 0.5 : 1.0);
+		const transparent = ghost || (inSketchMode && !projectActive);
+		const opacity = ghost
+			? (inSketchMode && !projectActive ? 0.2 : 0.4)
+			: (transparent ? 0.2 : (projectActive ? 0.5 : 1.0));
+		const baseColor = ghost ? CONTEXT_GHOST_COLOR : DEFAULT_COLOR;
 
 		const makeMat = (color) => {
 			const mat = new THREE.MeshStandardMaterial({
@@ -204,7 +210,7 @@
 		};
 
 		if (!faceRanges || faceRanges.length === 0) {
-			return [makeMat(DEFAULT_COLOR)];
+			return [makeMat(baseColor)];
 		}
 
 		const groupSideFaces = shouldGroupSideFaces(faceRanges);
@@ -216,7 +222,7 @@
 		};
 
 		// Create shared materials — reuse instances for groups with the same visual state
-		const defaultMat = makeMat(DEFAULT_COLOR);
+		const defaultMat = makeMat(baseColor);
 		const pickMode = getProfilePickMode()?.target === 'extrude';
 		let hoverMat = null;
 		let selectedMat = null;
@@ -279,6 +285,7 @@
 			bodyId: m.bodyId,
 			instanceId: m.instanceId ?? null,
 			instancePath: m.instancePath ?? null,
+			context: m.context === true,
 			...placementProps(m.transform)
 		}));
 	});
@@ -344,11 +351,11 @@
 		return engineMeshes.map((m) => {
 			// Import-placement ghost preview wins over hover/selection.
 			if (ghostFeature && m.featureId === ghostFeature) return makeGhostMaterial();
-			if (!inSketch && m.bodyId) {
+			if (!inSketch && m.bodyId && !m.context) {
 				if (m.bodyId === selectedBody) return makeBodyMaterial(BODY_SELECTED_COLOR);
 				if (m.bodyId === hoveredBody) return makeBodyMaterial(BODY_HOVER_COLOR);
 			}
-			return buildMaterials(m.faceRanges, hRef, sRefs, inSketch, selFeature);
+			return buildMaterials(m.faceRanges, hRef, sRefs, inSketch, selFeature, m.context);
 		});
 	});
 

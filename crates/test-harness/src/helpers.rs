@@ -49,6 +49,7 @@ pub fn datum_plane_ref(datum_id: Uuid) -> GeomRef {
             index: 0,
         },
         policy: ResolvePolicy::Strict,
+        scope: None,
     }
 }
 
@@ -62,6 +63,7 @@ pub fn face_ref(feature_id: Uuid, role: Role, index: usize) -> GeomRef {
         },
         selector: Selector::Role { role, index },
         policy: ResolvePolicy::Strict,
+        scope: None,
     }
 }
 
@@ -79,6 +81,7 @@ pub fn edge_ref_best_effort(feature_id: Uuid) -> GeomRef {
             index: 0,
         },
         policy: ResolvePolicy::BestEffort,
+        scope: None,
     }
 }
 
@@ -95,6 +98,7 @@ pub fn body_ref(feature_id: Uuid) -> GeomRef {
             index: 0,
         },
         policy: ResolvePolicy::BestEffort,
+        scope: None,
     }
 }
 

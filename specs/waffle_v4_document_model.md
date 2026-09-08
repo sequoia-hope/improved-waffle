@@ -212,14 +212,44 @@ the UI shows them read-only and "re-sync" may replace them.
 "scope": { "source_id": "3b9e…", "tab_id": "…", "instance_path": ["…", "…"] }
 ```
 
-Reserved field on `GeomRef`, absent ⇒ local (the current tab). `source_id`
+Field on `GeomRef`, absent ⇒ local (the current tab). `source_id`
 absent ⇒ same document; `tab_id` absent ⇒ same tab; `instance_path` = chain
 of assembly-instance ids from the referencing assembly down to the owning
-part instance. **Not implemented in Phase 1** (no consumer; 117 literal sites
-would change). Lands with the first consumer (assembly mates), together with
-the `MIN_READER_VERSION` bump that consumer needs anyway for its Part-side
-use (in-context sketch projection). Assembly and Drawing tabs that carry
-scoped refs are opaque to v4.0 readers per §2.5, so nothing is lost meanwhile.
+part instance. Not implemented in Phase 1 (no consumer; 117 literal sites
+would change).
+
+**LANDED 2026-09-08 (Phase 3d-4, in-context editing) — format v5,
+`MIN_READER_VERSION` 5** (`waffle_types::RefScope`; 106 literal sites swept
+with `scope: None`; `docs/FILE_FORMAT.md` §8). The first consumer is the
+Part side: a Part edited *in the context of an assembly* references the other
+instances' faces (sketch plane, projected points, extrude up-to) with
+`scope = {tab_id: <assembly tab>, instance_path}`. Design:
+
+- **Resolution only through a context.** `feature_engine::context::EditContext`
+  is a runtime-only snapshot — every other leaf's built feature results
+  (kernel handles, meshes stripped) plus `inv(P_edited) ∘ P_other` — taken by
+  the bridge's `OpenPartInContext` (and again on "Update context"). Scoped
+  refs resolve against the OWNING part's results and come back in the edited
+  part's frame; `resolve::refuse_scoped` makes it impossible to resolve one
+  against the local part by accident (the anchor id belongs to another part).
+- **Sketch planes re-derive.** `context::apply_context` runs before each
+  rebuild: a sketch whose `plane` is scoped gets `plane_origin`/`plane_normal`
+  from the referenced face (centroid + normal — the same origin the UI takes
+  from the ghost face's `plane`, so re-derivation never slides the sketch);
+  a moved plane widens the rebuild to that sketch. Projected points and
+  up-to depths resolve through the context at their use sites.
+- **Loud without a context.** Opened on its own, the sketch keeps its last
+  derived plane and warns which instance of which assembly it depends on; an
+  up-to depth fails its feature; nothing is guessed.
+- **Ghosts.** The bridge renders the other leaves baked into the edited
+  frame (`context: true` bodies; face/edge refs scoped; planar faces carry
+  `plane`); the app draws them translucent, pickable for sketch-on-face.
+  `OpenPartInContext` refuses a linked part (read-only) or an unrendered
+  instance. Propagation to every instance is by recipe: the assembly
+  rebuilds each instance of the part from the same tree.
+- Connector scopes in `AssemblyTree` keep their one-level `instance_path`
+  beside a plain `GeomRef` (§5.6) — no migration. `source_id` in a scope
+  (a linked document's assembly) is refused for now.
 
 ### 2.9 Agent-friendly profile addressing
 
@@ -339,7 +369,7 @@ byte-stable for the STEP text.
   `min_reader_version: 4`, a UUID `document.id` that is **identical** across
   two consecutive saves and across a reload; `sources` present; `created`
   still latched; too-new file still refused.
-- JSON Schema golden: `docs/schema/waffle-v4.schema.json` is generated from
+- JSON Schema golden: `docs/schema/waffle-v5.schema.json` is generated from
   the Rust types (`cargo test -p file-format --features json-schema
   schema_is_current`); the test fails when the committed schema is stale.
   Every fixture under `app/tests/gui/fixtures/*.waffle`, the root
@@ -465,10 +495,10 @@ capability; that spec must carry its own §7a.
 
 | Phase | Content | Wire impact |
 |---|---|---|
-| **1 (this spec)** | LANDED: `document.id`; `sources` table + git-aware locators; unknown tab/source/locator kinds preserved; unknown keys preserved (§2.6); provenance table; ImportedBody → sources with dedup; single Rust writer via bridge `SaveDocument`; engine source store + `ProvideSource`; inflation cap; JS-form timestamps; exact float parsing; corpus back-compat pin; JSON Schema golden (`docs/schema/waffle-v4.schema.json`, CI-pinned, every repo file validates); `docs/FILE_FORMAT.md` v4 section; `profile_entity_ids` (§2.9) and `solve_status` default (§2.10), 2026-09-08 | v4, `MIN_READER_VERSION` 4 |
+| **1 (this spec)** | LANDED: `document.id`; `sources` table + git-aware locators; unknown tab/source/locator kinds preserved; unknown keys preserved (§2.6); provenance table; ImportedBody → sources with dedup; single Rust writer via bridge `SaveDocument`; engine source store + `ProvideSource`; inflation cap; JS-form timestamps; exact float parsing; corpus back-compat pin; JSON Schema golden (`docs/schema/waffle-v5.schema.json`, CI-pinned, every repo file validates); `docs/FILE_FORMAT.md` v4 section; `profile_entity_ids` (§2.9) and `solve_status` default (§2.10), 2026-09-08 | v4, `MIN_READER_VERSION` 4 |
 | 1b | **LANDED 2026-09-08.** Opaque preservation of unknown `Operation` variants (feature kept, rebuild error, re-emitted) so future ops stop bumping the reader floor | none |
 | 2 | App storage. **P2-1 (git substrate: adapters, hashing, locators, per-host tokens, content cache) and P2-2 (open-from-link → linked read-only record → fork with `RebaseSources`; legacy `?src=` fixed; GitHub share URL = `/open` locator) LANDED 2026-09-08.** **P2-3 (source resolution at open: `ListSources` → cache/adapters at the recorded commit → `ProvideSource`; "Link STEP" import-from-link) LANDED 2026-09-08.** **P2-4 (Sources panel: pack/unpack, pin, update-to-tip, fetch; `UpdateSourceEntry`; `ModelUpdated.sources`) and P2-5 (`document.id` as the local storage key; `GitProvider` for GitHub/GitLab/Gitea with per-host tokens, folders, share links) LANDED 2026-09-08 — Phase 2 COMPLETE.** — `projects/09-file-format/PLAN.md` | none (uses Phase-1 fields) |
-| 3 | `Assembly` tab kind: instances `{id, name, source: {source_id?, tab_id}, transform: {translation_m, rotation_quat}, external_key?, parameter_overrides?}`, mate connectors `{id, name, geom_ref(scoped), frame}`, mates (Fastened first), persisted solved placements as derived hints. **3a (data model, file format, Fastened solver) LANDED 2026-09-08** — `feature_engine::assembly`, `docs/FILE_FORMAT.md` §5.6; the connector's scope is a one-level `instance_path` beside an ordinary `GeomRef` (no `GeomRef.scope` field yet, so no reader-floor bump — §2.8 stays reserved for in-context editing). **3b (bridge evaluation + rendering) and 3c (Assembly panel) LANDED 2026-09-08** — `projects/10-assemblies/PLAN.md`; **3d-1 numeric mates, 3d-2 sub-assemblies, 3d-3 rotation editing + linked-source instances LANDED 2026-09-08**; open: in-context editing (needs `GeomRef.scope` + reader bump), STEP assembly export (blocked on kernel STEP export) | new tab kind (no bump) |
+| 3 | `Assembly` tab kind: instances `{id, name, source: {source_id?, tab_id}, transform: {translation_m, rotation_quat}, external_key?, parameter_overrides?}`, mate connectors `{id, name, geom_ref(scoped), frame}`, mates (Fastened first), persisted solved placements as derived hints. **3a (data model, file format, Fastened solver) LANDED 2026-09-08** — `feature_engine::assembly`, `docs/FILE_FORMAT.md` §5.6; the connector's scope is a one-level `instance_path` beside an ordinary `GeomRef` (no `GeomRef.scope` field yet, so no reader-floor bump — §2.8 stays reserved for in-context editing). **3b (bridge evaluation + rendering) and 3c (Assembly panel) LANDED 2026-09-08** — `projects/10-assemblies/PLAN.md`; **3d-1 numeric mates, 3d-2 sub-assemblies, 3d-3 rotation editing + linked-source instances LANDED 2026-09-08**; **3d-4 in-context editing LANDED 2026-09-08** — `GeomRef.scope` (§2.8), `feature_engine::context`, bridge `OpenPartInContext`, ghost rendering, "Edit in context" / context banner in the app; open: STEP assembly export (blocked on kernel STEP export) | new tab kind (no bump); **3d-4: `GeomRef.scope` ⇒ v5, `MIN_READER_VERSION` 5** |
 | 3b | KiCad: `KicadPcb` source kind; derived board sketch/extrude (`Derived` provenance); one instance per footprint keyed by footprint UUID; component models as `Step` sources resolved through a KiCad path-variable table; mounting holes → connectors | none beyond Phase 3 |
 | 4 | `Drawing` tab kind: sheet, views `{source(scoped), projection kind, direction/up, placement, scale, style}`, annotations `{kind, refs(scoped), value, placement}`; kernel projection/HLR/section as a separate FIP spec | new tab kind (no bump) |
 
@@ -489,7 +519,7 @@ Phase-1 increments (each an atomic commit, tests first):
    template v4; `format.js` = 4; always route document open through the
    engine loader; seam spec updated; WASM rebuilt in the same commit.
 6. Schema: `json-schema` cargo feature (schemars) across `waffle-types`,
-   `feature-engine`, `file-format`; golden `docs/schema/waffle-v4.schema.json`;
+   `feature-engine`, `file-format`; golden `docs/schema/waffle-v5.schema.json`;
    fixture validation test.
 7. Docs: `docs/FILE_FORMAT.md` v4 section; `projects/09-file-format/PLAN.md`;
    `projects/10-assemblies/PLAN.md` M6 pointer.

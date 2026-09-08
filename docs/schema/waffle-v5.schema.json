@@ -941,6 +941,17 @@
           },
           "description": "What to do when resolution is ambiguous or fails."
         },
+        "scope": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RefScope"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Where the anchor lives when it is NOT in the current tab (v4 §2.8,\nin-context editing): the assembly whose instance owns the geometry\nand the chain of instance ids down to it. Absent ⇒ local (the current\ntab). A reader that does not know this field would silently resolve\nthe anchor locally, so its arrival bumped the reader floor (format v5)."
+        },
         "selector": {
           "$ref": "#/$defs/Selector",
           "description": "How to find the specific entity within the anchor's output."
@@ -2056,6 +2067,35 @@
           "type": "object"
         }
       ]
+    },
+    "RefScope": {
+      "description": "Scope of a geometry reference into another tab's instance (v4 §2.8).\n\n`source_id` absent ⇒ this document; `tab_id` absent ⇒ the current tab;\n`instance_path` = the chain of assembly-instance ids from the referencing\nassembly (`tab_id`) down to the part instance whose feature output the\nanchor names. A Part feature edited in the context of an assembly\nreferences the OTHER instances this way; the engine resolves such a\nreference through its edit context (the `feature_engine::context`\nmodule) and reports it loudly when the context is not open.",
+      "properties": {
+        "instance_path": {
+          "description": "Chain of assembly-instance ids down to the owning part instance.",
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "source_id": {
+          "description": "The document the assembly lives in; absent ⇒ this document.",
+          "format": "uuid",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tab_id": {
+          "description": "The assembly tab the instance path starts from; absent ⇒ the current tab.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
     },
     "Region": {
       "description": "A minimal closed face of the sketch, in sketch UV coordinates.",
@@ -4461,7 +4501,7 @@
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": true,
-  "description": "Owned mirror of the v4 envelope for schema derivation.",
+  "description": "Owned mirror of the v5 envelope for schema derivation.",
   "properties": {
     "active_tab": {
       "description": "Id of the tab open when saved; must name a tab.",
@@ -4496,7 +4536,7 @@
       "type": "array"
     },
     "version": {
-      "description": "Format version (4).",
+      "description": "Format version (5).",
       "format": "uint32",
       "minimum": 0,
       "type": "integer"
@@ -4510,6 +4550,6 @@
     "tabs",
     "active_tab"
   ],
-  "title": "Waffle Iron .waffle document (format v4)",
+  "title": "Waffle Iron .waffle document (format v5)",
   "type": "object"
 }

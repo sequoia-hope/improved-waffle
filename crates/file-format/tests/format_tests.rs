@@ -27,6 +27,7 @@ fn make_sketch_feature(name: &str) -> Feature {
             index: 0,
         },
         policy: ResolvePolicy::BestEffort,
+        scope: None,
     };
 
     let sketch = Sketch {
@@ -155,6 +156,7 @@ fn make_extrude_feature(name: &str, sketch_id: Uuid) -> Feature {
                 index: 0,
             },
             policy: ResolvePolicy::BestEffort,
+            scope: None,
         }],
     }
 }
@@ -378,6 +380,7 @@ fn save_all_operation_types() {
             index: 0,
         },
         policy: ResolvePolicy::Strict,
+        scope: None,
     };
 
     tree.features.push(Feature {
@@ -643,6 +646,7 @@ fn make_rebuild_compatible_tree() -> FeatureTree {
             index: 0,
         },
         policy: ResolvePolicy::BestEffort,
+        scope: None,
     };
 
     let sketch = Sketch {
@@ -816,6 +820,7 @@ fn round_trip_preserves_all_constraint_types() {
             index: 0,
         },
         policy: ResolvePolicy::BestEffort,
+        scope: None,
     };
 
     let constraints = vec![
@@ -1251,6 +1256,7 @@ fn point_pair_hv_constraints_roundtrip() {
             index: 0,
         },
         policy: ResolvePolicy::BestEffort,
+        scope: None,
     };
     let constraints = vec![
         SketchConstraint::Horizontal { entity: 5 },

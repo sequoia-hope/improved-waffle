@@ -32,6 +32,11 @@ pub struct EngineState {
     /// The open `Assembly` tab, evaluated (Phase 3b). `None` while a Part tab
     /// is active; its instance bodies are what the renderer shows.
     pub assembly: Option<crate::assembly_view::AssemblyView>,
+    /// The assembly context the live Part is open in (Phase 3d-4,
+    /// `OpenPartInContext`): the evaluated assembly plus which leaf is being
+    /// edited. Its OTHER leaves render as ghosts in the part's frame; the
+    /// engine's `context` (the resolution snapshot) is derived from it.
+    pub context_view: Option<crate::assembly_view::ContextView>,
 }
 
 /// An active sketch editing session.
@@ -60,7 +65,15 @@ impl EngineState {
             document_extra: serde_json::Map::new(),
             envelope_extra: serde_json::Map::new(),
             assembly: None,
+            context_view: None,
         }
+    }
+
+    /// Leave any in-context editing session: the ghost view and the engine's
+    /// resolution snapshot go together.
+    pub fn clear_context(&mut self) {
+        self.context_view = None;
+        self.engine.context = None;
     }
 
     /// Begin a new sketch session on the given plane.
@@ -185,6 +198,7 @@ impl EngineState {
     /// Reset to a clean state (new document).
     pub fn reset(&mut self) {
         self.assembly = None;
+        self.context_view = None;
         self.engine = Engine::new();
         self.active_sketch = None;
         self.selection.clear();

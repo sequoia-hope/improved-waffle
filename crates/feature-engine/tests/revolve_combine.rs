@@ -46,6 +46,7 @@ fn make_sketch_op() -> Operation {
                 index: 0,
             },
             policy: ResolvePolicy::Strict,
+            scope: None,
         },
         plane_origin: [0.0, 0.0, 0.0],
         plane_normal: [0.0, 0.0, 1.0],
@@ -136,6 +137,7 @@ fn body_target(feature_id: Uuid) -> GeomRef {
             index: 0,
         },
         policy: ResolvePolicy::BestEffort,
+        scope: None,
     }
 }
 

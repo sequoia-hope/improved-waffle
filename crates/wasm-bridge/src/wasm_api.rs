@@ -8,10 +8,11 @@ use wasm_bindgen::prelude::*;
 use crate::dispatch;
 use crate::engine_state::EngineState;
 use crate::messages::{EngineToUi, UiToEngine};
+use feature_engine::assembly::Transform;
 use modeling_ops::KernelBundle;
 use waffle_types::kernel::{EdgeRenderData, KernelId, RenderMesh};
 use waffle_types::{
-    Anchor, GeomRef, OutputKey, ResolvePolicy, Role, Selector, TopoKind, TopoSignature,
+    Anchor, GeomRef, OutputKey, RefScope, ResolvePolicy, Role, Selector, TopoKind, TopoSignature,
 };
 
 // Global engine state — single-threaded in the web worker.
@@ -306,6 +307,7 @@ pub fn get_face_data(feature_index: usize) -> String {
             &result.provenance.role_assignments,
             &engine.state.engine,
             &engine.kernel,
+            None,
         );
         serde_json::to_string(&entries).unwrap_or_else(|_| "[]".to_string())
     })
@@ -313,6 +315,9 @@ pub fn get_face_data(feature_index: usize) -> String {
 
 /// Build face-range JSON entries (each with a persistent GeomRef anchored to the
 /// given feature output). Shared by the per-feature and per-body face accessors.
+// Seven inputs: the sixth and seventh (introspect, ghost) are the KV13 and
+// Phase 3d-4 additions to a function that mirrors the face-entry wire shape.
+#[allow(clippy::too_many_arguments)]
 fn build_face_entries(
     feature_id: uuid::Uuid,
     output_key: &OutputKey,
@@ -322,6 +327,11 @@ fn build_face_entries(
     // booleans) for the face→feature UI.
     fe: &feature_engine::Engine,
     introspect: &dyn waffle_types::kernel::KernelIntrospect,
+    // Phase 3d-4: a ghost body's refs carry the scope, and each planar face
+    // reports its plane (centroid + normal, the engine's definition) in the
+    // edited part's frame so a sketch started on it uses the SAME origin the
+    // engine re-derives on rebuild.
+    ghost: Option<&Ghost>,
 ) -> Vec<serde_json::Value> {
     // Lookup from KernelId → Role from provenance.
     let role_map: std::collections::HashMap<_, _> = role_assignments.iter().cloned().collect();
@@ -341,6 +351,35 @@ fn build_face_entries(
                     index: 0,
                 },
                 policy: ResolvePolicy::BestEffort,
+                scope: None,
+            }
+        } else if ghost.is_some() {
+            // A ghost face without a role (an imported body) must be
+            // RESOLVABLE against the owning part's created-entity signatures
+            // — `signature_similarity` ignores `adjacency_hash`, so the
+            // index-only fallback below would match an arbitrary face. Carry
+            // the face's geometric fingerprint in the PART's own frame (that
+            // is what the part's provenance records).
+            let sig = introspect.compute_signature(range.face_id, TopoKind::Face);
+            GeomRef {
+                kind: TopoKind::Face,
+                anchor: Anchor::FeatureOutput {
+                    feature_id,
+                    output_key: output_key.clone(),
+                },
+                selector: Selector::Signature {
+                    signature: TopoSignature {
+                        surface_type: sig.surface_type.clone(),
+                        area: sig.area,
+                        centroid: sig.centroid,
+                        normal: sig.normal,
+                        bbox: None,
+                        adjacency_hash: None,
+                        length: None,
+                    },
+                },
+                policy: ResolvePolicy::BestEffort,
+                scope: None,
             }
         } else {
             // Signature-based fallback using face index
@@ -362,6 +401,7 @@ fn build_face_entries(
                     },
                 },
                 policy: ResolvePolicy::BestEffort,
+                scope: None,
             }
         };
 
@@ -372,12 +412,28 @@ fn build_face_entries(
             .created_by_feature(introspect, range.face_id)
             .map(|id| id.to_string());
 
-        entries.push(serde_json::json!({
+        let mut entry = serde_json::json!({
             "geom_ref": geom_ref,
             "start_index": range.start_index,
             "end_index": range.end_index,
             "created_by_feature": created_by_feature,
-        }));
+        });
+        if let Some(g) = ghost {
+            entry["geom_ref"] = serde_json::to_value(
+                g.scoped(serde_json::from_value(entry["geom_ref"].clone()).expect("round-trip")),
+            )
+            .unwrap_or(serde_json::Value::Null);
+            let sig = introspect.compute_signature(range.face_id, TopoKind::Face);
+            if sig.surface_type.as_deref() == Some("planar") {
+                if let (Some(c), Some(n)) = (sig.centroid, sig.normal) {
+                    entry["plane"] = serde_json::json!({
+                        "origin": g.relative.apply(c),
+                        "normal": g.relative.apply_dir(n),
+                    });
+                }
+            }
+        }
+        entries.push(entry);
     }
     entries
 }
@@ -439,7 +495,7 @@ pub fn get_edge_data(feature_index: usize) -> String {
         };
         let output_key = found_key.unwrap();
 
-        let entries = build_edge_entries(feature_id, &output_key, edges);
+        let entries = build_edge_entries(feature_id, &output_key, edges, None);
         serde_json::to_string(&entries).unwrap_or_else(|_| "[]".to_string())
     })
 }
@@ -450,11 +506,12 @@ fn build_edge_entries(
     feature_id: uuid::Uuid,
     output_key: &OutputKey,
     edges: &EdgeRenderData,
+    ghost: Option<&Ghost>,
 ) -> Vec<serde_json::Value> {
     let mut entries = Vec::new();
     for (edge_idx, range) in edges.edge_ranges.iter().enumerate() {
         // Use Signature-based selector with edge index as adjacency_hash
-        let geom_ref = GeomRef {
+        let mut geom_ref = GeomRef {
             kind: TopoKind::Edge,
             anchor: Anchor::FeatureOutput {
                 feature_id,
@@ -472,7 +529,11 @@ fn build_edge_entries(
                 },
             },
             policy: ResolvePolicy::BestEffort,
+            scope: None,
         };
+        if let Some(g) = ghost {
+            geom_ref = g.scoped(geom_ref);
+        }
 
         // EdgeOverlay.svelte expects start_index/end_index (vertex counts).
         // `curve` (Some for circular edges) lets sketch projection mint TRUE
@@ -545,16 +606,60 @@ struct BodyAddr {
     /// `(leaf index in the assembly view, index into its parts)`; `None`
     /// for the live part.
     instance: Option<(usize, usize)>,
+    /// Set for a GHOST body of an edit context (Phase 3d-4): its geometry is
+    /// baked into the edited part's frame by `relative`, and every reference
+    /// into it carries `scope`.
+    ghost: Option<Ghost>,
+}
+
+#[derive(Clone)]
+struct Ghost {
+    relative: Transform,
+    scope: RefScope,
+}
+
+impl Ghost {
+    fn scoped(&self, mut geom_ref: GeomRef) -> GeomRef {
+        geom_ref.scope = Some(self.scope.clone());
+        geom_ref
+    }
+
+    fn bake_points(&self, flat: &[f32]) -> Vec<f32> {
+        let mut out = Vec::with_capacity(flat.len());
+        for p in flat.chunks_exact(3) {
+            let q = self.relative.apply([p[0] as f64, p[1] as f64, p[2] as f64]);
+            out.extend_from_slice(&[q[0] as f32, q[1] as f32, q[2] as f32]);
+        }
+        out
+    }
+
+    fn bake_dirs(&self, flat: &[f32]) -> Vec<f32> {
+        let mut out = Vec::with_capacity(flat.len());
+        for p in flat.chunks_exact(3) {
+            let q = self
+                .relative
+                .apply_dir([p[0] as f64, p[1] as f64, p[2] as f64]);
+            out.extend_from_slice(&[q[0] as f32, q[1] as f32, q[2] as f32]);
+        }
+        out
+    }
+}
+
+/// The evaluated assembly whose leaves render: the open Assembly tab, or the
+/// context an open Part is being edited in (its ghosts).
+fn view_of(engine: &WasmEngine) -> Option<&crate::assembly_view::AssemblyView> {
+    engine
+        .state
+        .assembly
+        .as_ref()
+        .or_else(|| engine.state.context_view.as_ref().map(|cv| &cv.view))
 }
 
 /// The engine a body address lives in.
 fn engine_of<'a>(engine: &'a WasmEngine, addr: &BodyAddr) -> Option<&'a feature_engine::Engine> {
     match addr.instance {
         None => Some(&engine.state.engine),
-        Some((_, part_idx)) => engine
-            .state
-            .assembly
-            .as_ref()
+        Some((_, part_idx)) => view_of(engine)
             .and_then(|v| v.parts.get(part_idx))
             .map(|(_, e)| e),
     }
@@ -563,6 +668,7 @@ fn engine_of<'a>(engine: &'a WasmEngine, addr: &BodyAddr) -> Option<&'a feature_
 fn bodies_of_engine(
     fe: &feature_engine::Engine,
     instance: Option<(usize, usize)>,
+    ghost: Option<&Ghost>,
 ) -> Vec<BodyAddr> {
     let consumed = &fe.consumed_features;
     let mut bodies = Vec::new();
@@ -578,6 +684,7 @@ fn bodies_of_engine(
                         feature_id: feature.id,
                         output_index: oi,
                         instance,
+                        ghost: ghost.cloned(),
                     });
                 }
             }
@@ -589,22 +696,39 @@ fn bodies_of_engine(
 /// Flat, ordered list of renderable bodies: every mesh-bearing output of every
 /// feature that is not consumed by a later boolean. Order is feature order, then
 /// output order within a feature. In assembly mode: every non-suppressed
-/// instance's bodies, in instance order, each tagged with its instance.
+/// instance's bodies, in instance order, each tagged with its instance. In
+/// an edit context: the live part's bodies, then every OTHER instance's
+/// bodies as ghosts baked into the part's frame.
 fn collect_renderable_bodies(engine: &WasmEngine) -> Vec<BodyAddr> {
     if let Some(view) = engine.state.assembly.as_ref() {
         let mut bodies = Vec::new();
         for (li, leaf) in view.leaves.iter().enumerate() {
             if let Some((_, fe)) = view.parts.get(leaf.part) {
-                bodies.extend(bodies_of_engine(fe, Some((li, leaf.part))));
+                bodies.extend(bodies_of_engine(fe, Some((li, leaf.part)), None));
             }
         }
         return bodies;
     }
-    bodies_of_engine(&engine.state.engine, None)
+    let mut bodies = bodies_of_engine(&engine.state.engine, None, None);
+    if let Some(cv) = engine.state.context_view.as_ref() {
+        for (li, relative) in &cv.ghosts {
+            let Some(leaf) = cv.view.leaves.get(*li) else {
+                continue;
+            };
+            if let Some((_, fe)) = cv.view.parts.get(leaf.part) {
+                let ghost = Ghost {
+                    relative: *relative,
+                    scope: RefScope::in_assembly(cv.assembly_tab_id.clone(), leaf.path.clone()),
+                };
+                bodies.extend(bodies_of_engine(fe, Some((*li, leaf.part)), Some(&ghost)));
+            }
+        }
+    }
+    bodies
 }
 
-/// Access a body's mesh by flat body index.
-fn with_body_mesh<T>(body_index: usize, f: impl FnOnce(&RenderMesh) -> T) -> Option<T> {
+/// Access a body's mesh (and its address) by flat body index.
+fn with_body_mesh<T>(body_index: usize, f: impl FnOnce(&RenderMesh, &BodyAddr) -> T) -> Option<T> {
     ENGINE_STATE.with(|cell| {
         let engine = cell.borrow();
         let engine = engine.as_ref()?;
@@ -615,12 +739,15 @@ fn with_body_mesh<T>(body_index: usize, f: impl FnOnce(&RenderMesh) -> T) -> Opt
             .feature_results
             .get(&addr.feature_id)?;
         let (_key, body) = result.outputs.get(addr.output_index)?;
-        body.mesh.as_ref().map(f)
+        body.mesh.as_ref().map(|m| f(m, &addr))
     })
 }
 
-/// Access a body's edge data by flat body index.
-fn with_body_edges<T>(body_index: usize, f: impl FnOnce(&EdgeRenderData) -> T) -> Option<T> {
+/// Access a body's edge data (and its address) by flat body index.
+fn with_body_edges<T>(
+    body_index: usize,
+    f: impl FnOnce(&EdgeRenderData, &BodyAddr) -> T,
+) -> Option<T> {
     ENGINE_STATE.with(|cell| {
         let engine = cell.borrow();
         let engine = engine.as_ref()?;
@@ -631,7 +758,7 @@ fn with_body_edges<T>(body_index: usize, f: impl FnOnce(&EdgeRenderData) -> T) -
             .feature_results
             .get(&addr.feature_id)?;
         let (_key, body) = result.outputs.get(addr.output_index)?;
-        body.edges.as_ref().map(f)
+        body.edges.as_ref().map(|e| f(e, &addr))
     })
 }
 
@@ -693,7 +820,7 @@ pub fn get_body_metadata() -> String {
                 .map(|id| {
                     match addr
                         .instance
-                        .and_then(|(li, _)| engine.state.assembly.as_ref()?.leaves.get(li))
+                        .and_then(|(li, _)| view_of(engine)?.leaves.get(li))
                     {
                         Some(leaf) => format!(
                             "{}/{id}",
@@ -741,7 +868,7 @@ pub fn get_body_metadata() -> String {
                 "bodyId": body_id,
                 "name": name,
             });
-            if let (Some((li, _)), Some(view)) = (addr.instance, engine.state.assembly.as_ref()) {
+            if let (Some((li, _)), Some(view)) = (addr.instance, view_of(engine)) {
                 if let Some(leaf) = view.leaves.get(li) {
                     let top = leaf.path[0];
                     let inst = view.tree.instance(top);
@@ -749,8 +876,21 @@ pub fn get_body_metadata() -> String {
                     entry["instancePath"] = serde_json::json!(leaf.path);
                     entry["instanceName"] = serde_json::json!(inst.map(|i| i.name.clone()));
                     entry["partTabId"] = serde_json::json!(inst.map(|i| i.source.tab_id.clone()));
-                    entry["transform"] =
-                        serde_json::to_value(leaf.transform).unwrap_or(serde_json::Value::Null);
+                    // The LEAF's part (differs from `partTabId` for a member
+                    // of a sub-assembly instance): what "edit in context" opens.
+                    if let Some((part, _)) = view.parts.get(leaf.part) {
+                        entry["leafPartTabId"] = serde_json::json!(part.tab_id);
+                        entry["leafPartSourceId"] = serde_json::json!(part.source_id);
+                    }
+                    // A ghost's geometry is baked into the edited part's frame:
+                    // no renderer-side placement.
+                    entry["transform"] = match &addr.ghost {
+                        Some(_) => serde_json::Value::Null,
+                        None => {
+                            serde_json::to_value(leaf.transform).unwrap_or(serde_json::Value::Null)
+                        }
+                    };
+                    entry["context"] = serde_json::json!(addr.ghost.is_some());
                     if let Some(i) = inst {
                         let depth = if leaf.path.len() > 1 { " › …" } else { "" };
                         entry["name"] = serde_json::json!(format!(
@@ -770,8 +910,11 @@ pub fn get_body_metadata() -> String {
 /// Body mesh vertex positions as a Float32Array view (by flat body index).
 #[wasm_bindgen]
 pub fn get_body_vertices(body_index: usize) -> js_sys::Float32Array {
-    with_body_mesh(body_index, |mesh| unsafe {
-        js_sys::Float32Array::view(&mesh.vertices)
+    // A ghost's vertices are baked into the edited part's frame (a copy);
+    // everything else is a zero-copy view.
+    with_body_mesh(body_index, |mesh, addr| match &addr.ghost {
+        Some(g) => js_sys::Float32Array::from(g.bake_points(&mesh.vertices).as_slice()),
+        None => unsafe { js_sys::Float32Array::view(&mesh.vertices) },
     })
     .unwrap_or_else(|| js_sys::Float32Array::new_with_length(0))
 }
@@ -779,8 +922,9 @@ pub fn get_body_vertices(body_index: usize) -> js_sys::Float32Array {
 /// Body mesh vertex normals as a Float32Array view (by flat body index).
 #[wasm_bindgen]
 pub fn get_body_normals(body_index: usize) -> js_sys::Float32Array {
-    with_body_mesh(body_index, |mesh| unsafe {
-        js_sys::Float32Array::view(&mesh.normals)
+    with_body_mesh(body_index, |mesh, addr| match &addr.ghost {
+        Some(g) => js_sys::Float32Array::from(g.bake_dirs(&mesh.normals).as_slice()),
+        None => unsafe { js_sys::Float32Array::view(&mesh.normals) },
     })
     .unwrap_or_else(|| js_sys::Float32Array::new_with_length(0))
 }
@@ -788,7 +932,7 @@ pub fn get_body_normals(body_index: usize) -> js_sys::Float32Array {
 /// Body mesh triangle indices as a Uint32Array view (by flat body index).
 #[wasm_bindgen]
 pub fn get_body_indices(body_index: usize) -> js_sys::Uint32Array {
-    with_body_mesh(body_index, |mesh| unsafe {
+    with_body_mesh(body_index, |mesh, _| unsafe {
         js_sys::Uint32Array::view(&mesh.indices)
     })
     .unwrap_or_else(|| js_sys::Uint32Array::new_with_length(0))
@@ -832,6 +976,7 @@ pub fn get_body_face_data(body_index: usize) -> String {
             &result.provenance.role_assignments,
             fe,
             &engine.kernel,
+            addr.ghost.as_ref(),
         );
         serde_json::to_string(&entries).unwrap_or_else(|_| "[]".to_string())
     })
@@ -840,8 +985,9 @@ pub fn get_body_face_data(body_index: usize) -> String {
 /// Body edge vertex positions as a Float32Array view (by flat body index).
 #[wasm_bindgen]
 pub fn get_body_edge_vertices(body_index: usize) -> js_sys::Float32Array {
-    with_body_edges(body_index, |edges| unsafe {
-        js_sys::Float32Array::view(&edges.vertices)
+    with_body_edges(body_index, |edges, addr| match &addr.ghost {
+        Some(g) => js_sys::Float32Array::from(g.bake_points(&edges.vertices).as_slice()),
+        None => unsafe { js_sys::Float32Array::view(&edges.vertices) },
     })
     .unwrap_or_else(|| js_sys::Float32Array::new_with_length(0))
 }
@@ -862,7 +1008,10 @@ pub fn get_body_edge_data(body_index: usize) -> String {
             Some(a) => a,
             None => return "[]".to_string(),
         };
-        let result = match engine.state.engine.feature_results.get(&addr.feature_id) {
+        let Some(fe) = engine_of(engine, &addr) else {
+            return "[]".to_string();
+        };
+        let result = match fe.feature_results.get(&addr.feature_id) {
             Some(r) => r,
             None => return "[]".to_string(),
         };
@@ -874,7 +1023,7 @@ pub fn get_body_edge_data(body_index: usize) -> String {
             Some(e) => e,
             None => return "[]".to_string(),
         };
-        let entries = build_edge_entries(addr.feature_id, key, edges);
+        let entries = build_edge_entries(addr.feature_id, key, edges, addr.ghost.as_ref());
         serde_json::to_string(&entries).unwrap_or_else(|_| "[]".to_string())
     })
 }

@@ -102,6 +102,7 @@ fn rect_sketch_with_width_expr(width_expr: &str) -> Sketch {
                 index: 0,
             },
             policy: ResolvePolicy::Strict,
+            scope: None,
         },
         plane_origin: [0.0, 0.0, 0.0],
         plane_normal: [0.0, 0.0, 1.0],

@@ -18,7 +18,10 @@ function geomRefEquals(a, b) {
 		a.anchor?.plane === b.anchor?.plane &&
 		a.anchor?.id === b.anchor?.id &&
 		a.selector?.type === b.selector?.type &&
-		JSON.stringify(a.selector) === JSON.stringify(b.selector)
+		JSON.stringify(a.selector) === JSON.stringify(b.selector) &&
+		// In-context refs (v4 §2.8): the same face of two instances of one part
+		// differs only by scope.
+		JSON.stringify(a.scope ?? null) === JSON.stringify(b.scope ?? null)
 	);
 }
 

@@ -9,6 +9,22 @@ use waffle_types::{
 
 use crate::types::EngineError;
 
+/// A reference scoped to another tab's instance (v4 §2.8, in-context editing)
+/// must be resolved through the edit context (`crate::context`), never against
+/// this part's own results: the anchor feature id belongs to ANOTHER part, and
+/// an accidental id match would silently pick the wrong geometry.
+fn refuse_scoped(geom_ref: &GeomRef) -> Result<(), EngineError> {
+    match &geom_ref.scope {
+        None => Ok(()),
+        Some(scope) => Err(EngineError::ResolutionFailed {
+            reason: format!(
+                "reference is scoped to {}; it resolves only through the open assembly context",
+                crate::context::describe_scope(scope, None)
+            ),
+        }),
+    }
+}
+
 /// Result of resolving a GeomRef to a concrete KernelId.
 #[derive(Debug, Clone)]
 pub struct ResolvedRef {
@@ -21,6 +37,7 @@ pub fn resolve_geom_ref(
     geom_ref: &GeomRef,
     feature_results: &std::collections::HashMap<Uuid, OpResult>,
 ) -> Result<ResolvedRef, EngineError> {
+    refuse_scoped(geom_ref)?;
     // Extract the feature ID from the anchor
     let feature_id = match &geom_ref.anchor {
         waffle_types::Anchor::FeatureOutput {
@@ -82,6 +99,7 @@ pub fn resolve_by_position(
     introspect: &dyn KernelIntrospect,
     pos: [f64; 3],
 ) -> Result<ResolvedRef, EngineError> {
+    refuse_scoped(geom_ref)?;
     let (feature_id, output_key) = match &geom_ref.anchor {
         Anchor::FeatureOutput {
             feature_id,
@@ -636,6 +654,7 @@ mod tests {
             },
             selector: Selector::Position { x, y, z },
             policy,
+            scope: None,
         }
     }
 

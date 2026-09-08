@@ -97,6 +97,7 @@ fn square_sketch() -> Sketch {
                 index: 0,
             },
             policy: ResolvePolicy::Strict,
+            scope: None,
         },
         plane_origin: [0.0; 3],
         plane_normal: [0.0, 0.0, 1.0],

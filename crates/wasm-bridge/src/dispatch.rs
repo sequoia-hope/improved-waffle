@@ -8,7 +8,9 @@ use waffle_types::kernel::RenderMesh;
 use waffle_types::OutputKey;
 
 use crate::engine_state::{BridgeError, EngineState};
-use crate::messages::{AssemblyStatus, EngineToUi, SourceStatus, UiToEngine};
+use crate::messages::{
+    AssemblyStatus, ContextInstanceInfo, ContextStatus, EngineToUi, SourceStatus, UiToEngine,
+};
 
 /// Dispatch a UI message to the engine and return a response.
 ///
@@ -375,6 +377,7 @@ fn handle_message(
             state.envelope_extra = doc.extra;
             state.engine.tree = tree;
             state.assembly = None;
+            state.clear_context();
             state.engine.rebuild_from_scratch(kb);
             state.engine.warnings.extend(
                 loaded
@@ -432,6 +435,7 @@ fn handle_message(
             state.selection.clear();
             state.hover = None;
             state.assembly = None;
+            state.clear_context();
             state.engine.tree = features;
             state.engine.rebuild_from_scratch(kb);
             Ok(model_updated_response(state))
@@ -454,6 +458,7 @@ fn handle_message(
             state.active_sketch = None;
             state.selection.clear();
             state.hover = None;
+            state.clear_context();
             // The live tree is not the assembly's content; keep the renderer
             // on the instances only.
             state.engine.tree = feature_engine::types::FeatureTree::new();
@@ -466,6 +471,36 @@ fn handle_message(
                 kb,
             );
             state.assembly = Some(view);
+            Ok(model_updated_response(state))
+        }
+
+        UiToEngine::OpenPartInContext {
+            features,
+            assembly_tab_id,
+            instance_path,
+            assembly,
+            part_trees,
+            assembly_trees,
+        } => {
+            state.active_sketch = None;
+            state.selection.clear();
+            state.hover = None;
+            state.assembly = None;
+            state.clear_context();
+            let view = crate::assembly_view::evaluate(
+                assembly,
+                &part_trees,
+                &assembly_trees,
+                &state.engine.sources,
+                kb,
+            );
+            let (context_view, context) =
+                crate::assembly_view::ContextView::new(view, assembly_tab_id, instance_path)
+                    .map_err(|reason| BridgeError::InvalidRequest { reason })?;
+            state.context_view = Some(context_view);
+            state.engine.context = Some(context);
+            state.engine.tree = features;
+            state.engine.rebuild_from_scratch(kb);
             Ok(model_updated_response(state))
         }
 
@@ -760,6 +795,28 @@ fn model_updated_response(state: &EngineState) -> EngineToUi {
             errors: v.errors.clone(),
             warnings: v.warnings.clone(),
             parts: v.parts.iter().map(|(p, _)| p.clone()).collect(),
+        }),
+        context: state.context_view.as_ref().map(|cv| ContextStatus {
+            assembly_tab_id: cv.assembly_tab_id.clone(),
+            instance_path: cv.instance_path.clone(),
+            instance_name: cv.view.leaf_name(&cv.instance_path),
+            placement: cv.placement,
+            instances: cv
+                .ghosts
+                .iter()
+                .filter_map(|(li, _)| cv.view.leaves.get(*li))
+                .map(|leaf| {
+                    let part = &cv.view.parts[leaf.part].0;
+                    ContextInstanceInfo {
+                        path: leaf.path.clone(),
+                        name: cv.view.leaf_name(&leaf.path),
+                        part_tab_id: part.tab_id.clone(),
+                        part_source_id: part.source_id,
+                    }
+                })
+                .collect(),
+            errors: cv.view.errors.clone(),
+            warnings: cv.view.warnings.clone(),
         }),
     }
 }
