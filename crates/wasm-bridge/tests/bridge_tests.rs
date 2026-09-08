@@ -1792,3 +1792,85 @@ fn set_parameters_undo_flows_through_bridge() {
         panic!("expected ModelUpdated, got {resp:?}");
     }
 }
+
+// ── v4 Phase 2: fork-time source rebase ──────────────────────────────────
+
+#[test]
+fn rebase_sources_pins_relative_entries_and_the_next_save_carries_them() {
+    use file_format::{GitRef, Locator, SourceEntry, SourceKind, WaffleDocument};
+
+    // A document as fetched from a share link: one Relative source.
+    let mut doc = WaffleDocument::new("Shared Bracket");
+    let rel = SourceEntry::linked(
+        "bolt.waffle",
+        SourceKind::Waffle,
+        Locator::Relative {
+            path: "../fasteners/bolt.waffle".into(),
+        },
+    );
+    let rel_id = rel.id;
+    doc.sources.push(rel);
+    let json = file_format::save_document(&doc);
+
+    let mut kernel = MockKernel::new();
+    let mut state = EngineState::new();
+    let loaded = wasm_bridge::dispatch(
+        &mut state,
+        UiToEngine::LoadProject { data: json },
+        &mut kernel,
+    );
+    assert!(
+        matches!(loaded, EngineToUi::ModelUpdated { .. }),
+        "{loaded:?}"
+    );
+
+    let sha = "9fceb02a".repeat(5);
+    let base: Locator = serde_json::from_value(serde_json::json!({
+        "type": "Git",
+        "remote": "https://github.com/acme/parts",
+        "path": "brackets/bracket.waffle",
+        "ref": { "type": "Branch", "name": "main" },
+        "host": "github"
+    }))
+    .unwrap();
+    let resp = wasm_bridge::dispatch(
+        &mut state,
+        UiToEngine::RebaseSources {
+            base,
+            commit: sha.clone(),
+        },
+        &mut kernel,
+    );
+    assert!(matches!(resp, EngineToUi::ModelUpdated { .. }), "{resp:?}");
+
+    // The next save (the fork) carries the pinned locator under the same id.
+    let saved = wasm_bridge::dispatch(&mut state, UiToEngine::SaveProject, &mut kernel);
+    let EngineToUi::SaveReady { json_data } = saved else {
+        panic!("{saved:?}")
+    };
+    let out = file_format::load_document(&json_data).unwrap().document;
+    let entry = out.source(rel_id).expect("id kept");
+    assert!(
+        matches!(&entry.locator, Locator::Git { remote, path, git_ref: GitRef::Commit { sha: s }, .. }
+            if remote == "https://github.com/acme/parts" && path == "fasteners/bolt.waffle" && *s == sha),
+        "{:?}",
+        entry.locator
+    );
+    assert_eq!(
+        entry.resolved.as_ref().map(|r| r.commit.as_str()),
+        Some(sha.as_str())
+    );
+
+    // A non-git base is refused.
+    let bad = wasm_bridge::dispatch(
+        &mut state,
+        UiToEngine::RebaseSources {
+            base: Locator::Url {
+                url: "https://e.x/a.waffle".into(),
+            },
+            commit: sha,
+        },
+        &mut kernel,
+    );
+    assert!(matches!(bad, EngineToUi::Error { .. }), "{bad:?}");
+}

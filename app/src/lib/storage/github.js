@@ -4,6 +4,8 @@
  *
  * @implements {import('./types.js').DocumentStore}
  */
+import { base } from '$app/paths';
+import { buildOpenLink } from './git/locator.js';
 
 export class GitHubStorageError extends Error {
 	/** @param {string} message @param {string} code */
@@ -165,8 +167,31 @@ export class GitHubStore {
 		const entry = index.find((e) => e.id === docId);
 		if (!entry) return null;
 
-		const rawUrl = `https://raw.githubusercontent.com/${this.#owner}/${this.#repo}/main/${entry.filename}`;
-		return `${window.location.origin}?src=${encodeURIComponent(rawUrl)}`;
+		// A share link is a locator (specs/waffle_v4_document_model.md §7.4):
+		// this repo, this file, the branch tip. The recipient opens it linked
+		// and read-only; a fork is their path to editing.
+		return buildOpenLink(
+			{
+				remote: `https://github.com/${this.#owner}/${this.#repo}`,
+				path: entry.filename,
+				ref: { type: 'Branch', name: 'main' }
+			},
+			`${window.location.origin}${base}`
+		);
+	}
+
+	/** The git locator of a stored document (its location, §7.1), or null. */
+	async getLocator(docId) {
+		const index = await this.#loadIndex();
+		const entry = index.find((e) => e.id === docId);
+		if (!entry) return null;
+		return {
+			type: 'Git',
+			remote: `https://github.com/${this.#owner}/${this.#repo}`,
+			path: entry.filename,
+			ref: { type: 'Branch', name: 'main' },
+			host: 'github'
+		};
 	}
 
 	/**

@@ -903,3 +903,119 @@ fn malformed_known_operation_is_still_a_parse_error() {
         matches!(load_document(&doc.to_string()), Err(LoadError::ParseError(m)) if m.contains("string `type`"))
     );
 }
+
+// ---------------------------------------- Phase 2: fork-time source rebase
+
+#[test]
+fn join_repo_path_normalizes_and_refuses_escapes() {
+    use file_format::join_repo_path;
+    assert_eq!(
+        join_repo_path("brackets/bracket.waffle", "../fasteners/bolt.waffle").as_deref(),
+        Some("fasteners/bolt.waffle")
+    );
+    assert_eq!(
+        join_repo_path("brackets/bracket.waffle", "./sub/plate.waffle").as_deref(),
+        Some("brackets/sub/plate.waffle")
+    );
+    assert_eq!(
+        join_repo_path("top.waffle", "other.waffle").as_deref(),
+        Some("other.waffle")
+    );
+    assert_eq!(
+        join_repo_path("brackets/bracket.waffle", "../../escape.waffle"),
+        None
+    );
+    assert_eq!(join_repo_path("top.waffle", "../x.waffle"), None);
+    assert_eq!(join_repo_path("a/b.waffle", ".."), None);
+}
+
+#[test]
+fn rebase_pins_relative_sources_to_the_opened_commit_and_keeps_ids() {
+    use file_format::rebase_relative_sources;
+    let sha = "9fceb02a".repeat(5);
+    let at = chrono::DateTime::parse_from_rfc3339("2026-09-08T00:00:00Z")
+        .unwrap()
+        .with_timezone(&chrono::Utc);
+    let mut entries = vec![
+        SourceEntry::linked(
+            "bolt.waffle",
+            SourceKind::Waffle,
+            Locator::Relative {
+                path: "../fasteners/bolt.waffle".into(),
+            },
+        ),
+        SourceEntry::linked(
+            "escape.waffle",
+            SourceKind::Waffle,
+            Locator::Relative {
+                path: "../../escape.waffle".into(),
+            },
+        ),
+        SourceEntry::linked(
+            "other.waffle",
+            SourceKind::Waffle,
+            Locator::git_branch("https://github.com/x/y", "o.waffle", "dev"),
+        ),
+        SourceEntry::embedded("cube.step", SourceKind::Step, CUBE_STEP),
+    ];
+    let ids: Vec<Uuid> = entries.iter().map(|e| e.id).collect();
+    let base = Locator::Git {
+        remote: "https://github.com/acme/parts.git".into(),
+        path: "brackets/bracket.waffle".into(),
+        git_ref: GitRef::Branch {
+            name: "main".into(),
+        },
+        host: Some(GitHost::Github),
+    };
+
+    let rewritten = rebase_relative_sources(&mut entries, &base, &sha.to_uppercase(), at);
+    assert_eq!(
+        rewritten,
+        vec![ids[0]],
+        "only the resolvable Relative entry"
+    );
+
+    assert_eq!(
+        entries[0].locator,
+        Locator::Git {
+            remote: "https://github.com/acme/parts".into(),
+            path: "fasteners/bolt.waffle".into(),
+            git_ref: GitRef::Commit { sha: sha.clone() },
+            host: Some(GitHost::Github),
+        }
+    );
+    assert_eq!(
+        entries[0]
+            .resolved
+            .as_ref()
+            .map(|r| (r.commit.clone(), r.at)),
+        Some((sha.clone(), at))
+    );
+    assert_eq!(entries[0].id, ids[0]);
+    // An escaping relative path is left alone (still unresolvable, still reported).
+    assert!(matches!(entries[1].locator, Locator::Relative { .. }));
+    // Absolute and embedded entries are untouched.
+    assert!(
+        matches!(&entries[2].locator, Locator::Git { git_ref: GitRef::Branch { name }, .. } if name == "dev")
+    );
+    assert!(matches!(entries[3].locator, Locator::Embedded));
+
+    // A non-git base rewrites nothing.
+    let mut again = vec![SourceEntry::linked(
+        "r",
+        SourceKind::Waffle,
+        Locator::Relative {
+            path: "x.waffle".into(),
+        },
+    )];
+    assert!(rebase_relative_sources(
+        &mut again,
+        &Locator::Url {
+            url: "https://e.x/a.waffle".into()
+        },
+        &sha,
+        at
+    )
+    .is_empty());
+    assert!(matches!(again[0].locator, Locator::Relative { .. }));
+}

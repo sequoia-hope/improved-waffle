@@ -88,7 +88,9 @@ export class IndexedDBStore {
 						displayUnit,
 						tabCount,
 						previewMesh,
-						provider: 'local'
+						provider: 'local',
+						// Share-link provenance (open-link.js); null for the user's own docs.
+						link: doc.link ?? null
 					};
 				});
 				// Sort by modified descending

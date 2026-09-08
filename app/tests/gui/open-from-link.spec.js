@@ -1,0 +1,231 @@
+/**
+ * v4 Phase 2 — open-from-link (specs/waffle_v4_document_model.md §7.1, §7.4):
+ * a share link is a locator. Opening `/open?remote=&path=&ref=` fetches the
+ * document at the RESOLVED commit from a mocked GitHub, creates a linked
+ * read-only local record, and shows the read-only banner; Ctrl+S refuses;
+ * "Fork to edit" makes an editable copy with a new document id whose
+ * `Relative` sources are rebased to Git locators pinned at that commit; the
+ * legacy `/?src=<raw url>` link redirects here; a private repo asks for a
+ * per-host token and retries; the GitHub provider's share URL is this link.
+ */
+import { test as rawTest, expect } from '@playwright/test';
+import { getDocumentFromDB } from './helpers/waffle-test.js';
+
+const SHA = '9fceb02a9fceb02a9fceb02a9fceb02a9fceb02a';
+const REMOTE = 'https://github.com/acme/parts';
+const PATH = 'brackets/bracket.waffle';
+const DOC_ID = '6f1c2a4e-1111-4222-8333-444455556666';
+const TAB_ID = '9068ef01-1111-4222-8333-444455556666';
+const SRC_ID = '3b9e0000-1111-4222-8333-444455556666';
+
+/** The shared document: one empty Part tab and one Relative source. */
+function sharedDoc() {
+	return {
+		format: 'waffle-iron',
+		version: 4,
+		min_reader_version: 4,
+		document: { id: DOC_ID, name: 'Shared Bracket', created: '2026-09-01T00:00:00.000Z', modified: '2026-09-01T00:00:00.000Z', display_unit: 'mm' },
+		sources: [
+			{ id: SRC_ID, name: 'bolt.waffle', kind: { type: 'Waffle' }, locator: { type: 'Relative', path: '../fasteners/bolt.waffle' } }
+		],
+		tabs: [{ id: TAB_ID, name: 'Part 1', kind: { type: 'Part', features: { features: [], active_index: null } } }],
+		active_tab: TAB_ID
+	};
+}
+
+const b64 = (s) => Buffer.from(s, 'utf8').toString('base64');
+
+/** Mock the GitHub API for acme/parts. `needsToken` ⇒ 401 without Authorization. */
+async function mockGitHub(page, { needsToken = false } = {}) {
+	const calls = [];
+	await page.route('https://api.github.com/**', async (route) => {
+		const req = route.request();
+		const url = req.url();
+		calls.push(url);
+		if (needsToken && !req.headers()['authorization']) {
+			return route.fulfill({ status: 401, contentType: 'application/json', body: '{"message":"Requires authentication"}' });
+		}
+		if (url.endsWith('/repos/acme/parts/commits/main')) {
+			return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ sha: SHA }) });
+		}
+		if (url.includes(`/repos/acme/parts/contents/brackets/bracket.waffle?ref=${SHA}`)) {
+			return route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify({ content: b64(JSON.stringify(sharedDoc())), sha: 'b10b', encoding: 'base64' })
+			});
+		}
+		return route.fulfill({ status: 404, contentType: 'application/json', body: '{"message":"Not Found"}' });
+	});
+	return calls;
+}
+
+/**
+ * Wait until the editor holds the LINKED document. `activeDocId` alone is not
+ * enough: the editor's direct-`/` bootstrap mints one before
+ * `loadPendingDocument` adopts the pending link (the legacy `/?src=` path
+ * visits `/` first, so the engine is already up when `/open` hands off).
+ */
+async function waitForEditor(page) {
+	await page.waitForURL('/', { timeout: 20000 });
+	await page.waitForFunction(() => typeof window.__waffle !== 'undefined', { timeout: 30000 });
+	await page.waitForFunction(() => window.__waffle?.getState()?.engineReady === true, { timeout: 30000 });
+	await page.waitForFunction(() => window.__waffle?.getDocumentState?.()?.documentLink != null, { timeout: 15000 });
+}
+
+const OPEN_URL = `/open?remote=${encodeURIComponent(REMOTE)}&path=${encodeURIComponent(PATH)}&ref=main`;
+
+rawTest.describe('Open from link', () => {
+	rawTest('a public repo link opens as a linked, read-only document', async ({ page }) => {
+		const calls = await mockGitHub(page);
+		await page.goto(OPEN_URL);
+		await waitForEditor(page);
+
+		const state = await page.evaluate(() => window.__waffle.getDocumentState());
+		expect(state.readOnly).toBe(true);
+		expect(state.documentName).toBe('Shared Bracket');
+		expect(state.documentId).toBe(DOC_ID);
+		expect(state.documentLink.locator).toEqual({ type: 'Git', remote: REMOTE, path: PATH, ref: { type: 'Branch', name: 'main' } });
+		expect(state.documentLink.resolved.commit).toBe(SHA);
+		expect(state.documentLink.contentHash).toBe('git-blob-sha1:b10b');
+		// Content was fetched at the resolved commit, not at the branch name.
+		expect(calls.some((u) => u.includes(`?ref=${SHA}`))).toBe(true);
+		expect(calls.some((u) => u.includes('?ref=main'))).toBe(false);
+
+		// Banner names the source and the commit.
+		const banner = page.locator('[data-testid="linked-doc-banner"]');
+		await expect(banner).toBeVisible();
+		await expect(page.locator('[data-testid="linked-doc-locator"]')).toContainText('github.com/acme/parts/brackets/bracket.waffle @ main');
+		await expect(page.locator('[data-testid="linked-doc-commit"]')).toContainText(SHA.slice(0, 7));
+
+		// The linked record is in local storage, carrying its provenance.
+		const stored = await getDocumentFromDB(page, state.activeDocId);
+		expect(stored.link.readOnly).toBe(true);
+		expect(stored.link.locator.path).toBe(PATH);
+		expect(JSON.parse(stored.json).document.id).toBe(DOC_ID);
+
+		// Ctrl+S is refused with a read-only toast and writes nothing.
+		await page.keyboard.press('Control+s');
+		await page.waitForFunction(
+			() => (window.__waffle.getToasts() || []).some((t) => /read-only/i.test(t.message)),
+			{ timeout: 5000 }
+		);
+		const after = await getDocumentFromDB(page, state.activeDocId);
+		expect(after.modified).toBe(stored.modified);
+	});
+
+	rawTest('fork makes an editable copy with a new id and commit-pinned sources', async ({ page }) => {
+		await mockGitHub(page);
+		await page.goto(OPEN_URL);
+		await waitForEditor(page);
+		const before = await page.evaluate(() => window.__waffle.getDocumentState());
+
+		await page.locator('[data-testid="linked-doc-fork"]').click();
+		await page.waitForFunction(() => window.__waffle.getDocumentState().readOnly === false, { timeout: 15000 });
+		await page.waitForFunction(
+			(prev) => window.__waffle.getDocumentState().activeDocId !== prev,
+			before.activeDocId,
+			{ timeout: 15000 }
+		);
+		const after = await page.evaluate(() => window.__waffle.getDocumentState());
+		expect(after.documentLink).toBeNull();
+		expect(after.documentId).not.toBe(DOC_ID);
+		expect(after.documentName).toBe('Shared Bracket');
+		await expect(page.locator('[data-testid="linked-doc-banner"]')).toHaveCount(0);
+
+		// The fork was saved (wait for the record) with rebased sources.
+		await page.waitForFunction(async (id) => {
+			return await new Promise((resolve) => {
+				const req = indexedDB.open('waffle-iron', 1);
+				req.onsuccess = () => {
+					const get = req.result.transaction('documents', 'readonly').objectStore('documents').get(id);
+					get.onsuccess = () => resolve(!!get.result);
+					get.onerror = () => resolve(false);
+				};
+				req.onerror = () => resolve(false);
+			});
+		}, after.activeDocId, { timeout: 15000 });
+		const fork = await getDocumentFromDB(page, after.activeDocId);
+		expect(fork.link ?? null).toBeNull();
+		const forkJson = JSON.parse(fork.json);
+		expect(forkJson.document.id).toBe(after.documentId);
+		expect(forkJson.sources).toHaveLength(1);
+		expect(forkJson.sources[0].id).toBe(SRC_ID);
+		// `host` stays absent (⇒ inferred): the share link carried none, and the
+		// rebase copies the base locator's host verbatim.
+		expect(forkJson.sources[0].locator).toEqual({
+			type: 'Git',
+			remote: REMOTE,
+			path: 'fasteners/bolt.waffle',
+			ref: { type: 'Commit', sha: SHA }
+		});
+		expect(forkJson.sources[0].resolved.commit).toBe(SHA);
+
+		// The original linked record is untouched.
+		const original = await getDocumentFromDB(page, before.activeDocId);
+		expect(JSON.parse(original.json).sources[0].locator.type).toBe('Relative');
+		expect(original.link.readOnly).toBe(true);
+	});
+
+	rawTest('the legacy /?src=<raw url> share link redirects to /open and opens', async ({ page }) => {
+		await mockGitHub(page);
+		const raw = `https://raw.githubusercontent.com/acme/parts/main/${PATH}`;
+		await page.goto(`/?src=${encodeURIComponent(raw)}`);
+		await waitForEditor(page);
+		const state = await page.evaluate(() => window.__waffle.getDocumentState());
+		expect(state.readOnly).toBe(true);
+		expect(state.documentLink.locator.remote).toBe(REMOTE);
+		expect(state.documentLink.locator.host).toBe('github');
+	});
+
+	rawTest('a private repo asks for a host token, stores it per host, and retries', async ({ page }) => {
+		await mockGitHub(page, { needsToken: true });
+		await page.goto('/home');
+		await page.evaluate(() => localStorage.clear());
+		await page.goto(OPEN_URL);
+		const form = page.locator('[data-testid="open-token-form"]');
+		await expect(form).toBeVisible({ timeout: 15000 });
+		await expect(form).toContainText('https://github.com');
+		await page.locator('[data-testid="open-token-input"]').fill('ghp_secret');
+		await page.locator('[data-testid="open-token-submit"]').click();
+		await waitForEditor(page);
+		const state = await page.evaluate(() => window.__waffle.getDocumentState());
+		expect(state.readOnly).toBe(true);
+		const tokens = await page.evaluate(() => JSON.parse(localStorage.getItem('waffle-host-tokens') || '[]'));
+		expect(tokens).toEqual([{ host_url: 'https://github.com', token: 'ghp_secret', kind: 'github' }]);
+	});
+
+	rawTest('an unreadable link reports the error instead of an empty editor', async ({ page }) => {
+		await page.route('https://api.github.com/**', (route) =>
+			route.fulfill({ status: 404, contentType: 'application/json', body: '{"message":"Not Found"}' })
+		);
+		await page.goto(OPEN_URL);
+		await expect(page.locator('[data-testid="open-error"]')).toBeVisible({ timeout: 15000 });
+		await expect(page.locator('[data-testid="open-error"]')).toContainText('not found');
+
+		await page.goto('/open?remote=https://github.com/acme/parts');
+		await expect(page.locator('[data-testid="open-error"]')).toContainText('remote and path');
+	});
+
+	rawTest("the GitHub provider's share URL is an /open locator link", async ({ page }) => {
+		await page.route('https://api.github.com/repos/acme/parts/contents/.waffle-index.json', (route) =>
+			route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify({
+					content: b64(JSON.stringify([{ id: 'g1', name: 'Bracket', filename: 'bracket.waffle', created: 1, modified: 1 }])),
+					sha: 'idx',
+					encoding: 'base64'
+				})
+			})
+		);
+		await page.goto('/home');
+		const r = await page.evaluate(async () => {
+			const { GitHubStore } = await import('/src/lib/storage/github.js');
+			const store = new GitHubStore('tok', 'acme', 'parts');
+			return { share: await store.getShareUrl('g1'), locator: await store.getLocator('g1') };
+		});
+		expect(r.share).toBe(`http://localhost:5173/open?remote=${encodeURIComponent(REMOTE)}&path=bracket.waffle&ref=main`);
+		expect(r.locator).toEqual({ type: 'Git', remote: REMOTE, path: 'bracket.waffle', ref: { type: 'Branch', name: 'main' }, host: 'github' });
+	});
+});

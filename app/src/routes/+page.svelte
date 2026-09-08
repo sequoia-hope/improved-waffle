@@ -1,6 +1,9 @@
 <script>
 	import { onMount } from 'svelte';
+	import { goto } from '$app/navigation';
+	import { base } from '$app/paths';
 	import Toolbar from '$lib/ui/Toolbar.svelte';
+	import LinkedDocBanner from '$lib/ui/LinkedDocBanner.svelte';
 	import FeatureTree from '$lib/ui/FeatureTree.svelte';
 	import PropertyEditor from '$lib/ui/PropertyEditor.svelte';
 	import StatusBar from '$lib/ui/StatusBar.svelte';
@@ -33,6 +36,13 @@
 	let resizing = $state(null);
 
 	onMount(() => {
+		// Legacy share link `/?src=<raw url>` (emitted by the GitHub provider,
+		// never handled before v4 Phase 2): hand it to the /open route.
+		const legacySrc = new URLSearchParams(window.location.search).get('src');
+		if (legacySrc) {
+			goto(`${base}/open?src=${encodeURIComponent(legacySrc)}`, { replaceState: true });
+			return;
+		}
 		// Load pending document from /doc/[id] route if one exists in sessionStorage
 		loadPendingDocument();
 
@@ -93,6 +103,7 @@
 		<Toolbar />
 	</div>
 	<div class="tabbar-area">
+		<LinkedDocBanner />
 		<TabBar
 			{tabs}
 			activeTabId={activeTab}
@@ -130,6 +141,7 @@
 		<Toolbar />
 	</div>
 	<div class="tabbar-area">
+		<LinkedDocBanner />
 		<TabBar
 			{tabs}
 			activeTabId={activeTab}

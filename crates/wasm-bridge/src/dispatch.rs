@@ -313,6 +313,22 @@ fn handle_message(
             Ok(model_updated_response(state))
         }
 
+        UiToEngine::RebaseSources { base, commit } => {
+            if !matches!(base, file_format::Locator::Git { .. }) {
+                return Err(BridgeError::InvalidRequest {
+                    reason: "RebaseSources: base must be a Git locator".to_string(),
+                });
+            }
+            file_format::rebase_relative_sources(
+                &mut state.sources,
+                &base,
+                &commit,
+                chrono::Utc::now(),
+            );
+            // No geometry changed; the sources table did.
+            Ok(model_updated_response(state))
+        }
+
         // -- Tab / document management --
         UiToEngine::SwitchTab { features } => {
             state.active_sketch = None;

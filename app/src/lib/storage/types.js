@@ -8,6 +8,7 @@
  * @property {number} tabCount - Number of tabs
  * @property {string} provider - Provider ID ("local", "github")
  * @property {object|null} [previewMesh] - Preview mesh for thumbnail
+ * @property {import('./open-link.js').DocumentLink|null} [link] - Share-link provenance; non-null ⇒ read-only linked copy
  */
 
 /**
@@ -16,6 +17,7 @@
  * @property {string} json - Full serialized WaffleFile v3 JSON
  * @property {number} created - Unix timestamp ms
  * @property {number} modified - Unix timestamp ms
+ * @property {import('./open-link.js').DocumentLink|null} [link] - Share-link provenance (linked, read-only records only)
  */
 
 /**

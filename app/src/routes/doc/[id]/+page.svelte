@@ -13,6 +13,9 @@
 		if (doc) {
 			sessionStorage.setItem('waffle-active-doc', doc.id);
 			sessionStorage.setItem('waffle-active-json', doc.json);
+			// A linked (share-link) record stays read-only when reopened.
+			if (doc.link) sessionStorage.setItem('waffle-active-link', JSON.stringify(doc.link));
+			else sessionStorage.removeItem('waffle-active-link');
 		}
 		goto(`${base}/`, { replaceState: true });
 	});

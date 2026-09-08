@@ -367,6 +367,15 @@ let documentTabs = $state([]);
 
 /** @type {string} Human-readable document name */
 let documentName = $state('Untitled');
+/**
+ * Provenance of a document opened from a share link
+ * (specs/waffle_v4_document_model.md §7.1, `$lib/storage/open-link.js`
+ * `DocumentLink`): locator + resolved commit + content hash. Non-null ⇒ the
+ * document is READ-ONLY here — autosave and Ctrl+S are refused; `forkLinkedDocument`
+ * is the way to an editable copy. Null for every document of the user's own.
+ * @type {import('$lib/storage/open-link.js').DocumentLink | null}
+ */
+let documentLink = $state(null);
 /** v4 `document.id` (specs/waffle_v4_document_model.md §2.1): the document's
  *  own identity, independent of the storage record. Latched at open (minted
  *  once for legacy files) so every save in the session carries the same id. */
@@ -621,8 +630,15 @@ export async function initEngine() {
 		log('system', 'Engine ready (WASM loaded)');
 		initLoggerToasts();
 
+		// A route handoff in flight (/doc/[id], /open) is an EXPLICIT open;
+		// offering to restore some other document on top of it is wrong (and
+		// the /open route's freshly written linked record would otherwise be
+		// "the newest doc" — the dialog then sits over the read-only banner).
+		const handoffPending =
+			typeof sessionStorage !== 'undefined' && !!sessionStorage.getItem('waffle-active-doc');
+
 		// Check for auto-save data (legacy localStorage)
-		if (typeof localStorage !== 'undefined') {
+		if (!handoffPending && typeof localStorage !== 'undefined') {
 			const saved = localStorage.getItem(AUTOSAVE_KEY);
 			const savedTime = localStorage.getItem(AUTOSAVE_TIME_KEY);
 			if (saved && savedTime) {
@@ -631,7 +647,7 @@ export async function initEngine() {
 		}
 
 		// If no localStorage restore found, check IndexedDB for most recently modified doc
-		if (!autoRestoreState) {
+		if (!handoffPending && !autoRestoreState) {
 			try {
 				const { getStore } = await import('$lib/storage/index.js');
 				const local = getStore();
@@ -1127,9 +1143,12 @@ export async function initEngine() {
 				documentName,
 				documentCreated,
 				documentDisplayUnit,
+				documentLink: documentLink ? JSON.parse(JSON.stringify(documentLink)) : null,
+				readOnly: documentLink?.readOnly === true,
 			}),
 			// Test/debug: the exact document JSON the save paths write.
 			buildDocumentJson: () => buildDocumentJson(),
+			forkLinkedDocument: () => forkLinkedDocument(),
 		};
 	}
 }
@@ -5485,6 +5504,9 @@ export function setDocumentDisplayUnit(unit) {
 
 export function getActiveDocId() { return activeDocId; }
 export function getActiveTabId() { return activeTabId; }
+export function getDocumentLink() { return documentLink; }
+/** True when the open document came from a share link and must not be saved over. */
+export function isDocumentReadOnly() { return documentLink?.readOnly === true; }
 export function getDocumentTabs() { return documentTabs; }
 export function getDocumentName() { return documentName; }
 export function setDocumentName(name) { documentName = name; projectName = name; }
@@ -5498,10 +5520,16 @@ export async function loadPendingDocument() {
 	if (typeof sessionStorage === 'undefined') return;
 	const pendingDocId = sessionStorage.getItem('waffle-active-doc');
 	const pendingJson = sessionStorage.getItem('waffle-active-json');
+	const pendingLink = sessionStorage.getItem('waffle-active-link');
 	if (!pendingDocId || !pendingJson) return;
 
 	sessionStorage.removeItem('waffle-active-doc');
 	sessionStorage.removeItem('waffle-active-json');
+	sessionStorage.removeItem('waffle-active-link');
+	let link = null;
+	if (pendingLink) {
+		try { link = JSON.parse(pendingLink); } catch { link = null; }
+	}
 
 	// Wait for engine if not ready yet
 	if (!engineReady) {
@@ -5515,7 +5543,10 @@ export async function loadPendingDocument() {
 
 	try {
 		const parsed = JSON.parse(pendingJson);
-		initDocumentState(pendingDocId, parsed);
+		// The handoff is the document the user asked for; drop any restore
+		// offer the bootstrap raced ahead with.
+		autoRestoreState = null;
+		initDocumentState(pendingDocId, parsed, link);
 		// Load the document into the engine — ALWAYS, even when the active tab
 		// is empty: the engine owns the document's `sources` table (v4 §2.3),
 		// which an empty tab can still belong to, and the Rust loader is the
@@ -5620,9 +5651,12 @@ export function renameTab(tabId, name) {
  * Called when loading a document from IndexedDB or creating a new one.
  * @param {string} docId
  * @param {object} parsed - Parsed v3 JSON
+ * @param {import('$lib/storage/open-link.js').DocumentLink | null} [link] -
+ *   share-link provenance; non-null makes the document read-only here.
  */
-export function initDocumentState(docId, parsed) {
+export function initDocumentState(docId, parsed, link = null) {
 	activeDocId = docId;
+	documentLink = link && link.readOnly ? link : null;
 	documentName = parsed.document?.name || 'Untitled';
 	projectName = documentName;
 	// v4 identity: adopt the file's document.id; a legacy (v1–v3) file has
@@ -5881,6 +5915,9 @@ const AUTOSAVE_DELAY_MS = 3000;
 
 function scheduleAutoSave() {
 	if (autoSaveTimer) clearTimeout(autoSaveTimer);
+	// A linked document is read-only: never write it back to storage (the
+	// linked record must keep the bytes fetched at `resolved.commit`).
+	if (documentLink?.readOnly) return;
 	autoSaveTimer = setTimeout(async () => {
 		autoSaveTimer = null;
 		try {
@@ -5935,6 +5972,10 @@ async function saveToProvider() {
  * @returns {Promise<boolean>}
  */
 export async function saveToStorage() {
+	if (documentLink?.readOnly) {
+		showToast('warning', 'This document is linked read-only — fork it to edit');
+		return false;
+	}
 	if (!activeDocId) {
 		// No active doc — fall back to file download
 		return !!(await saveProject());
@@ -5948,6 +5989,43 @@ export async function saveToStorage() {
 		showToast('error', `Save failed: ${err.message || err}`);
 		return false;
 	}
+}
+
+/**
+ * Fork a linked (read-only) document into the user's active storage
+ * (specs/waffle_v4_document_model.md §7.1): a copy with a NEW `document.id`
+ * and storage record, its `Relative` sources rewritten by the engine to
+ * absolute `Git` locators pinned at the commit the link was opened at
+ * (`RebaseSources`), and the link dropped — the fork is an ordinary,
+ * editable document from here on.
+ * @returns {Promise<string | null>} the new storage document id
+ */
+export async function forkLinkedDocument() {
+	if (!documentLink || !bridge || !engineReady) return null;
+	// Plain data for postMessage — `documentLink` is a Svelte $state proxy.
+	const link = JSON.parse(JSON.stringify(documentLink));
+	if (link.locator?.type === 'Git' && link.resolved?.commit) {
+		try {
+			await bridge.send({ type: 'RebaseSources', base: link.locator, commit: link.resolved.commit });
+		} catch (err) {
+			showToast('error', `Fork failed: ${err?.message || err}`);
+			return null;
+		}
+	}
+	const { generateDocId, getActiveProvider } = await import('$lib/storage/index.js');
+	documentId = generateUUID();
+	documentCreated = new Date().toISOString();
+	documentLink = null;
+	activeDocId = generateDocId();
+	try {
+		await saveToProvider();
+	} catch (err) {
+		showToast('error', `Fork failed: ${err?.message || err}`);
+		return null;
+	}
+	showToast('success', `Forked to ${getActiveProvider().label}`);
+	log('action', 'Forked linked document', { from: link.locator, docId: activeDocId });
+	return activeDocId;
 }
 
 /**

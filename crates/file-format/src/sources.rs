@@ -515,3 +515,69 @@ impl SourceEntry {
         out
     }
 }
+
+/// POSIX-join `dirname(base_path)/rel`, normalizing `.` and `..`. `None` when
+/// the result escapes the repository root or is empty.
+pub fn join_repo_path(base_path: &str, rel: &str) -> Option<String> {
+    let mut out: Vec<&str> = base_path.split('/').collect();
+    out.pop(); // the document's own file name
+    for seg in rel.split('/') {
+        match seg {
+            "" | "." => {}
+            ".." => {
+                out.pop()?;
+            }
+            s => out.push(s),
+        }
+    }
+    (!out.is_empty()).then(|| out.join("/"))
+}
+
+/// Fork-time rebase (`specs/waffle_v4_document_model.md` §7.1): a document
+/// opened from a `Git` locator `base` at `commit` is being copied into the
+/// user's own storage, where its `Relative` links would no longer resolve
+/// (§2.4: they resolve against the document's own location). Every
+/// `Relative` entry becomes an absolute `Git` locator in `base`'s repository,
+/// **pinned at `commit`** — the content the user saw — with `resolved`
+/// recorded. Entry ids are kept, so dependents survive (§2.3). Returns the
+/// ids rewritten; a non-`Git` base, or a relative path that escapes the
+/// repository, rewrites nothing.
+pub fn rebase_relative_sources(
+    entries: &mut [SourceEntry],
+    base: &Locator,
+    commit: &str,
+    at: DateTime<Utc>,
+) -> Vec<Uuid> {
+    let Locator::Git {
+        remote,
+        path: base_path,
+        host,
+        ..
+    } = base
+    else {
+        return Vec::new();
+    };
+    let mut rewritten = Vec::new();
+    for entry in entries.iter_mut() {
+        let Locator::Relative { path: rel } = &entry.locator else {
+            continue;
+        };
+        let Some(path) = join_repo_path(base_path, rel) else {
+            continue;
+        };
+        entry.locator = Locator::Git {
+            remote: normalize_remote(remote),
+            path,
+            git_ref: GitRef::Commit {
+                sha: commit.to_ascii_lowercase(),
+            },
+            host: *host,
+        };
+        entry.resolved = Some(Resolved {
+            commit: commit.to_ascii_lowercase(),
+            at,
+        });
+        rewritten.push(entry.id);
+    }
+    rewritten
+}

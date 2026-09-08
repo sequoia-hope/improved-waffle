@@ -185,6 +185,15 @@ pub enum UiToEngine {
         source_id: Uuid,
         data: String,
     },
+    /// Fork of a linked document (v4 §7.1): rewrite every `Relative` source
+    /// into an absolute `Git` locator in `base`'s repository, pinned at
+    /// `commit` (the commit the link was opened at), so the copy's links keep
+    /// resolving from the user's own storage. The UI mints the new
+    /// `document.id` and saves through `SaveDocument` afterwards.
+    RebaseSources {
+        base: file_format::Locator,
+        commit: String,
+    },
     /// Import a STEP file as a new ImportedBody feature (task #138). `data`
     /// is the raw STEP text from the file picker; the engine compresses it
     /// into the feature's embedded payload. Placement starts at identity —

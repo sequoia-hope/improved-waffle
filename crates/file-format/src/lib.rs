@@ -19,5 +19,8 @@ pub use save::{
     save_document, save_document_verified, save_project, save_project_verified, FORMAT_VERSION,
     MIN_READER_VERSION,
 };
-pub use sources::{Embed, GitHost, GitRef, Locator, Resolved, SourceEntry, SourceKind};
+pub use sources::{
+    join_repo_path, rebase_relative_sources, Embed, GitHost, GitRef, Locator, Resolved,
+    SourceEntry, SourceKind,
+};
 pub use step_export::export_step;

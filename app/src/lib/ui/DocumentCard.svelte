@@ -117,6 +117,9 @@
 			/>
 		{:else}
 			<span class="card-name">{doc.name}</span>
+			{#if doc.link}
+				<span class="linked-badge" data-testid="doc-linked-badge" title={`Linked (read-only) from ${doc.link.locator?.remote ?? doc.link.locator?.url ?? 'link'}`}>linked</span>
+			{/if}
 		{/if}
 		<span class="card-meta">
 			{doc.tabCount > 1 ? `${doc.tabCount} tabs` : ''}
@@ -126,6 +129,18 @@
 </button>
 
 <style>
+	.linked-badge {
+		margin-left: 6px;
+		padding: 1px 6px;
+		border-radius: 999px;
+		font-size: 10px;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		background: var(--bg-tertiary, #313244);
+		color: var(--warning, #f9e2af);
+		vertical-align: middle;
+	}
 	.document-card {
 		background: var(--bg-secondary, #313244);
 		border: 1px solid var(--border-color, #45475a);
