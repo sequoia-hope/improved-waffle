@@ -1,16 +1,22 @@
 <script>
-	import { getAllProviders, getActiveProvider, getActiveProviderId, setActiveProvider } from '$lib/storage/index.js';
+	import { getAllProviders, getActiveProvider, getActiveProviderId, setActiveProvider, unregisterProvider } from '$lib/storage/index.js';
+	import { removeGitProviderConfig } from '$lib/storage/providers.js';
 	import GitHubConnectDialog from './GitHubConnectDialog.svelte';
+	import GitHostConnectDialog from './GitHostConnectDialog.svelte';
 	import ThemeSwitcher from './ThemeSwitcher.svelte';
 
 	let { oncreate, onproviderchange } = $props();
 
 	let dropdownOpen = $state(false);
 	let githubDialogVisible = $state(false);
+	let gitDialogVisible = $state(false);
 
-	let providers = $derived(getAllProviders());
-	let activeId = $derived(getActiveProviderId());
-	let activeLabel = $derived(getActiveProvider()?.label ?? 'This Browser');
+	// The provider registry is plain module state (not reactive); bump `tick`
+	// after anything that changes it so the dropdown re-reads it.
+	let tick = $state(0);
+	let providers = $derived.by(() => { void tick; return getAllProviders(); });
+	let activeId = $derived.by(() => { void tick; return getActiveProviderId(); });
+	let activeLabel = $derived.by(() => { void tick; return getActiveProvider()?.label ?? 'This Browser'; });
 
 	function toggleDropdown() {
 		dropdownOpen = !dropdownOpen;
@@ -18,6 +24,7 @@
 
 	function selectProvider(id) {
 		setActiveProvider(id);
+		tick++;
 		dropdownOpen = false;
 		window.dispatchEvent(new CustomEvent('waffle-provider-changed', { detail: { id } }));
 		onproviderchange?.(id);
@@ -26,6 +33,22 @@
 	function openGitHubDialog() {
 		dropdownOpen = false;
 		githubDialogVisible = true;
+	}
+
+	function openGitDialog() {
+		dropdownOpen = false;
+		gitDialogVisible = true;
+	}
+
+	/** Forget a connected git repository (its host token is kept). */
+	function disconnectProvider(e, id) {
+		e.stopPropagation();
+		removeGitProviderConfig(id);
+		unregisterProvider(id);
+		tick++;
+		dropdownOpen = false;
+		window.dispatchEvent(new CustomEvent('waffle-provider-changed', { detail: { id: 'local' } }));
+		onproviderchange?.('local');
 	}
 
 	function handleClickOutside(e) {
@@ -69,6 +92,17 @@
 							{#if provider.id === activeId}
 								<span class="check-mark">&#10003;</span>
 							{/if}
+							{#if provider.id.startsWith('git:')}
+								<span
+									class="provider-remove"
+									role="button"
+									tabindex="0"
+									title="Disconnect this repository"
+									data-testid="provider-disconnect-{provider.id}"
+									onclick={(e) => disconnectProvider(e, provider.id)}
+									onkeydown={(e) => { if (e.key === 'Enter') disconnectProvider(e, provider.id); }}
+								>&times;</span>
+							{/if}
 						</button>
 					{/each}
 					<div class="provider-divider"></div>
@@ -78,6 +112,13 @@
 						onclick={openGitHubDialog}
 					>
 						Connect GitHub...
+					</button>
+					<button
+						class="provider-item connect-item"
+						data-testid="provider-connect-git"
+						onclick={openGitDialog}
+					>
+						Connect GitLab / Gitea repository...
 					</button>
 				</div>
 			{/if}
@@ -89,19 +130,37 @@
 	</div>
 </header>
 
+<GitHostConnectDialog
+	visible={gitDialogVisible}
+	onclose={() => { gitDialogVisible = false; }}
+	onconnect={(cfg) => { tick++; onproviderchange?.(cfg.id); }}
+/>
+
 <GitHubConnectDialog
 	visible={githubDialogVisible}
 	onclose={() => { githubDialogVisible = false; }}
 	onconnect={(info) => {
 		githubDialogVisible = false;
+		tick++;
 		onproviderchange?.(info);
 	}}
 	ondisconnect={() => {
+		tick++;
 		onproviderchange?.('local');
 	}}
 />
 
 <style>
+	.provider-remove {
+		margin-left: auto;
+		padding: 0 6px;
+		opacity: 0.6;
+		cursor: pointer;
+	}
+	.provider-remove:hover {
+		opacity: 1;
+		color: var(--error, #f38ba8);
+	}
 	.home-header {
 		display: flex;
 		align-items: center;

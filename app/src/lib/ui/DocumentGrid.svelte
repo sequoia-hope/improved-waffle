@@ -1,7 +1,7 @@
 <script>
 	import DocumentCard from './DocumentCard.svelte';
 
-	let { documents = [], onselect, onrename, ondelete } = $props();
+	let { documents = [], onselect, onrename, ondelete, onshare = null } = $props();
 </script>
 
 {#if documents.length === 0}
@@ -15,7 +15,7 @@
 {:else}
 	<div class="document-grid" data-testid="document-grid">
 		{#each documents as doc, i (doc.id)}
-			<DocumentCard {doc} index={i} onclick={onselect} {onrename} {ondelete} />
+			<DocumentCard {doc} index={i} onclick={onselect} {onrename} {ondelete} {onshare} />
 		{/each}
 	</div>
 {/if}

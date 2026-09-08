@@ -4,6 +4,11 @@
  *
  *   resolveRef(remote, ref, token?)          → { commit }
  *   fetchBlob(remote, commit, path, token?)  → { text, blobSha }
+ * and, for storage providers (write-back, §7.3):
+ *   repoExists(remote, token?)               → boolean
+ *   getFile(remote, branch, path, token?)    → { text, sha } | null
+ *   putFile(remote, branch, path, text, message, token?, existingSha?) → { sha }
+ *   deleteFile(remote, branch, path, message, token?, existingSha?)
  *
  * `ref` is a `GitRef` (`{type:'Commit', sha}` | `{type:'Branch', name}` |
  * `{type:'Tag', name}`). Content is always fetched at a RESOLVED commit, never
@@ -42,6 +47,11 @@ export function encodeUtf8Base64(text) {
 	let bin = '';
 	for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
 	return btoa(bin);
+}
+
+/** A repo path as URL segments. @param {string} path */
+function encodePath(path) {
+	return path.split('/').map(encodeURIComponent).join('/');
 }
 
 /** The ref name/sha a host API wants in a URL. @param {any} ref */
@@ -124,6 +134,45 @@ const github = {
 		});
 		if (!raw.ok) throw await failFor(raw, `fetch ${path} (raw) from ${remote}`);
 		return { text: await raw.text(), blobSha: data?.sha ? String(data.sha).toLowerCase() : null };
+	},
+	// --- write-back (storage providers, §7.3) ---
+	async repoExists(remote, token) {
+		const { api, repo } = this.apiBase(remote);
+		const res = await doFetch(`${api}/repos/${repo}`, { headers: this.headers(token) });
+		if (res.status === 404) return false;
+		if (!res.ok) throw await failFor(res, `check ${remote}`);
+		return true;
+	},
+	async getFile(remote, branch, path, token) {
+		const { api, repo } = this.apiBase(remote);
+		const url = `${api}/repos/${repo}/contents/${encodePath(path)}?ref=${encodeURIComponent(branch)}`;
+		const res = await doFetch(url, { headers: this.headers(token) });
+		if (res.status === 404) return null;
+		if (!res.ok) throw await failFor(res, `read ${path} on ${remote}`);
+		const data = await res.json();
+		return { text: decodeBase64Utf8(data.content), sha: String(data.sha).toLowerCase() };
+	},
+	async putFile(remote, branch, path, text, message, token, existingSha = null) {
+		const { api, repo } = this.apiBase(remote);
+		const body = { message, content: encodeUtf8Base64(text), branch };
+		if (existingSha) body.sha = existingSha;
+		const res = await doFetch(`${api}/repos/${repo}/contents/${encodePath(path)}`, {
+			method: 'PUT',
+			headers: { ...this.headers(token), 'Content-Type': 'application/json' },
+			body: JSON.stringify(body)
+		});
+		if (!res.ok) throw await failFor(res, `write ${path} on ${remote}`);
+		const data = await res.json().catch(() => ({}));
+		return { sha: data?.content?.sha ? String(data.content.sha).toLowerCase() : null };
+	},
+	async deleteFile(remote, branch, path, message, token, existingSha) {
+		const { api, repo } = this.apiBase(remote);
+		const res = await doFetch(`${api}/repos/${repo}/contents/${encodePath(path)}`, {
+			method: 'DELETE',
+			headers: { ...this.headers(token), 'Content-Type': 'application/json' },
+			body: JSON.stringify({ message, sha: existingSha, branch })
+		});
+		if (!res.ok && res.status !== 404) throw await failFor(res, `delete ${path} on ${remote}`);
 	}
 };
 
@@ -162,6 +211,42 @@ const gitlab = {
 		const data = await res.json();
 		if (typeof data?.content !== 'string') throw new GitHostError('fetch: no content', 'api_error');
 		return { text: decodeBase64Utf8(data.content), blobSha: data.blob_id ? String(data.blob_id).toLowerCase() : null };
+	},
+	// --- write-back (storage providers, §7.3) ---
+	async repoExists(remote, token) {
+		const { api } = this.apiBase(remote);
+		const res = await doFetch(api, { headers: this.headers(token) });
+		if (res.status === 404) return false;
+		if (!res.ok) throw await failFor(res, `check ${remote}`);
+		return true;
+	},
+	async getFile(remote, branch, path, token) {
+		const { api } = this.apiBase(remote);
+		const url = `${api}/repository/files/${encodeURIComponent(path)}?ref=${encodeURIComponent(branch)}`;
+		const res = await doFetch(url, { headers: this.headers(token) });
+		if (res.status === 404) return null;
+		if (!res.ok) throw await failFor(res, `read ${path} on ${remote}`);
+		const data = await res.json();
+		return { text: decodeBase64Utf8(data.content), sha: data.blob_id ? String(data.blob_id).toLowerCase() : 'exists' };
+	},
+	async putFile(remote, branch, path, text, message, token, existingSha = null) {
+		const { api } = this.apiBase(remote);
+		const res = await doFetch(`${api}/repository/files/${encodeURIComponent(path)}`, {
+			method: existingSha ? 'PUT' : 'POST',
+			headers: { ...this.headers(token), 'Content-Type': 'application/json' },
+			body: JSON.stringify({ branch, content: text, commit_message: message })
+		});
+		if (!res.ok) throw await failFor(res, `write ${path} on ${remote}`);
+		return { sha: null };
+	},
+	async deleteFile(remote, branch, path, message, token) {
+		const { api } = this.apiBase(remote);
+		const res = await doFetch(`${api}/repository/files/${encodeURIComponent(path)}`, {
+			method: 'DELETE',
+			headers: { ...this.headers(token), 'Content-Type': 'application/json' },
+			body: JSON.stringify({ branch, commit_message: message })
+		});
+		if (!res.ok && res.status !== 404) throw await failFor(res, `delete ${path} on ${remote}`);
 	}
 };
 
@@ -214,6 +299,45 @@ const gitea = {
 		const data = await res.json();
 		if (typeof data?.content !== 'string') throw new GitHostError('fetch: no content', 'api_error');
 		return { text: decodeBase64Utf8(data.content), blobSha: data.sha ? String(data.sha).toLowerCase() : null };
+	},
+	// --- write-back (storage providers, §7.3) ---
+	async repoExists(remote, token) {
+		const { api } = this.apiBase(remote);
+		const res = await doFetch(api, { headers: this.headers(token) });
+		if (res.status === 404) return false;
+		if (!res.ok) throw await failFor(res, `check ${remote}`);
+		return true;
+	},
+	async getFile(remote, branch, path, token) {
+		const { api } = this.apiBase(remote);
+		const url = `${api}/contents/${encodePath(path)}?ref=${encodeURIComponent(branch)}`;
+		const res = await doFetch(url, { headers: this.headers(token) });
+		if (res.status === 404) return null;
+		if (!res.ok) throw await failFor(res, `read ${path} on ${remote}`);
+		const data = await res.json();
+		return { text: decodeBase64Utf8(data.content), sha: String(data.sha).toLowerCase() };
+	},
+	async putFile(remote, branch, path, text, message, token, existingSha = null) {
+		const { api } = this.apiBase(remote);
+		const body = { content: encodeUtf8Base64(text), message, branch };
+		if (existingSha) body.sha = existingSha;
+		const res = await doFetch(`${api}/contents/${encodePath(path)}`, {
+			method: existingSha ? 'PUT' : 'POST',
+			headers: { ...this.headers(token), 'Content-Type': 'application/json' },
+			body: JSON.stringify(body)
+		});
+		if (!res.ok) throw await failFor(res, `write ${path} on ${remote}`);
+		const data = await res.json().catch(() => ({}));
+		return { sha: data?.content?.sha ? String(data.content.sha).toLowerCase() : null };
+	},
+	async deleteFile(remote, branch, path, message, token, existingSha) {
+		const { api } = this.apiBase(remote);
+		const res = await doFetch(`${api}/contents/${encodePath(path)}`, {
+			method: 'DELETE',
+			headers: { ...this.headers(token), 'Content-Type': 'application/json' },
+			body: JSON.stringify({ message, sha: existingSha, branch })
+		});
+		if (!res.ok && res.status !== 404) throw await failFor(res, `delete ${path} on ${remote}`);
 	}
 };
 
@@ -229,6 +353,18 @@ const generic = {
 		);
 	},
 	async fetchBlob(remote) {
+		throw new GitHostError(`${remote}: no API adapter for this host`, 'unresolvable');
+	},
+	async repoExists(remote) {
+		throw new GitHostError(`${remote}: no API adapter for this host`, 'unresolvable');
+	},
+	async getFile(remote) {
+		throw new GitHostError(`${remote}: no API adapter for this host`, 'unresolvable');
+	},
+	async putFile(remote) {
+		throw new GitHostError(`${remote}: no API adapter for this host`, 'unresolvable');
+	},
+	async deleteFile(remote) {
 		throw new GitHostError(`${remote}: no API adapter for this host`, 'unresolvable');
 	}
 };

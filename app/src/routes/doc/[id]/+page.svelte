@@ -2,14 +2,22 @@
 	import { goto } from '$app/navigation';
 	import { base } from '$app/paths';
 	import { page } from '$app/stores';
-	import { getStore } from '$lib/storage/index.js';
+	import { getStore, getActiveProvider } from '$lib/storage/index.js';
 	import { onMount } from 'svelte';
 
 	const id = $derived($page.params.id);
 
 	onMount(async () => {
-		const store = getStore();
-		const doc = await store.get(id);
+		// The active provider first (a document listed on the home page comes
+		// from it), then the local store — the two are different stores.
+		const active = getActiveProvider();
+		let doc = null;
+		try {
+			doc = await active.get(id);
+		} catch {
+			doc = null;
+		}
+		if (!doc && active.id !== 'local') doc = await getStore().get(id);
 		if (doc) {
 			sessionStorage.setItem('waffle-active-doc', doc.id);
 			sessionStorage.setItem('waffle-active-json', doc.json);

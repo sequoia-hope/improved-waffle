@@ -9,6 +9,22 @@
 
 	let documents = $state([]);
 	let loading = $state(true);
+	/** Last share link produced (shown briefly; also copied to the clipboard). */
+	let shareNotice = $state('');
+	let canShare = $derived.by(() => { void documents; return !!getActiveProvider()?.canShare; });
+
+	async function handleShare(doc) {
+		const provider = getActiveProvider();
+		const url = await provider.getShareUrl?.(doc.id);
+		if (!url) return;
+		shareNotice = url;
+		try {
+			await navigator.clipboard.writeText(url);
+		} catch {
+			// Clipboard may be unavailable; the link is shown instead.
+		}
+		setTimeout(() => { if (shareNotice === url) shareNotice = ''; }, 8000);
+	}
 
 	onMount(async () => {
 		// Migrate legacy localStorage autosave (always to local provider)
@@ -102,17 +118,27 @@
 
 <div class="home-page" data-testid="home-page">
 	<HomeHeader oncreate={handleNewDocument} onproviderchange={handleProviderChange} />
+	{#if shareNotice}
+		<p class="share-notice" data-testid="share-notice">Share link copied: <code>{shareNotice}</code></p>
+	{/if}
 
 	{#if loading}
 		<div class="loading-area">
 			<p>Loading documents...</p>
 		</div>
 	{:else}
-		<DocumentGrid {documents} onselect={handleSelect} onrename={handleRename} ondelete={handleDelete} />
+		<DocumentGrid {documents} onselect={handleSelect} onrename={handleRename} ondelete={handleDelete} onshare={canShare ? handleShare : null} />
 	{/if}
 </div>
 
 <style>
+	.share-notice {
+		margin: 8px 32px 0;
+		font-size: 12px;
+		color: var(--text-secondary, #a6adc8);
+		word-break: break-all;
+	}
+
 	.home-page {
 		height: 100vh;
 		height: 100dvh;

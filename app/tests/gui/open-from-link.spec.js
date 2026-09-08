@@ -211,7 +211,7 @@ rawTest.describe('Open from link', () => {
 	});
 
 	rawTest("the GitHub provider's share URL is an /open locator link", async ({ page }) => {
-		await page.route('https://api.github.com/repos/acme/parts/contents/.waffle-index.json', (route) =>
+		await page.route('https://api.github.com/repos/acme/parts/contents/.waffle-index.json**', (route) =>
 			route.fulfill({
 				status: 200,
 				contentType: 'application/json',
