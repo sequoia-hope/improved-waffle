@@ -85,11 +85,11 @@ test.describe('extrude depth value edge cases', () => {
 		await depthInput.fill('42');
 
 		// Toggle some other options and verify depth unchanged
-		await waffle.page.locator('[data-testid="extrude-cut"]').check();
+		await waffle.page.locator('[data-testid="extrude-combine"]').selectOption('Cut');
 		const value = await depthInput.inputValue();
 		expect(value).toBe('42');
 
-		await waffle.page.locator('[data-testid="extrude-cut"]').uncheck();
+		await waffle.page.locator('[data-testid="extrude-combine"]').selectOption('Add');
 		const value2 = await depthInput.inputValue();
 		expect(value2).toBe('42');
 	});
@@ -148,7 +148,7 @@ test.describe('extrude depth stored in feature params', () => {
 		await clickExtrude(waffle.page);
 
 		await waffle.page.locator('[data-testid="extrude-depth"]').fill('10');
-		await waffle.page.locator('[data-testid="extrude-cut"]').check();
+		await waffle.page.locator('[data-testid="extrude-combine"]').selectOption('Cut');
 		await waffle.page.locator('[data-testid="extrude-apply"]').click();
 
 		try {
@@ -216,7 +216,7 @@ test.describe('extrude UI interaction order', () => {
 		await clickExtrude(waffle.page);
 
 		// Set up some options
-		await waffle.page.locator('[data-testid="extrude-cut"]').check();
+		await waffle.page.locator('[data-testid="extrude-combine"]').selectOption('Cut');
 		await waffle.page.locator('[data-testid="extrude-flip-direction"]').click();
 
 		// Switch to Through All and back to Blind
@@ -224,7 +224,7 @@ test.describe('extrude UI interaction order', () => {
 		await waffle.page.locator('[data-testid="extrude-depth-mode"]').selectOption('Blind');
 
 		// Cut and flip should still be set
-		await expect(waffle.page.locator('[data-testid="extrude-cut"]')).toBeChecked();
+		await expect(waffle.page.locator('[data-testid="extrude-combine"]')).toHaveValue('Cut');
 		await expect(waffle.page.locator('[data-testid="extrude-flip-direction"]')).toHaveText('Flipped');
 	});
 

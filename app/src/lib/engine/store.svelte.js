@@ -847,6 +847,7 @@ export async function initEngine() {
 			fetchSource: (id) => fetchSource(id),
 			getImportDialogState: () => importDialogState,
 			showImportDialogForEdit: (featureId) => showImportDialogForEdit(featureId),
+			showEditFeatureDialog: (featureId) => showEditFeatureDialog(featureId),
 			hideImportDialog: () => hideImportDialog(),
 			applyImportPlacement: (featureId, placement, opts) => applyImportPlacement(featureId, placement, opts),
 			cancelImportPlacement: () => cancelImportPlacement(),
@@ -7024,8 +7025,9 @@ export async function exportBodyStl(bodyId, name) {
 
 /**
  * Export the current model as a STEP AP203 file (browser download).
- * Sends ExportStep to engine, receives ExportReady { step_data },
- * and triggers download as 'model.step'.
+ * Sends ExportStep to engine, receives ExportReady { step_data, warnings },
+ * and triggers download as '<project>.step'. The export is the whole model:
+ * every live body of the part, or every placed instance of an open assembly.
  * @returns {Promise<boolean>} True if export succeeded
  */
 export async function exportStep() {
@@ -7034,6 +7036,12 @@ export async function exportStep() {
 	const response = await bridge.send({ type: 'ExportStep' });
 	if (response.type !== 'ExportReady' || !response.step_data) return false;
 	showToast('success', 'STEP exported');
+	// The engine reports what it left out (a mesh-backed imported body has no
+	// analytic geometry to write) — surface it rather than export silently.
+	for (const w of response.warnings ?? []) {
+		log('warn', `STEP export: ${w}`);
+		showToast('warning', `STEP export: ${w}`);
+	}
 
 	if (typeof document !== 'undefined') {
 		const blob = new Blob([response.step_data], { type: 'application/step' });

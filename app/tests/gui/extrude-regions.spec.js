@@ -5,7 +5,7 @@
  */
 import { test, expect } from './helpers/waffle-test.js';
 import { clickSketch, clickRectangle, clickFinishSketch, clickExtrude } from './helpers/toolbar.js';
-import { drawRectangle, orbitDrag } from './helpers/canvas.js';
+import { drawRectangle, getCanvasBounds } from './helpers/canvas.js';
 import {
 	waitForEntityCount,
 	waitForFeatureCount,
@@ -58,7 +58,19 @@ test.describe('extrude panel layout', () => {
 			return cam;
 		});
 
-		await orbitDrag(waffle.page, -100, 0, 100, 50);
+		// Orbit is the RIGHT button (CameraControls reserves LEFT for select /
+		// sketch tools; a left drag over the sketch here would PICK regions).
+		// Start off the sketch so the gesture is purely a camera one.
+		const bounds = await getCanvasBounds(waffle.page);
+		const sx = bounds.centerX - 300;
+		const sy = bounds.centerY - 200;
+		await waffle.page.mouse.move(sx, sy);
+		await waffle.page.mouse.down({ button: 'right' });
+		for (let i = 1; i <= 5; i++) {
+			await waffle.page.mouse.move(sx + 40 * i, sy + 20 * i);
+		}
+		await waffle.page.mouse.up({ button: 'right' });
+		await waffle.page.waitForTimeout(200);
 
 		const cameraAfter = await waffle.page.evaluate(() => {
 			const cam = window.__waffle.getCameraState();
@@ -180,7 +192,7 @@ test.describe('extrude region list', () => {
 		// Empty state should be visible with the correct text
 		const emptyState = waffle.page.locator('.region-empty');
 		await expect(emptyState).toBeVisible();
-		await expect(emptyState).toHaveText('No regions — click to pick faces');
+		await expect(emptyState).toHaveText('No regions — click sketch profiles or faces');
 	});
 
 	test('region list persists across field changes', async ({ waffle }) => {

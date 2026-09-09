@@ -123,7 +123,8 @@ pub trait Kernel {
         })
     }
 
-    /// Export a solid to STEP AP203 format string.
+    /// Export a solid as an ISO 10303-21 (STEP, AP214) text file. The
+    /// single-body form of [`Kernel::export_step_bodies`].
     fn export_step(
         &mut self,
         _solid: &KernelSolidHandle,
@@ -131,6 +132,21 @@ pub trait Kernel {
     ) -> Result<String, KernelError> {
         Err(KernelError::NotSupported {
             operation: "export_step".to_string(),
+        })
+    }
+
+    /// Export several solids into ONE STEP file, each named and optionally
+    /// placed — a multi-body part, or an assembly's leaf bodies at their
+    /// world placements. Geometry is written analytically (exact surfaces
+    /// and curves), never as a mesh. A body the kernel cannot write (a
+    /// mesh-backed imported body) is a typed `NotSupported` naming it.
+    fn export_step_bodies(
+        &mut self,
+        _bodies: &[StepExportBody],
+        _file_name: &str,
+    ) -> Result<String, KernelError> {
+        Err(KernelError::NotSupported {
+            operation: "export_step_bodies".to_string(),
         })
     }
 
@@ -186,6 +202,25 @@ pub trait KernelIntrospect {
 
     /// Get the vertices at the ends of an edge.
     fn edge_vertices(&self, edge: KernelId) -> (KernelId, KernelId);
+
+    /// The edge's geometry as a 3D polyline from its start vertex to its end
+    /// vertex: two points for a straight edge; for a curved edge, its chord
+    /// samples at the kernel's render density (a closed circle edge is a
+    /// closed polyline whose last point repeats the first). This is what a
+    /// consumer must use for the FOOTPRINT of a face — the edge vertices
+    /// alone under-represent every curved edge, and a circular cap has a
+    /// single seam vertex (no footprint at all).
+    ///
+    /// The default derives the two endpoint positions from `edge_vertices`
+    /// and `compute_signature` — exact for straight edges, the chord for
+    /// curved ones. A kernel with curve sampling overrides it.
+    fn edge_polyline(&self, edge: KernelId) -> Vec<[f64; 3]> {
+        let (a, b) = self.edge_vertices(edge);
+        [a, b]
+            .into_iter()
+            .filter_map(|v| self.compute_signature(v, TopoKind::Vertex).centroid)
+            .collect()
+    }
 
     /// Get the faces sharing an edge or vertex with the given face.
     fn face_neighbors(&self, face: KernelId) -> Vec<KernelId>;

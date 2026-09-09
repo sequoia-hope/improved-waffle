@@ -61,8 +61,8 @@ await page.waitForTimeout(500);
 await page.evaluate(() => window.__waffle.showExtrudeDialog());
 await page.waitForTimeout(300);
 
-// Check cut checkbox
-await page.locator('[data-testid="extrude-cut"]').click();
+// Choose the Cut combine mode
+await page.locator('[data-testid="extrude-combine"]').selectOption('Cut');
 await page.waitForTimeout(200);
 
 console.log('About to apply cut extrude...');

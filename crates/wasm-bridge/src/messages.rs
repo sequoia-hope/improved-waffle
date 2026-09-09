@@ -421,8 +421,13 @@ pub enum EngineToUi {
         tabs: Vec<SourceTabInfo>,
     },
 
-    /// STEP export is ready.
-    ExportReady { step_data: String },
+    /// STEP export is ready. `warnings` names anything the export left out
+    /// (a mesh-backed imported body has no analytic geometry to write).
+    ExportReady {
+        step_data: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        warnings: Vec<String>,
+    },
 
     /// STL export is ready (base64-encoded binary STL).
     StlExportReady { stl_data: String },

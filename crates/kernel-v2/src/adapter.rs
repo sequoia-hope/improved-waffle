@@ -28,7 +28,7 @@
 //! | `fillet_edges` / `chamfer_edges` / `shell` | NOT SUPPORTED | deferred indefinitely (root CLAUDE.md) |
 //! | `tessellate` | SUPPORTED | `kernel_v2::validate_solid` + `kernel_v2::tessellate` (exact-rational, planar) → legacy `RenderMesh`; the tolerance argument is ignored (planar tessellation is exact) |
 //! | `extract_edges` | SUPPORTED | arena half-edge walk (canonical = lower-id twin) → legacy `EdgeRenderData` |
-//! | `export_step` | NOT SUPPORTED | trait default |
+//! | `export_step` / `export_step_bodies` | SUPPORTED | `kernel_v2::step_export::write_step` — ISO 10303-21 AP214 text, every surface and analytic curve written with its exact STEP counterpart (plane, cylinder, cone, sphere, torus; line, circle, ellipse, hyperbola), the M5 procedural surface-pair curve as its certified sample polyline; millimetres; per-body `RigidPlacement` (assembly export); a mesh-backed imported body → `NotSupported` naming it |
 //! | `list_faces` / `list_edges` / `list_vertices` | SUPPORTED | arena walk, tagged `KernelId` encoding |
 //! | `face_edges` / `edge_faces` / `edge_vertices` / `face_neighbors` | SUPPORTED | arena adjacency |
 //! | `compute_signature` / `compute_all_signatures` | SUPPORTED | planar face area/centroid/normal/bbox, edge length/centroid/bbox, vertex point |
@@ -60,7 +60,7 @@ use crate::{BrepArena, FaceId, HalfEdgeId, KernelV2Error, SolidId, Surface, Vert
 use cad_primitives::{BoolOp, Point2, Point3, Vector3};
 use waffle_types::kernel::{
     ClosedProfile, EdgeRange, EdgeRenderData, FaceRange, KernelError, KernelId, KernelSolidHandle,
-    RenderMesh, TopoKind, TopoSignature,
+    RenderMesh, StepExportBody, TopoKind, TopoSignature,
 };
 use waffle_types::kernel::{Kernel, KernelIntrospect};
 
@@ -736,6 +736,49 @@ impl Kernel for KernelV2Adapter {
         Ok(KernelSolidHandle::from_raw(raw))
     }
 
+    fn export_step(
+        &mut self,
+        solid: &KernelSolidHandle,
+        file_name: &str,
+    ) -> Result<String, KernelError> {
+        self.export_step_bodies(
+            &[StepExportBody {
+                handle: solid.clone(),
+                name: "Body".to_string(),
+                placement: None,
+            }],
+            file_name,
+        )
+    }
+
+    fn export_step_bodies(
+        &mut self,
+        bodies: &[StepExportBody],
+        file_name: &str,
+    ) -> Result<String, KernelError> {
+        let mut solids = Vec::with_capacity(bodies.len());
+        for b in bodies {
+            // A mesh-backed imported body never entered the exact arena;
+            // there is no analytic geometry to write (its own STEP text is
+            // the document's source). Loud, named — never a faceted stand-in.
+            if self.imported_slot_of(&b.handle).is_some() {
+                return Err(KernelError::NotSupported {
+                    operation: format!("export_step of the imported mesh-backed body `{}`", b.name),
+                });
+            }
+            solids.push(crate::step_export::StepSolid {
+                solid: self.solid_of(&b.handle)?,
+                name: b.name.clone(),
+                placement: b.placement.unwrap_or_default(),
+            });
+        }
+        crate::step_export::write_step(&self.arena, &solids, file_name).map_err(|e| {
+            KernelError::Other {
+                message: format!("STEP export: {e}"),
+            }
+        })
+    }
+
     fn tessellate(
         &mut self,
         solid: &KernelSolidHandle,
@@ -1406,6 +1449,29 @@ impl KernelIntrospect for KernelV2Adapter {
             return (KernelId(0), KernelId(0));
         };
         (encode_vertex(he.origin), encode_vertex(twin.origin))
+    }
+
+    fn edge_polyline(&self, edge: KernelId) -> Vec<[f64; 3]> {
+        let (tag, idx) = decode(edge);
+        if tag == TAG_IMPORTED_EDGE {
+            let (slot, ei) = decode_imported(idx);
+            return match self.imported.get(slot).and_then(|b| b.edges.get(ei)) {
+                Some(e) => e.polyline.clone(),
+                None => Vec::new(),
+            };
+        }
+        if tag != TAG_EDGE {
+            return Vec::new();
+        }
+        // The SAME per-curve sampler as `extract_edges` (the app's edge
+        // overlay), at the canonical render density, so a consumer's face
+        // footprint and the rendered seams agree.
+        let n_seg =
+            crate::tessellate::circle_segment_count(crate::tessellate::RENDER_CHORD_TOLERANCE_REL);
+        match crate::introspect::edge_polyline(&self.arena, HalfEdgeId(idx), n_seg) {
+            Ok(pl) => pl.iter().map(|p| p.as_array()).collect(),
+            Err(_) => Vec::new(),
+        }
     }
 
     fn face_neighbors(&self, face: KernelId) -> Vec<KernelId> {

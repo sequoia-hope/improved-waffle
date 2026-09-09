@@ -1359,21 +1359,18 @@ fn point_pair_hv_constraints_roundtrip() {
     );
 }
 
-// ── M4: STEP export — the NotSupported boundary ────────────────────────
+// ── STEP export through a kernel WITHOUT it ────────────────────────────
 //
-// `make_rebuild_compatible_tree` and the `export_step` import above were left
-// orphaned when this section's tests were removed: the fixture built a tree
-// nothing exported, and clippy flagged both as dead. Rather than delete the
-// residue, this pins the contract the module documents — kernel-v2 has no STEP
-// export, so the trait default returns NotSupported and `export_step` surfaces
-// it as `StepExportFailed` (root CLAUDE.md lists STEP export as a capability
-// boundary, not a bug).
-//
-// When STEP export lands, this test FAILS — which is the point. Replace it with
-// a real round-trip assertion at that time; do not relax it.
+// kernel-v2 implements STEP export (2026-09-08: `kernel_v2::step_export`,
+// analytic AP214; the semantic oracle is the truck round trip in
+// `wasm-bridge/tests/step_export_roundtrip.rs`). `MockKernel` deliberately
+// keeps the trait default, so this pins how the file-format layer surfaces a
+// kernel's missing capability: the trait's NotSupported must reach the
+// caller as `StepExportFailed` naming it — never as `NoSolid` (which would
+// mean the rebuild produced no body, an unrelated failure).
 
 #[test]
-fn step_export_reports_the_kernel_capability_gap_loudly() {
+fn step_export_through_a_kernel_without_it_names_the_missing_capability() {
     use waffle_types::kernel::MockKernel;
 
     let tree = make_rebuild_compatible_tree();
@@ -1396,8 +1393,8 @@ fn step_export_reports_the_kernel_capability_gap_loudly() {
         }
         Err(other) => panic!("unexpected export error: {other:?}"),
         Ok(_) => panic!(
-            "STEP export unexpectedly SUCCEEDED — if the kernel gained STEP support, \
-             replace this test with a real round-trip assertion"
+            "MockKernel's trait-default export_step unexpectedly SUCCEEDED — this \
+             test pins the NotSupported surfacing path, not kernel-v2's export"
         ),
     }
 }

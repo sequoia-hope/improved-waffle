@@ -4,7 +4,7 @@ use file_format::{
     git_blob_sha1, Embed, ProjectMetadata, SourceEntry, SourceKind, TabKind, WaffleDocument,
 };
 use modeling_ops::KernelBundle;
-use waffle_types::kernel::RenderMesh;
+use waffle_types::kernel::{RenderMesh, RigidPlacement, StepExportBody};
 use waffle_types::OutputKey;
 
 use crate::engine_state::{BridgeError, EngineState};
@@ -536,19 +536,24 @@ fn handle_message(
         }
 
         UiToEngine::ExportStep => {
-            let handle = find_last_solid_handle(state);
-            match handle {
-                Some(handle) => {
-                    let step_data = kb.export_step(&handle, "waffle_export.step").map_err(|e| {
-                        BridgeError::Engine(feature_engine::types::EngineError::RebuildFailed {
-                            feature_name: "STEP export".to_string(),
-                            reason: format!("{}", e),
-                        })
-                    })?;
-                    Ok(EngineToUi::ExportReady { step_data })
-                }
-                None => Err(BridgeError::NoMeshData),
+            // Whole model: every live body of the part — or, with an assembly
+            // open, every rendered instance's bodies at their world
+            // placements (a flat multi-body file) — written analytically.
+            let (bodies, warnings) = step_export_bodies(state);
+            if bodies.is_empty() {
+                return Err(BridgeError::NoMeshData);
             }
+            let file_name = format!("{}.step", state.project_name);
+            let step_data = kb.export_step_bodies(&bodies, &file_name).map_err(|e| {
+                BridgeError::Engine(feature_engine::types::EngineError::RebuildFailed {
+                    feature_name: "STEP export".to_string(),
+                    reason: format!("{}", e),
+                })
+            })?;
+            Ok(EngineToUi::ExportReady {
+                step_data,
+                warnings,
+            })
         }
 
         // -- Gear generation (stateless) --
@@ -821,23 +826,92 @@ fn model_updated_response(state: &EngineState) -> EngineToUi {
     }
 }
 
-/// Find the last active feature's solid handle by iterating features in reverse.
-fn find_last_solid_handle(state: &EngineState) -> Option<waffle_types::kernel::KernelSolidHandle> {
-    let tree = &state.engine.tree;
-    let limit = tree.active_index.unwrap_or(tree.features.len());
-    for feature in tree.features[..limit].iter().rev() {
-        if feature.suppressed {
-            continue;
-        }
-        if let Some(result) = state.engine.feature_results.get(&feature.id) {
-            for (key, body) in &result.outputs {
-                if *key == OutputKey::Main {
-                    return Some(body.handle.clone());
-                }
+/// The bodies a whole-model STEP export writes, with what it leaves out.
+///
+/// A Part: every solid output (`Main` / `Body{}`) of every non-suppressed,
+/// non-consumed feature up to the rollback bar, at identity. An open
+/// assembly: the same for each rendered leaf's part engine, placed by the
+/// leaf's solved world transform and named `instance / feature`. A
+/// mesh-backed imported body has no analytic geometry to write and is
+/// reported in `warnings` rather than faceted or silently dropped.
+fn step_export_bodies(state: &EngineState) -> (Vec<StepExportBody>, Vec<String>) {
+    let mut bodies = Vec::new();
+    let mut warnings = Vec::new();
+    match &state.assembly {
+        Some(view) => {
+            for leaf in &view.leaves {
+                let (_, engine) = &view.parts[leaf.part];
+                let prefix = view.leaf_name(&leaf.path);
+                let placement = rigid_placement_of(&leaf.transform);
+                collect_step_bodies(engine, &prefix, Some(placement), &mut bodies, &mut warnings);
             }
         }
+        None => collect_step_bodies(&state.engine, "", None, &mut bodies, &mut warnings),
     }
-    None
+    (bodies, warnings)
+}
+
+fn collect_step_bodies(
+    engine: &feature_engine::Engine,
+    prefix: &str,
+    placement: Option<RigidPlacement>,
+    out: &mut Vec<StepExportBody>,
+    warnings: &mut Vec<String>,
+) {
+    let tree = &engine.tree;
+    let limit = tree.active_index.unwrap_or(tree.features.len());
+    for feature in &tree.features[..limit] {
+        if feature.suppressed || engine.consumed_features.contains(&feature.id) {
+            continue;
+        }
+        let Some(result) = engine.feature_results.get(&feature.id) else {
+            continue;
+        };
+        let solids: Vec<(&OutputKey, &modeling_ops::BodyOutput)> = result
+            .outputs
+            .iter()
+            .filter(|(k, _)| matches!(k, OutputKey::Main | OutputKey::Body { .. }))
+            .map(|(k, b)| (k, b))
+            .collect();
+        if solids.is_empty() {
+            continue;
+        }
+        let name = if prefix.is_empty() {
+            feature.name.clone()
+        } else {
+            format!("{prefix} / {}", feature.name)
+        };
+        if matches!(feature.operation, Operation::ImportedBody { .. }) {
+            warnings.push(format!(
+                "`{name}` is a mesh-backed imported body and was not written \
+                 (its own STEP text is the document's source)"
+            ));
+            continue;
+        }
+        for (key, body) in solids {
+            let body_name = match key {
+                OutputKey::Body { index } => format!("{name} / Body {index}"),
+                _ => name.clone(),
+            };
+            out.push(StepExportBody {
+                handle: body.handle.clone(),
+                name: body_name,
+                placement,
+            });
+        }
+    }
+}
+
+/// An assembly placement as the kernel's rigid motion (rotation columns =
+/// the transformed basis vectors).
+fn rigid_placement_of(t: &feature_engine::assembly::Transform) -> RigidPlacement {
+    let x = t.apply_dir([1.0, 0.0, 0.0]);
+    let y = t.apply_dir([0.0, 1.0, 0.0]);
+    let z = t.apply_dir([0.0, 0.0, 1.0]);
+    RigidPlacement {
+        translation: t.translation_m,
+        rotation: [[x[0], y[0], z[0]], [x[1], y[1], z[1]], [x[2], y[2], z[2]]],
+    }
 }
 
 /// Find the last active feature's mesh data by iterating features in reverse.

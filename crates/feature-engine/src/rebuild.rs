@@ -1792,18 +1792,19 @@ fn body_face_shares_sketch(
         if !crate::share_a_face::plane_coincident(s_o, s_n, fnorm, fc) {
             continue;
         }
+        // The face's footprint is its BOUNDARY GEOMETRY, not its vertex set:
+        // a curved edge's vertices under-represent it, and a circular cap has
+        // a single seam vertex — with vertices alone such a face never
+        // reached three points and a cut sketched on a cylinder cap found no
+        // target ("Cut requires at least one target body").
         let mut pts2d: Vec<[f64; 2]> = Vec::new();
         for edge in intro.face_edges(face) {
-            let (v0, v1) = intro.edge_vertices(edge);
-            for v in [v0, v1] {
-                let vs = intro.compute_signature(v, TopoKind::Vertex);
-                if let Some(p) = vs.centroid {
-                    let d = [p[0] - s_o[0], p[1] - s_o[1], p[2] - s_o[2]];
-                    pts2d.push([
-                        d[0] * x_axis[0] + d[1] * x_axis[1] + d[2] * x_axis[2],
-                        d[0] * y_axis[0] + d[1] * y_axis[1] + d[2] * y_axis[2],
-                    ]);
-                }
+            for p in intro.edge_polyline(edge) {
+                let d = [p[0] - s_o[0], p[1] - s_o[1], p[2] - s_o[2]];
+                pts2d.push([
+                    d[0] * x_axis[0] + d[1] * x_axis[1] + d[2] * x_axis[2],
+                    d[0] * y_axis[0] + d[1] * y_axis[1] + d[2] * y_axis[2],
+                ]);
             }
         }
         if pts2d.len() >= 3 {

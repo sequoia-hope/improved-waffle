@@ -318,6 +318,58 @@ impl<'de> Deserialize<'de> for KernelId {
     }
 }
 
+/// A rigid motion `p' = R·p + t` in meters: an assembly instance's world
+/// placement applied to a body at export (`Kernel::export_step_bodies`).
+/// `rotation` is row-major, orthonormal, determinant +1.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RigidPlacement {
+    pub translation: [f64; 3],
+    pub rotation: [[f64; 3]; 3],
+}
+
+impl RigidPlacement {
+    pub const IDENTITY: RigidPlacement = RigidPlacement {
+        translation: [0.0; 3],
+        rotation: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+    };
+
+    /// Apply to a point (rotation, then translation).
+    pub fn apply(&self, p: [f64; 3]) -> [f64; 3] {
+        let r = self.apply_dir(p);
+        [
+            r[0] + self.translation[0],
+            r[1] + self.translation[1],
+            r[2] + self.translation[2],
+        ]
+    }
+
+    /// Apply the rotation only (directions).
+    pub fn apply_dir(&self, v: [f64; 3]) -> [f64; 3] {
+        let m = &self.rotation;
+        [
+            m[0][0] * v[0] + m[0][1] * v[1] + m[0][2] * v[2],
+            m[1][0] * v[0] + m[1][1] * v[1] + m[1][2] * v[2],
+            m[2][0] * v[0] + m[2][1] * v[1] + m[2][2] * v[2],
+        ]
+    }
+}
+
+impl Default for RigidPlacement {
+    fn default() -> Self {
+        Self::IDENTITY
+    }
+}
+
+/// One body to write into a STEP file (`Kernel::export_step_bodies`): the
+/// solid, the name the file gives it, and its world placement (an assembly
+/// instance's pose; `None` = identity).
+#[derive(Debug, Clone)]
+pub struct StepExportBody {
+    pub handle: KernelSolidHandle,
+    pub name: String,
+    pub placement: Option<RigidPlacement>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -87,7 +87,7 @@ test.describe('Full-depth circular cut regression', () => {
 		// Step 4: Extrude cut with SAME depth (10) — full through-cut
 		await clickExtrude(waffle.page);
 		await waffle.page.locator('[data-testid="extrude-depth"]').fill('10');
-		await waffle.page.locator('[data-testid="extrude-cut"]').check();
+		await waffle.page.locator('[data-testid="extrude-combine"]').selectOption('Cut');
 		await waffle.page.locator('[data-testid="extrude-apply"]').click();
 		await waitForFeatureCount(waffle.page, 4, 30000);
 
@@ -142,7 +142,7 @@ test.describe('Full-depth circular cut regression', () => {
 		// Step 3: Extrude cut with HALF depth (5) — partial cut (baseline)
 		await clickExtrude(waffle.page);
 		await waffle.page.locator('[data-testid="extrude-depth"]').fill('5');
-		await waffle.page.locator('[data-testid="extrude-cut"]').check();
+		await waffle.page.locator('[data-testid="extrude-combine"]').selectOption('Cut');
 		await waffle.page.locator('[data-testid="extrude-apply"]').click();
 		await waitForFeatureCount(waffle.page, 4, 30000);
 
@@ -197,7 +197,7 @@ test.describe('Full-depth circular cut regression', () => {
 		// Full-depth cut
 		await clickExtrude(waffle.page);
 		await waffle.page.locator('[data-testid="extrude-depth"]').fill('10');
-		await waffle.page.locator('[data-testid="extrude-cut"]').check();
+		await waffle.page.locator('[data-testid="extrude-combine"]').selectOption('Cut');
 		await waffle.page.locator('[data-testid="extrude-apply"]').click();
 		await waitForFeatureCount(waffle.page, 4, 30000);
 

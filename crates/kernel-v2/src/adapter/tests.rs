@@ -651,3 +651,50 @@ fn boolean_subtract_offset_boxes() {
         "subtract volume {vol}, expected 0.784"
     );
 }
+
+/// `KernelIntrospect::edge_polyline` is CURVE-AWARE: a cylinder's rim circle
+/// (one seam vertex) samples to a closed `N + 1`-point chord polyline at the
+/// canonical render density, and the straight seam is its two endpoints. The
+/// engine's share-a-face footprint reads faces through this accessor — with
+/// vertices alone a circular cap had ONE point and a cut sketched on it found
+/// no target body.
+#[test]
+fn edge_polyline_samples_a_circle_rim_as_a_closed_chord_polyline() {
+    let mut adapter = KernelV2Adapter::new();
+    let face = stage_circle(&mut adapter, [0.0, 0.0, 0.0], (0.0, 0.0), 0.06);
+    let handle = adapter
+        .extrude_face(face, [0.0, 0.0, 1.0], 0.01)
+        .expect("cylinder");
+
+    let n_seg =
+        crate::tessellate::circle_segment_count(crate::tessellate::RENDER_CHORD_TOLERANCE_REL);
+    let mut closed_rims = 0;
+    let mut straight = 0;
+    for edge in adapter.list_edges(&handle) {
+        let pl = adapter.edge_polyline(edge);
+        if pl.len() == 2 {
+            straight += 1;
+            continue;
+        }
+        assert_eq!(
+            pl.len(),
+            n_seg as usize + 1,
+            "rim polyline at render density"
+        );
+        assert_eq!(
+            pl.first(),
+            pl.last(),
+            "a closed circle edge closes its polyline"
+        );
+        for p in &pl {
+            let r = (p[0] * p[0] + p[1] * p[1]).sqrt();
+            assert!((r - 0.06).abs() < 1e-12, "sample on the rim: r = {r}");
+        }
+        closed_rims += 1;
+    }
+    assert_eq!((closed_rims, straight), (2, 1), "two rims + the seam");
+    assert!(
+        adapter.edge_polyline(KernelId(0)).is_empty(),
+        "a non-edge id is empty"
+    );
+}

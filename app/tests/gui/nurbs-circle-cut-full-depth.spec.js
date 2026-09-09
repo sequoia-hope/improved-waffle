@@ -91,7 +91,7 @@ test.describe('NURBS circle full-depth cut', () => {
 		// Step 4: Extrude cut with SAME depth (10) — full through-cut
 		await clickExtrude(waffle.page);
 		await waffle.page.locator('[data-testid="extrude-depth"]').fill('10');
-		await waffle.page.locator('[data-testid="extrude-cut"]').check();
+		await waffle.page.locator('[data-testid="extrude-combine"]').selectOption('Cut');
 		await waffle.page.locator('[data-testid="extrude-apply"]').click();
 		try {
 			await waitForFeatureCount(waffle.page, 4, 30000);
@@ -159,7 +159,7 @@ test.describe('NURBS circle full-depth cut', () => {
 		// Step 3: Extrude cut with same depth (10) — full through-cut
 		await clickExtrude(waffle.page);
 		await waffle.page.locator('[data-testid="extrude-depth"]').fill('10');
-		await waffle.page.locator('[data-testid="extrude-cut"]').check();
+		await waffle.page.locator('[data-testid="extrude-combine"]').selectOption('Cut');
 		await waffle.page.locator('[data-testid="extrude-apply"]').click();
 		try {
 			await waitForFeatureCount(waffle.page, 4, 30000);

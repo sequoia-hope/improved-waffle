@@ -79,7 +79,7 @@ async function bearingRecess(page, { r0, depth0, ox, oy, r1, cutDepth }) {
 	// 3. PARTIAL-depth extrude-cut → blind recess.
 	await clickExtrude(page);
 	await page.locator('[data-testid="extrude-depth"]').fill(String(cutDepth));
-	await page.locator('[data-testid="extrude-cut"]').check();
+	await page.locator('[data-testid="extrude-combine"]').selectOption('Cut');
 	await page.locator('[data-testid="extrude-apply"]').click();
 	try {
 		await waitForFeatureCount(page, 4, 30000);

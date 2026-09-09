@@ -19,6 +19,7 @@
 		clearExtrudeTargets,
 		evaluateExpression
 	} from '$lib/engine/store.svelte.js';
+	import { untrack } from 'svelte';
 	import { showToast } from '$lib/ui/toast.svelte.js';
 	import { log } from '$lib/engine/logger.js';
 	import { displayToInternal, internalToDisplay, parseAndConvert, formatForInput, isPlainMeasurement, UNITS } from '$lib/units.js';
@@ -59,7 +60,26 @@
 	let regions = $derived(dialogState?.regions ?? []);
 	let availableSketches = $derived(dialogState?.availableSketches ?? []);
 
+	// Seed the dialog's local fields ONCE per dialog session — when it opens,
+	// or when it is re-opened for a different feature. Region picks, sketch
+	// changes and target picks REPLACE the store's dialog-state object
+	// (immutable updates); re-seeding on every replacement clobbered the
+	// user's in-progress choices — a combine changed to Cut snapped back to
+	// Add on the next region click (in edit mode, back to the persisted mode)
+	// and a typed depth reverted. Keyed on the session, not the object.
+	let seededSession = null;
 	$effect(() => {
+		if (!dialogState) {
+			seededSession = null;
+			return;
+		}
+		const session = dialogState.editingFeatureId ?? 'new';
+		if (seededSession === session) return;
+		seededSession = session;
+		untrack(() => seedFromDialogState(dialogState));
+	});
+
+	function seedFromDialogState(dialogState) {
 		if (dialogState) {
 			const ep = dialogState.editParams;
 			if (ep) {
@@ -101,7 +121,7 @@
 				flipDirection = false;
 			}
 		}
-	});
+	}
 
 	// Expression support: when the depth input is not a plain number it is
 	// treated as an expression over the design variables (mm-space: bare

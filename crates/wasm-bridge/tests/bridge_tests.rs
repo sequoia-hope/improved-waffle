@@ -1034,9 +1034,11 @@ fn dispatch_export_step_with_solid_reaches_kernel() {
         &mut kernel,
     );
 
-    // ExportStep should find the solid handle but MockKernel's export_step
-    // returns NotSupported (default trait impl). Verify we get a kernel error
-    // rather than a "no mesh data" error — proving dispatch found the solid.
+    // ExportStep should find the solid handle but MockKernel's
+    // export_step_bodies returns NotSupported (default trait impl; kernel-v2
+    // implements it — see tests/step_export_roundtrip.rs). Verify we get a
+    // kernel error rather than a "no mesh data" error — proving dispatch
+    // found the solid.
     let response = wasm_bridge::dispatch(&mut state, UiToEngine::ExportStep, &mut kernel);
     match &response {
         EngineToUi::Error { message, .. } => {
@@ -1413,11 +1415,12 @@ fn serde_roundtrip_project_loaded() {
 fn serde_roundtrip_export_ready() {
     let msg = EngineToUi::ExportReady {
         step_data: "ISO-10303-21;".to_string(),
+        warnings: vec![],
     };
     let json = serde_json::to_string(&msg).unwrap();
     assert!(json.contains("\"type\":\"ExportReady\""));
     let d: EngineToUi = serde_json::from_str(&json).unwrap();
-    if let EngineToUi::ExportReady { step_data } = d {
+    if let EngineToUi::ExportReady { step_data, .. } = d {
         assert!(step_data.contains("ISO"));
     } else {
         panic!("Expected ExportReady");

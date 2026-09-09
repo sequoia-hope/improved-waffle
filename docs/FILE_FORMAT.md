@@ -723,8 +723,10 @@ original text is kept for the record with a status line.
    `INTERFACES.md` describe v1, claim `#[serde(flatten)]` unknown-field
    preservation (never implemented), claim solved positions "are NOT stored"
    (they are — §10), claim STEP export works via ruststep/truck (the truck kernel
-   is deleted; kernel-v2's `export_step` returns `NotSupported`, surfaced as
-   `ExportError::StepExportFailed` — `crates/file-format/src/step_export.rs`).
+   is deleted; since 2026-09-08 kernel-v2 writes STEP itself —
+   `kernel_v2::step_export`, analytic AP214 — and a kernel without it surfaces
+   `NotSupported` as `ExportError::StepExportFailed`,
+   `crates/file-format/src/step_export.rs`).
    Last substantive update: initial commit `c2b6cb9d`.
 2. **`created` is destroyed on every save.** `buildDocumentJson` stamped
    `created: now` on every save. The storage envelope kept its own honest

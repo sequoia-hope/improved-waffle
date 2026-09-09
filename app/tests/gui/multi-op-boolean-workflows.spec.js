@@ -197,7 +197,7 @@ test.describe('multi-op boolean workflows', () => {
 
 		await clickExtrude(waffle.page);
 		await waffle.page.locator('[data-testid="extrude-depth"]').fill('3');
-		await waffle.page.locator('[data-testid="extrude-cut"]').check();
+		await waffle.page.locator('[data-testid="extrude-combine"]').selectOption('Cut');
 		await waffle.page.locator('[data-testid="extrude-apply"]').click();
 		try {
 			await waitForFeatureCount(waffle.page, 6, 30000);
@@ -241,7 +241,7 @@ test.describe('multi-op boolean workflows', () => {
 
 		await clickExtrude(waffle.page);
 		await waffle.page.locator('[data-testid="extrude-depth"]').fill('10');
-		await waffle.page.locator('[data-testid="extrude-cut"]').check();
+		await waffle.page.locator('[data-testid="extrude-combine"]').selectOption('Cut');
 		await waffle.page.locator('[data-testid="extrude-apply"]').click();
 		try {
 			await waitForFeatureCount(waffle.page, 4, 30000);
@@ -273,7 +273,7 @@ test.describe('multi-op boolean workflows', () => {
 
 		await clickExtrude(waffle.page);
 		await waffle.page.locator('[data-testid="extrude-depth"]').fill('10');
-		await waffle.page.locator('[data-testid="extrude-cut"]').check();
+		await waffle.page.locator('[data-testid="extrude-combine"]').selectOption('Cut');
 		await waffle.page.locator('[data-testid="extrude-apply"]').click();
 		try {
 			await waitForFeatureCount(waffle.page, 6, 30000);

@@ -87,7 +87,7 @@ test.describe('circle cut workflow', () => {
 		// Step 5: Extrude with cut enabled
 		await clickExtrude(waffle.page);
 		await waffle.page.locator('[data-testid="extrude-depth"]').fill('5');
-		await waffle.page.locator('[data-testid="extrude-cut"]').check();
+		await waffle.page.locator('[data-testid="extrude-combine"]').selectOption('Cut');
 		await waffle.page.locator('[data-testid="extrude-apply"]').click();
 		try { await waitForFeatureCount(waffle.page, 4, 15000); } catch {
 			await waffle.dumpState('ccw-circle-cut-extrude-failed');

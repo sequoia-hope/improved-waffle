@@ -122,7 +122,7 @@ fn save_document_writes_the_source_and_load_project_reads_it_back() {
 
     let json = save_document(&mut state, &mut kernel);
     let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
-    assert_eq!(parsed["version"], 4);
+    assert_eq!(parsed["version"], 5);
     assert_eq!(parsed["document"]["name"], "Doc");
     assert_eq!(parsed["sources"].as_array().unwrap().len(), 1);
     assert!(parsed["sources"][0]["embed"]["blob"].is_string(), "packed");

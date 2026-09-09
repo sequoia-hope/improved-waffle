@@ -4,13 +4,15 @@ use waffle_types::OutputKey;
 
 use crate::errors::ExportError;
 
-/// Export a feature tree to STEP AP203 format.
+/// Export a feature tree's final solid to STEP (ISO 10303-21).
 ///
 /// Rebuilds the model from scratch through the `Kernel` trait, then exports
-/// the final solid to a STEP string. Returns an error if the rebuild
-/// fails or produces no solid. NOTE: kernel-v2 does not implement STEP
-/// export yet — the trait-default `export_step` returns `NotSupported`,
-/// which surfaces here as `ExportError::StepExportFailed`.
+/// the last feature's `Main` body via `Kernel::export_step` (kernel-v2:
+/// `kernel_v2::step_export`, analytic AP214). Returns an error if the
+/// rebuild fails or produces no solid; a kernel without STEP export
+/// (`MockKernel`) surfaces its `NotSupported` as
+/// `ExportError::StepExportFailed`. The app's whole-model export (every live
+/// body, placed assembly instances) is the bridge's `ExportStep`.
 pub fn export_step(tree: &FeatureTree, kb: &mut dyn KernelBundle) -> Result<String, ExportError> {
     // Build an engine and rebuild
     let mut engine = feature_engine::Engine::new();

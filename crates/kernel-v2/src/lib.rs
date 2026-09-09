@@ -79,6 +79,7 @@ pub mod introspect;
 pub mod journal;
 pub mod profile;
 pub(crate) mod recover;
+pub mod step_export;
 pub mod tessellate;
 pub mod validate;
 
@@ -100,6 +101,7 @@ pub use euler::{
 pub use introspect::{extract_edges, extract_edges_with_chord_tolerance, face_plane, surface_area};
 pub use journal::{descendants, face_lineage, EvoKind, Evolution, FaceLineage, OpTag};
 pub use profile::{Profile, ProfileEdge, ProfileRegion};
+pub use step_export::{write_step, StepSolid};
 pub use tessellate::{
     circle_segment_count, surface_pair_interior_samples, tessellate,
     tessellate_with_chord_tolerance, FaceRange, RenderMesh, MIN_CIRCLE_SEGMENTS,

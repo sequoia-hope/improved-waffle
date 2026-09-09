@@ -56,11 +56,12 @@ They are ROADMAP ITEMS, not bugs:
   M8 (the only `NotSupported` boundary left in the corpus: F0064, F0072)
 - **Holed revolve profiles** and **arc/spline profiles without a chord
   polygon** — typed `NotSupported` at profile staging (no corpus case)
-- **STEP export** — trait-default NotSupported
 - **Fillet / chamfer / shell** — deferred indefinitely (see below)
 
 Everything else the roadmap once listed here has LANDED and is no longer a
-`NotSupported` boundary — revolve (KV6, incl. cones, tori, spheres, on-axis
+`NotSupported` boundary — STEP export (2026-09-08, `kernel_v2::step_export`:
+analytic AP214, multi-body and placed assembly export, truck round-trip
+oracle in `wasm-bridge/tests/step_export_roundtrip.rs`), revolve (KV6, incl. cones, tori, spheres, on-axis
 lathe shapes and the apex cone as a boolean operand), cylinder×cylinder and
 other degree-4 SSI (M5 surface-pair curves, re-entering chained booleans
 since K11, 2026-09-04), gear/arc profiles. What remains for those families is

@@ -115,7 +115,7 @@ test.describe('sketch-on-face full workflow', () => {
 		// Extrude the face sketch as a cut
 		await clickExtrude(waffle.page);
 		await waffle.page.locator('[data-testid="extrude-depth"]').fill('5');
-		await waffle.page.locator('[data-testid="extrude-cut"]').check();
+		await waffle.page.locator('[data-testid="extrude-combine"]').selectOption('Cut');
 		await waffle.page.locator('[data-testid="extrude-apply"]').click();
 
 		await waitForFeatureCount(waffle.page, 4, 15000);

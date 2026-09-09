@@ -199,6 +199,11 @@ pub enum KernelV2Error {
     /// no retry, no tolerance fallback (P9/P10).
     BooleanFailed(String),
 
+    /// STEP export could not represent the solid (a surface-pair edge whose
+    /// certified sampling failed, a solid with no shell, a non-finite
+    /// coordinate, …). Loud: no partial file is ever produced.
+    StepExportFailed { reason: String },
+
     /// The boolean result is empty (e.g. intersection of disjoint solids).
     /// kernel-v2 has no empty solid; callers treat this as "no body".
     EmptyBooleanResult,

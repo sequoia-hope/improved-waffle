@@ -582,11 +582,12 @@ async function run() {
 			await depthInput2.fill('10');
 			await page.waitForTimeout(200);
 
-			// Check the Cut checkbox
-			const cutCheckbox = page.locator('[data-testid="extrude-cut"]');
-			if (await cutCheckbox.isVisible({ timeout: 1000 }).catch(() => false)) {
-				await cutCheckbox.check();
-				console.log('  Cut checkbox checked');
+			// Choose the Cut combine mode (the combine select replaced the old
+			// cut checkbox in the optional-booleans overhaul)
+			const combineSelect = page.locator('[data-testid="extrude-combine"]');
+			if (await combineSelect.isVisible({ timeout: 1000 }).catch(() => false)) {
+				await combineSelect.selectOption('Cut');
+				console.log('  Combine mode set to Cut');
 			}
 			await page.waitForTimeout(200);
 

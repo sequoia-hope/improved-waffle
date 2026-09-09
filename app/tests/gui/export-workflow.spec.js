@@ -2,6 +2,7 @@
  * Export workflow tests — save/load project, STL/STEP export.
  * Covers: saveProject, loadProject, exportStl, exportStep, graceful empty-model handling.
  */
+import fs from 'node:fs';
 import { test, expect } from './helpers/waffle-test.js';
 import { clickSketch, clickRectangle, clickFinishSketch, clickExtrude } from './helpers/toolbar.js';
 import { drawRectangle } from './helpers/canvas.js';
@@ -109,23 +110,27 @@ test.describe('export workflow', () => {
 		await expect(waffle.page.locator('canvas')).toBeVisible();
 	});
 
-	// QUARANTINED (STEP-EXPORT capability gap): kernel-v2's `export_step` is the
-	// trait-default NotSupported (root CLAUDE.md "Known capability boundaries";
-	// docs/FILE_FORMAT.md §14.1), so the bridge rejects with "operation not
-	// supported: export_step" — verified failing on a clean tree 2026-08-28,
-	// independent of any local change. The loud-error contract is pinned by
-	// `step_export_reports_the_kernel_capability_gap_loudly` in
-	// crates/file-format/tests/format_tests.rs. Un-fixme (grep STEP-EXPORT)
-	// when the kernel implements STEP export, and assert real STEP output then.
-	test.fixme('exportStep returns result for model with mesh', async ({ waffle }) => {
+	// STEP export landed 2026-09-08 (kernel-v2 `step_export`, analytic AP214;
+	// oracle: the truck round trip in wasm-bridge/tests/step_export_roundtrip.rs).
+	// The app's exportStep() triggers a download of the file the engine wrote;
+	// capture it and assert real STEP text, not just a truthy return.
+	test('exportStep downloads a STEP file for a model with a body', async ({ waffle }) => {
 		await createSketchAndExtrude(waffle);
+		await waitForMeshWithGeometry(waffle.page, 10000);
 
-		try { await waitForMeshWithGeometry(waffle.page, 10000); } catch {
-			await waffle.dumpState('export-step-mesh-wait-failed');
-		}
-
+		const downloadPromise = waffle.page.waitForEvent('download', { timeout: 15000 });
 		const result = await waffle.page.evaluate(() => window.__waffle.exportStep());
 		expect(result).toBeTruthy();
+
+		const download = await downloadPromise;
+		expect(download.suggestedFilename()).toMatch(/\.step$/);
+		const text = fs.readFileSync(await download.path(), 'utf8');
+		expect(text.startsWith('ISO-10303-21;')).toBe(true);
+		expect(text).toContain("FILE_SCHEMA(('AUTOMOTIVE_DESIGN");
+		expect(text).toContain('SI_UNIT(.MILLI.,.METRE.)');
+		expect(text).toContain('MANIFOLD_SOLID_BREP(');
+		expect(text).toContain('ADVANCED_FACE(');
+		expect(text.trim().endsWith('END-ISO-10303-21;')).toBe(true);
 
 		// Canvas should still be visible
 		await expect(waffle.page.locator('canvas')).toBeVisible();

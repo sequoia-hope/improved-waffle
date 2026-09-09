@@ -48,7 +48,7 @@ async function sketchAndExtrude(waffle, { plane = 'front', depth = '10', cut = f
 	await clickExtrude(waffle.page);
 	await waffle.page.locator('[data-testid="extrude-depth"]').fill(depth);
 	if (cut) {
-		await waffle.page.locator('[data-testid="extrude-cut"]').check();
+		await waffle.page.locator('[data-testid="extrude-combine"]').selectOption('Cut');
 	}
 	await waffle.page.locator('[data-testid="extrude-apply"]').click();
 	try { await waitForFeatureCount(waffle.page, 2, 10000); } catch {
@@ -92,7 +92,7 @@ async function sketchOnFaceAndExtrude(waffle, expectedFeaturesBefore, {
 	await clickExtrude(waffle.page);
 	await waffle.page.locator('[data-testid="extrude-depth"]').fill(depth);
 	if (cut) {
-		await waffle.page.locator('[data-testid="extrude-cut"]').check();
+		await waffle.page.locator('[data-testid="extrude-combine"]').selectOption('Cut');
 	}
 	await waffle.page.locator('[data-testid="extrude-apply"]').click();
 	try { await waitForFeatureCount(waffle.page, expectedFeaturesBefore + 2, 10000); } catch {
