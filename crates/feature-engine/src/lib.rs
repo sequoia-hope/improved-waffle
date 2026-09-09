@@ -1,5 +1,6 @@
 pub mod assembly;
 pub mod assembly_solver;
+pub mod connector;
 pub mod context;
 pub mod expr;
 pub mod opaque;

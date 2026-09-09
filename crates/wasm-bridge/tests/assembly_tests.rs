@@ -254,7 +254,7 @@ fn a_part_the_document_lacks_and_a_bad_face_are_loud_but_the_rest_renders() {
         status
             .errors
             .iter()
-            .any(|e| e.contains("face could not be resolved")),
+            .any(|e| e.contains("could not be derived from its geometry")),
         "{:?}",
         status.errors
     );
@@ -864,4 +864,362 @@ fn open_part_in_context_refuses_what_it_cannot_edit() {
         .find(|(id, _)| *id == sid2)
         .expect("self-scoped reference is an error");
     assert!(msg.contains("edited instance itself"), "{msg}");
+}
+
+// ── Connector frames from real curved geometry ──────────────────────────
+//
+// `specs/assembly_connector_frame_resolver.md` §3: the canonical mate — a pin
+// in a hole — must be authorable by picking the two CYLINDRICAL faces, which
+// Phase 3's planar-only resolver refused (and then silently replaced with a
+// default frame).
+
+/// A circle sketch of radius `r` centred on the world axis at height `z`,
+/// extruded `depth`. The bridge path a user's click-and-extrude takes.
+fn circle_extrude(
+    state: &mut EngineState,
+    kernel: &mut KernelV2Adapter,
+    (z, normal): (f64, [f64; 3]),
+    r: f64,
+    depth: f64,
+    combine: CombineMode,
+) {
+    dispatch(
+        state,
+        UiToEngine::BeginSketch {
+            plane: GeomRef {
+                kind: TopoKind::Face,
+                anchor: Anchor::Datum {
+                    datum_id: Uuid::new_v4(),
+                },
+                selector: Selector::Role {
+                    role: waffle_types::Role::EndCapPositive,
+                    index: 0,
+                },
+                policy: ResolvePolicy::BestEffort,
+                scope: None,
+            },
+        },
+        kernel,
+    );
+    let entities = vec![
+        waffle_types::SketchEntity::Point {
+            id: 1,
+            x: 0.0,
+            y: 0.0,
+            construction: true,
+        },
+        waffle_types::SketchEntity::Circle {
+            id: 2,
+            center_id: 1,
+            radius: r,
+            construction: false,
+        },
+    ];
+    for e in &entities {
+        dispatch(
+            state,
+            UiToEngine::AddSketchEntity { entity: e.clone() },
+            kernel,
+        );
+    }
+    let r_sketch = dispatch(
+        state,
+        UiToEngine::FinishSketch {
+            solved_positions: HashMap::from([(1, (0.0, 0.0))]),
+            solved_profiles: vec![waffle_types::ClosedProfile {
+                entity_ids: vec![2],
+                is_outer: true,
+                vertex_ids: vec![],
+                circle: Some(waffle_types::CircleProfile {
+                    center_u: 0.0,
+                    center_v: 0.0,
+                    radius: r,
+                }),
+                spline_segments: vec![],
+                arc_segments: vec![],
+            }],
+            plane_origin: [0.0, 0.0, z],
+            plane_normal: normal,
+            entities,
+            constraints: vec![],
+            projected: vec![],
+        },
+        kernel,
+    );
+    let EngineToUi::ModelUpdated { feature_tree, .. } = r_sketch else {
+        panic!("sketch")
+    };
+    let sketch_id = feature_tree.features.last().expect("sketch").id;
+    dispatch(
+        state,
+        UiToEngine::AddFeature {
+            operation: Operation::Extrude {
+                params: ExtrudeParams {
+                    sketch_id,
+                    profile_index: 0,
+                    profile_entity_ids: None,
+                    depth,
+                    depth_expr: None,
+                    direction: None,
+                    symmetric: false,
+                    cut: matches!(combine, CombineMode::Cut),
+                    merge: true,
+                    target_body: None,
+                    depth_mode: DepthMode::Blind,
+                    second_direction: None,
+                    region: None,
+                    regions: vec![],
+                    combine: Some(combine),
+                    targets: None,
+                },
+            },
+        },
+        kernel,
+    );
+    assert!(state.engine.errors.is_empty(), "{:?}", state.engine.errors);
+}
+
+/// The `GeomRef` the viewport mints for the cylindrical face of the smallest
+/// radius — a click on the bore of a washer, or on the barrel of a pin. Uses
+/// the same role-based selector `body_face_entries` builds.
+fn smallest_cylinder_face_ref(state: &EngineState, kernel: &KernelV2Adapter) -> (GeomRef, f64) {
+    use waffle_types::kernel::KernelIntrospect as _;
+    let mut best: Option<(GeomRef, f64)> = None;
+    for feature in &state.engine.tree.features {
+        let Some(res) = state.engine.feature_results.get(&feature.id) else {
+            continue;
+        };
+        for (id, role) in &res.provenance.role_assignments {
+            let Some(axis) = kernel.entity_axis(*id, TopoKind::Face) else {
+                continue;
+            };
+            let Some(radius) = axis.radius else { continue };
+            if best.as_ref().is_some_and(|(_, r)| *r <= radius) {
+                continue;
+            }
+            best = Some((
+                GeomRef {
+                    kind: TopoKind::Face,
+                    anchor: Anchor::FeatureOutput {
+                        feature_id: feature.id,
+                        output_key: OutputKey::Main,
+                    },
+                    selector: Selector::Role {
+                        role: role.clone(),
+                        index: 0,
+                    },
+                    policy: ResolvePolicy::BestEffort,
+                    scope: None,
+                },
+                radius,
+            ));
+        }
+    }
+    best.expect("the part has a cylindrical face with a role")
+}
+
+/// A washer (Ø20 × 4 mm) with a Ø6 mm bore drilled through it, and a
+/// Ø5 mm × 10 mm pin, mated Revolute by their two CYLINDRICAL faces: the pin
+/// lands on the bore's axis, centred in it, from wherever it started.
+///
+/// The bore is sketched below the washer and extruded past it, so no cap is
+/// coplanar with a washer cap (the M8 boundary) — the hole is a genuine
+/// drilled through-hole whose wall is a cavity-sense cylinder.
+#[test]
+fn a_revolute_mate_on_two_cylindrical_faces_puts_the_pin_on_the_bore_axis() {
+    let mut state = EngineState::new();
+    let mut kernel = KernelV2Adapter::new();
+
+    circle_extrude(
+        &mut state,
+        &mut kernel,
+        (0.0, [0.0, 0.0, 1.0]),
+        0.010,
+        0.004,
+        CombineMode::Add,
+    );
+    // The bore is sketched on the washer's top face (how the app records a
+    // sketch-on-face) and cut 2 mm PAST the bottom, so only the top cap is
+    // coplanar with the target — the ordinary drilled-through case.
+    circle_extrude(
+        &mut state,
+        &mut kernel,
+        (0.004, [0.0, 0.0, 1.0]),
+        0.003,
+        0.006,
+        CombineMode::Cut,
+    );
+    let (bore_ref, bore_r) = smallest_cylinder_face_ref(&state, &kernel);
+    assert!(
+        (bore_r - 0.003).abs() < 1e-9,
+        "the pick is the BORE wall, not the outer wall (r = {bore_r})"
+    );
+    let washer = state.engine.tree.clone();
+
+    dispatch(&mut state, UiToEngine::NewDocument, &mut kernel);
+    circle_extrude(
+        &mut state,
+        &mut kernel,
+        (0.0, [0.0, 0.0, 1.0]),
+        0.0025,
+        0.010,
+        CombineMode::Add,
+    );
+    let (pin_ref, pin_r) = smallest_cylinder_face_ref(&state, &kernel);
+    assert!(
+        (pin_r - 0.0025).abs() < 1e-9,
+        "the pin barrel (r = {pin_r})"
+    );
+    let pin = state.engine.tree.clone();
+    dispatch(&mut state, UiToEngine::NewDocument, &mut kernel);
+
+    let parts: HashMap<String, FeatureTree> =
+        HashMap::from([("washer".to_string(), washer), ("pin".to_string(), pin)]);
+
+    let w = instance("W", "washer", Transform::identity(), true);
+    // The pin starts translated and turned right off the axis.
+    let p = instance(
+        "P",
+        "pin",
+        Transform {
+            translation_m: [0.05, 0.02, 0.03],
+            rotation_quat: [0.382_683_432_365_09, 0.0, 0.0, 0.923_879_532_511_287],
+        },
+        false,
+    );
+    let (idw, idp) = (w.id, p.id);
+    let cw = connector("bore", idw, Some(bore_ref.clone()), Frame::default());
+    let cp = connector("barrel", idp, Some(pin_ref), Frame::default());
+    let (idcw, idcp) = (cw.id, cp.id);
+    let tree = AssemblyTree {
+        instances: vec![w, p],
+        connectors: vec![cw, cp],
+        mates: vec![Mate {
+            id: Uuid::new_v4(),
+            name: "hinge".into(),
+            kind: MateKind::Revolute { flip: false },
+            connectors: [idcw, idcp],
+            suppressed: false,
+            extra: Map::new(),
+        }],
+        placements: BTreeMap::new(),
+        extra: Map::new(),
+    };
+
+    let status = open(&mut state, &mut kernel, &tree, &parts);
+    assert!(
+        status.errors.is_empty(),
+        "a cylindrical pick is no longer an error: {:?}",
+        status.errors
+    );
+
+    // Both frames are reported, labelled by what they came from.
+    let frame_of = |id: Uuid| {
+        status
+            .connectors
+            .iter()
+            .find(|c| c.id == id)
+            .unwrap_or_else(|| panic!("connector {id} reported"))
+            .clone()
+    };
+    let bore = frame_of(idcw);
+    let barrel = frame_of(idcp);
+    assert_eq!(bore.kind.as_deref(), Some("cylindrical face"));
+    assert_eq!(barrel.kind.as_deref(), Some("cylindrical face"));
+
+    // The bore's frame: on the washer's axis, at mid-depth of the 4 mm wall.
+    assert!(
+        near3(bore.origin, [0.0, 0.0, 0.002], 1e-9),
+        "bore frame at mid-depth on the axis, got {:?}",
+        bore.origin
+    );
+    // Parallel to the washer's axis. The SENSE is the kernel's construction
+    // direction (this bore was drilled downward, so −Z); a cylinder has no
+    // preferred end, which is what the mate's `flip` is for.
+    assert!(
+        bore.z_axis[2].abs() > 1.0 - 1e-9 && bore.z_axis[0].abs() < 1e-9,
+        "bore axis along ±Z, got {:?}",
+        bore.z_axis
+    );
+
+    // What the mate is for: the pin's axis IS the bore's axis, and its
+    // connector origin coincides — the pin sits centred in the hole.
+    assert!(
+        near3(barrel.origin, bore.origin, 1e-6),
+        "the pin's frame moved onto the bore's, got {:?}",
+        barrel.origin
+    );
+    let dot: f64 = (0..3).map(|k| barrel.z_axis[k] * bore.z_axis[k]).sum();
+    assert!(
+        (dot.abs() - 1.0).abs() < 1e-6,
+        "the pin's axis is parallel to the bore's (dot = {dot})"
+    );
+}
+
+/// The pick is judged BEFORE a connector exists (§2.4): the app asks, and a
+/// pick that cannot derive a frame comes back refused with the resolver's own
+/// reason instead of minting a connector that resolves to a default frame.
+#[test]
+fn probe_connector_ref_accepts_a_cylindrical_pick_and_refuses_what_has_no_frame() {
+    let mut state = EngineState::new();
+    let mut kernel = KernelV2Adapter::new();
+
+    // Without an assembly open there is nothing to place a connector on.
+    let r = dispatch(
+        &mut state,
+        UiToEngine::ProbeConnectorRef {
+            instance_path: vec![Uuid::new_v4()],
+            geom_ref: cube_top_face(Uuid::new_v4(), None),
+        },
+        &mut kernel,
+    );
+    assert!(matches!(r, EngineToUi::Error { .. }), "{r:?}");
+
+    circle_extrude(
+        &mut state,
+        &mut kernel,
+        (0.0, [0.0, 0.0, 1.0]),
+        0.010,
+        0.004,
+        CombineMode::Add,
+    );
+    let (wall_ref, _) = smallest_cylinder_face_ref(&state, &kernel);
+    let part = state.engine.tree.clone();
+    dispatch(&mut state, UiToEngine::NewDocument, &mut kernel);
+
+    let parts: HashMap<String, FeatureTree> = HashMap::from([("part".to_string(), part)]);
+    let a = instance("A", "part", Transform::identity(), true);
+    let id = a.id;
+    let tree = AssemblyTree {
+        instances: vec![a],
+        connectors: Vec::new(),
+        mates: Vec::new(),
+        placements: BTreeMap::new(),
+        extra: Map::new(),
+    };
+    open(&mut state, &mut kernel, &tree, &parts);
+
+    let probe = |state: &mut EngineState, kernel: &mut KernelV2Adapter, geom_ref: GeomRef| {
+        let r = dispatch(
+            state,
+            UiToEngine::ProbeConnectorRef {
+                instance_path: vec![id],
+                geom_ref,
+            },
+            kernel,
+        );
+        match r {
+            EngineToUi::ConnectorRefProbed { ok, kind, reason } => (ok, kind, reason),
+            other => panic!("{other:?}"),
+        }
+    };
+
+    let (ok, kind, reason) = probe(&mut state, &mut kernel, wall_ref);
+    assert!(ok, "a cylindrical face carries a connector: {reason:?}");
+    assert_eq!(kind.as_deref(), Some("cylindrical face"));
+
+    // A reference into a feature this part does not have resolves to nothing.
+    let (ok, _, reason) = probe(&mut state, &mut kernel, cube_top_face(Uuid::new_v4(), None));
+    assert!(!ok, "an unresolvable pick is refused");
+    assert!(reason.is_some(), "with a reason the panel can show");
 }

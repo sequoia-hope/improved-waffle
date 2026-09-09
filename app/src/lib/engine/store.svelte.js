@@ -473,7 +473,7 @@ export async function initEngine() {
 		// Assembly evaluation (v4 Phase 3b): solved placements are derived
 		// hints written back into the tab so they are saved with it.
 		// Empty arrays are omitted on the wire; give the UI a stable shape.
-		assemblyStatus = msg.assembly ? { errors: [], warnings: [], parts: [], ...msg.assembly } : null;
+		assemblyStatus = msg.assembly ? { errors: [], warnings: [], parts: [], connectors: [], ...msg.assembly } : null;
 		// In-context editing (v4 Phase 3d-4): present while a Part is open in
 		// an assembly's context; the engine drops it on any tab switch.
 		editContext = msg.context ? { instances: [], errors: [], warnings: [], ...msg.context } : null;
@@ -833,6 +833,9 @@ export async function initEngine() {
 			removeInstance: (id) => removeInstance(id),
 			addConnector: (opts) => addConnector(opts),
 			removeConnector: (id) => removeConnector(id),
+			probeConnectorRef: (path, ref) => probeConnectorRef(path, ref),
+			getAssemblyConnectorFrames: () => JSON.parse(JSON.stringify(getAssemblyConnectorFrames())),
+			getConnectorRefusal: () => lastConnectorRefusal,
 			addMate: (opts) => addMate(opts),
 			updateMate: (id, patch) => updateMate(id, patch),
 			removeMate: (id) => removeMate(id),
@@ -5700,6 +5703,38 @@ export async function switchTab(tabId) {
 let assemblyStatus = $state(null);
 export function getAssemblyStatus() { return assemblyStatus; }
 
+/**
+ * Every mate connector's evaluated frame in WORLD coordinates —
+ * `{ id, kind, origin, x_axis, y_axis, z_axis }` — as the engine derived it
+ * from the parts' current geometry. What the viewport draws, so a connector's
+ * position and its z direction are visible instead of inferred from a `flip`
+ * checkbox. Empty unless an Assembly tab is open.
+ */
+export function getAssemblyConnectorFrames() {
+	return assemblyStatus?.connectors ?? [];
+}
+
+/**
+ * Can this pick carry a mate connector? Asks the engine (which answers from
+ * the already-evaluated assembly, no rebuild) BEFORE one is created — see
+ * `specs/assembly_connector_frame_resolver.md` §2.4. Returns
+ * `{ ok, kind, reason }`.
+ */
+export async function probeConnectorRef(instancePath, geomRef) {
+	if (!bridge || !engineReady) return { ok: false, reason: 'the engine is not ready' };
+	try {
+		const r = await bridge.send({
+			type: 'ProbeConnectorRef',
+			instance_path: [...instancePath],
+			geom_ref: JSON.parse(JSON.stringify(geomRef))
+		});
+		if (r?.type === 'ConnectorRefProbed') return { ok: !!r.ok, kind: r.kind ?? null, reason: r.reason ?? null };
+		return { ok: false, reason: r?.message ?? 'the engine could not judge this pick' };
+	} catch (err) {
+		return { ok: false, reason: err?.message || String(err) };
+	}
+}
+
 /** The active tab when it is an Assembly, else null. */
 function activeAssemblyTab() {
 	const tab = documentTabs.find(t => t.id === activeTabId);
@@ -5900,6 +5935,13 @@ async function refreshSourceTabs() {
 	sourceTabs = next;
 }
 
+/**
+ * Why the last connector pick was refused (`null` once one succeeds) — shown
+ * in the Assembly panel next to the pick button.
+ */
+let lastConnectorRefusal = $state(null);
+export function getConnectorRefusal() { return lastConnectorRefusal; }
+
 /** Mutate the open assembly's tree, then re-evaluate and autosave. */
 async function editAssembly(fn) {
 	const tab = activeAssemblyTab();
@@ -5965,10 +6007,25 @@ export async function removeInstance(instanceId) {
  * @returns {Promise<string|null>} the connector id
  */
 export async function addConnector({ instanceId = null, instancePath = null, geomRef = null, frame = null, name }) {
+	const path = instancePath?.length ? [...instancePath] : [instanceId];
+	// Judge the pick BEFORE minting a connector: a reference the engine cannot
+	// derive a frame from used to be accepted here and silently fall back to a
+	// default frame at solve time, placing the part against geometry the user
+	// never picked (`specs/assembly_connector_frame_resolver.md` §1).
+	if (geomRef) {
+		const probe = await probeConnectorRef(path, geomRef);
+		if (!probe.ok) {
+			const reason = probe.reason || 'this geometry cannot define a connector frame';
+			lastConnectorRefusal = reason;
+			log('warn', `Connector refused: ${reason}`);
+			showToast('error', `Cannot put a connector here — ${reason}`);
+			return null;
+		}
+		lastConnectorRefusal = null;
+	}
 	return editAssembly((asm) => {
 		const id = generateUUID();
 		asm.connectors = asm.connectors ?? [];
-		const path = instancePath?.length ? [...instancePath] : [instanceId];
 		const inst = asm.instances.find(i => i.id === path[0]);
 		asm.connectors.push({
 			id,

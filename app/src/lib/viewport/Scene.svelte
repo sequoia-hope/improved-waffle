@@ -15,6 +15,7 @@
 	import SketchInteraction from '$lib/sketch/SketchInteraction.svelte';
 	import DimensionLabels from '$lib/sketch/DimensionLabels.svelte';
 	import GhostPreview from './GhostPreview.svelte';
+	import ConnectorFrames from './ConnectorFrames.svelte';
 
 	// Enable raycaster-based interactivity for all child meshes
 	interactivity();
@@ -34,6 +35,7 @@
 <EdgeOverlay />
 <VertexOverlay />
 <GhostPreview />
+<ConnectorFrames />
 
 <SectionCap />
 

@@ -1970,35 +1970,7 @@ pub fn resolve_face_plane(
     introspect: &dyn waffle_types::kernel::KernelIntrospect,
 ) -> Result<([f64; 3], [f64; 3]), EngineError> {
     let resolved = resolve_with_fallback(base, feature_results)?;
-    let sig = introspect.compute_signature(resolved.kernel_id, TopoKind::Face);
-
-    match sig.surface_type.as_deref() {
-        Some("planar") => {}
-        other => {
-            return Err(EngineError::ResolutionFailed {
-                reason: format!(
-                    "Datum plane base face is not planar (surface_type: {})",
-                    other.unwrap_or("unknown")
-                ),
-            });
-        }
-    }
-
-    let normal = sig.normal.ok_or_else(|| EngineError::ResolutionFailed {
-        reason: "Datum plane base face has no normal".into(),
-    })?;
-    let origin = sig.centroid.ok_or_else(|| EngineError::ResolutionFailed {
-        reason: "Datum plane base face has no centroid".into(),
-    })?;
-
-    let len = (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
-    if len < TAU_WORK {
-        return Err(EngineError::ResolutionFailed {
-            reason: "Datum plane base face normal is zero-length".into(),
-        });
-    }
-    let n = [normal[0] / len, normal[1] / len, normal[2] / len];
-    Ok((origin, n))
+    crate::connector::planar_face_plane(resolved.kernel_id, introspect, "Datum plane base face")
 }
 
 /// Look up origin and normal for a datum plane by its UUID.

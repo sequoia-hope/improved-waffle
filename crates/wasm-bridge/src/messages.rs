@@ -247,6 +247,15 @@ pub enum UiToEngine {
     ListSourceTabs {
         source_id: Uuid,
     },
+    /// Can this pick carry a mate connector? Answered from the assembly
+    /// ALREADY evaluated (no rebuild), so the app can refuse a pick at
+    /// creation instead of minting a connector that silently resolves to a
+    /// default frame — see `specs/assembly_connector_frame_resolver.md` §2.4.
+    /// `instance_path` names the leaf whose part the reference belongs to.
+    ProbeConnectorRef {
+        instance_path: Vec<Uuid>,
+        geom_ref: waffle_types::GeomRef,
+    },
     /// Open a Part tab IN THE CONTEXT of an assembly (Phase 3d-4, in-context
     /// editing, v4 §2.8). `features` is the part's tree (it becomes the live
     /// tree); the assembly and this document's trees are evaluated exactly as
@@ -421,6 +430,17 @@ pub enum EngineToUi {
         tabs: Vec<SourceTabInfo>,
     },
 
+    /// Answer to `ProbeConnectorRef`: whether the pick derives a frame, what
+    /// it was derived from (`"cylindrical face"`, `"circular edge"`, …), and
+    /// the resolver's own reason when it does not.
+    ConnectorRefProbed {
+        ok: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        kind: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
+    },
+
     /// STEP export is ready. `warnings` names anything the export left out
     /// (a mesh-backed imported body has no analytic geometry to write).
     ExportReady {
@@ -495,6 +515,26 @@ pub struct AssemblyStatus {
     /// Parts that were built (tab id, and source id for linked parts).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub parts: Vec<feature_engine::assembly::PartRef>,
+    /// Every connector's evaluated frame, in WORLD coordinates, so the
+    /// viewport can draw it and the panel can label it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub connectors: Vec<ConnectorFrameInfo>,
+}
+
+/// One connector's evaluated frame for the UI: an orthonormal basis at a
+/// point, in world coordinates.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConnectorFrameInfo {
+    pub id: Uuid,
+    /// What the frame was derived from (`"cylindrical face"`, …), absent for
+    /// a connector carrying an explicit frame or one that failed to resolve
+    /// (the failure is in `AssemblyStatus.errors`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    pub origin: [f64; 3],
+    pub x_axis: [f64; 3],
+    pub y_axis: [f64; 3],
+    pub z_axis: [f64; 3],
 }
 
 /// The edit context a Part is open in (Phase 3d-4), as the UI needs it.

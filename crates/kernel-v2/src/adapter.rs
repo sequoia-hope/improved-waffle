@@ -59,8 +59,8 @@ use crate::arena::Curve;
 use crate::{BrepArena, FaceId, HalfEdgeId, KernelV2Error, SolidId, Surface, VertexId};
 use cad_primitives::{BoolOp, Point2, Point3, Vector3};
 use waffle_types::kernel::{
-    ClosedProfile, EdgeRange, EdgeRenderData, FaceRange, KernelError, KernelId, KernelSolidHandle,
-    RenderMesh, StepExportBody, TopoKind, TopoSignature,
+    AxisKind, ClosedProfile, EdgeRange, EdgeRenderData, EntityAxis, FaceRange, KernelError,
+    KernelId, KernelSolidHandle, RenderMesh, StepExportBody, TopoKind, TopoSignature,
 };
 use waffle_types::kernel::{Kernel, KernelIntrospect};
 
@@ -1325,6 +1325,11 @@ impl Kernel for KernelV2Adapter {
     }
 }
 
+/// `UnitVector3` as a plain array (the kernel contract speaks arrays).
+fn unit_array(v: crate::arena::UnitVector3) -> [f64; 3] {
+    [v.x, v.y, v.z]
+}
+
 impl KernelIntrospect for KernelV2Adapter {
     fn list_faces(&self, solid: &KernelSolidHandle) -> Vec<KernelId> {
         if let Some(slot) = self.imported_slot_of(solid) {
@@ -1516,6 +1521,98 @@ impl KernelIntrospect for KernelV2Adapter {
             }
         }
         set.into_iter().map(encode_face).collect()
+    }
+
+    /// The analytic axis of a rotational face or a circular/elliptical edge,
+    /// read straight off the arena's stored surface/curve (the contract's
+    /// only door out for an axis — `TopoSignature::normal` on a cylinder is
+    /// radial). Planar faces, straight edges, surface-pair and hyperbola
+    /// pieces have none.
+    ///
+    /// An IMPORTED body reports `None` even for a face the importer tagged
+    /// `Cylindrical`: `ImportedSurface` carries no axis parameters, only the
+    /// mesh, and fitting an axis to the tessellation would be a guess dressed
+    /// as analytic geometry.
+    fn entity_axis(&self, entity: KernelId, kind: TopoKind) -> Option<EntityAxis> {
+        let (tag, idx) = decode(entity);
+        match (kind, tag) {
+            (TopoKind::Face, TAG_FACE) => {
+                let surface = self.arena.face(FaceId(idx)).ok()?.surface?;
+                match surface {
+                    Surface::Plane(_) => None,
+                    Surface::Cylinder {
+                        axis_point,
+                        axis_dir,
+                        radius,
+                        ..
+                    } => Some(EntityAxis {
+                        kind: AxisKind::Cylindrical,
+                        origin: axis_point.as_array(),
+                        direction: unit_array(axis_dir),
+                        radius: Some(radius),
+                    }),
+                    Surface::Cone { apex, axis_dir, .. } => Some(EntityAxis {
+                        kind: AxisKind::Conical,
+                        origin: apex.as_array(),
+                        direction: unit_array(axis_dir),
+                        radius: None,
+                    }),
+                    Surface::Torus {
+                        center,
+                        axis_dir,
+                        major_radius,
+                        ..
+                    } => Some(EntityAxis {
+                        kind: AxisKind::Toroidal,
+                        origin: center.as_array(),
+                        direction: unit_array(axis_dir),
+                        radius: Some(major_radius),
+                    }),
+                    // A sphere is isotropic; the arena's canonical frame is
+                    // world-z-up (poles at `center ± radius·ẑ`), so that is
+                    // the axis reported rather than an invented one.
+                    Surface::Sphere { center, radius, .. } => Some(EntityAxis {
+                        kind: AxisKind::Spherical,
+                        origin: center.as_array(),
+                        direction: [0.0, 0.0, 1.0],
+                        radius: Some(radius),
+                    }),
+                }
+            }
+            (TopoKind::Edge, TAG_EDGE) => {
+                let curve = self.arena.half_edge(HalfEdgeId(idx)).ok()?.curve;
+                match curve {
+                    Curve::Circle {
+                        center,
+                        normal,
+                        radius,
+                    }
+                    | Curve::Arc {
+                        center,
+                        normal,
+                        radius,
+                    } => Some(EntityAxis {
+                        kind: AxisKind::Circular,
+                        origin: center.as_array(),
+                        direction: unit_array(normal),
+                        radius: Some(radius),
+                    }),
+                    Curve::EllipseArc {
+                        center,
+                        normal,
+                        major_radius,
+                        ..
+                    } => Some(EntityAxis {
+                        kind: AxisKind::Elliptical,
+                        origin: center.as_array(),
+                        direction: unit_array(normal),
+                        radius: Some(major_radius),
+                    }),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
     }
 
     fn compute_signature(&self, entity: KernelId, kind: TopoKind) -> TopoSignature {

@@ -9,8 +9,8 @@ use std::collections::{BTreeMap, HashMap};
 
 use feature_engine::assembly::{AssemblyTree, Frame, PartRef, Transform};
 use feature_engine::assembly_solver::solve_mates;
+use feature_engine::connector::{resolve_connector_frame, ConnectorGeometry};
 use feature_engine::context::{ContextInstance, EditContext};
-use feature_engine::rebuild::resolve_face_plane;
 use feature_engine::types::FeatureTree;
 use feature_engine::Engine;
 use modeling_ops::KernelBundle;
@@ -39,6 +39,11 @@ pub struct AssemblyView {
     /// Top-level connector frames (in the top-level instance's coordinates)
     /// as evaluated.
     pub frames: HashMap<Uuid, Frame>,
+    /// What each connector's frame was DERIVED from, for the connectors whose
+    /// `geom_ref` resolved. Absent for a connector that carries an explicit
+    /// frame, and for one whose reference could not be resolved (which is an
+    /// error in `errors`, never a silent default).
+    pub connector_geometry: HashMap<Uuid, ConnectorGeometry>,
     pub errors: Vec<String>,
     pub warnings: Vec<String>,
 }
@@ -190,6 +195,7 @@ struct Evaluated {
     placements: BTreeMap<Uuid, Transform>,
     leaves: Vec<Leaf>,
     frames: HashMap<Uuid, Frame>,
+    geometry: HashMap<Uuid, ConnectorGeometry>,
 }
 
 const MAX_DEPTH: usize = 8;
@@ -223,6 +229,7 @@ pub fn evaluate(
         leaves: evaluated.leaves,
         placements: evaluated.placements,
         frames: evaluated.frames,
+        connector_geometry: evaluated.geometry,
         errors: ctx.errors,
         warnings: ctx.warnings,
     }
@@ -300,6 +307,7 @@ fn evaluate_tree(
     // Connector frames, in the TOP-LEVEL instance's coordinates.
     let introspect = kb.as_introspect();
     let mut frames: HashMap<Uuid, Frame> = HashMap::new();
+    let mut geometry: HashMap<Uuid, ConnectorGeometry> = HashMap::new();
     for c in &tree.connectors {
         let Some(top) = c.top_instance_id() else {
             continue; // reported by validate()
@@ -325,16 +333,28 @@ fn evaluate_tree(
         };
         let frame = match (&c.geom_ref, part_idx) {
             (Some(geom_ref), Some(idx)) => {
-                match resolve_face_plane(geom_ref, &ctx.parts[idx].1.feature_results, introspect) {
-                    Ok((origin, normal)) => Frame {
-                        origin,
-                        z_axis: normal,
-                        x_axis: c.frame.x_axis,
+                match resolve_connector_frame(
+                    geom_ref,
+                    &ctx.parts[idx].1.feature_results,
+                    introspect,
+                ) {
+                    Ok((mut frame, kind)) => {
+                        // An author-set secondary direction still wins; the
+                        // resolver never fabricates one (see its module doc).
+                        if c.frame.x_axis != [0.0; 3] {
+                            frame.x_axis = c.frame.x_axis;
+                        }
+                        geometry.insert(c.id, kind);
+                        frame.transformed(&rel)
                     }
-                    .transformed(&rel),
                     Err(e) => {
+                        // The geometry the connector was placed on is gone or
+                        // no longer derivable. Loud, and the assembly still
+                        // renders — but nothing pretends this frame came from
+                        // the pick (the app refuses such a pick up front).
                         ctx.errors.push(format!(
-                            "connector `{}` ({}): face could not be resolved ({e}); using its explicit frame",
+                            "connector `{}` ({}): could not be derived from its geometry \
+                             ({e}); using its explicit frame",
                             c.name, c.id
                         ));
                         c.frame.transformed(&rel)
@@ -380,6 +400,7 @@ fn evaluate_tree(
         placements: solved.placements,
         leaves,
         frames,
+        geometry,
     }
 }
 

@@ -21,6 +21,8 @@
 		getSelectedInstanceId,
 		getSelectedInstancePath,
 		getSelectedRefs,
+		getAssemblyConnectorFrames,
+		getConnectorRefusal,
 		getSources,
 		getSourceTabs,
 		getActiveTabId,
@@ -53,7 +55,23 @@
 	function editableInContext(inst) {
 		return !inst.source?.source_id && partTabs.some((t) => t.id === inst.source?.tab_id);
 	}
-	let selectedFace = $derived(getSelectedRefs().find((r) => r?.kind?.type === 'Face') ?? null);
+	/**
+	 * The pick a connector would be placed on: a face or an edge of the
+	 * clicked instance. An edge is what a Revolute mate usually wants (a
+	 * hole's rim), and a cylindrical face is what it wants when the rim is
+	 * hidden — the engine derives the axis from either.
+	 */
+	let selectedPick = $derived(
+		getSelectedRefs().find((r) => r?.kind?.type === 'Face' || r?.kind?.type === 'Edge') ?? null
+	);
+	let pickLabel = $derived(selectedPick?.kind?.type === 'Edge' ? 'edge' : 'face');
+	/** What each connector's frame was derived from, by connector id. */
+	let derivedKinds = $derived.by(() => {
+		const by = {};
+		for (const f of getAssemblyConnectorFrames()) if (f.kind) by[f.id] = f.kind;
+		return by;
+	});
+	let refusal = $derived(getConnectorRefusal());
 
 	let newInstanceKey = $state('');
 	let mateA = $state('');
@@ -130,9 +148,9 @@
 		await run(() => updateInstance(inst.id, { transform: t }));
 	}
 
-	async function handleAddConnectorFromFace() {
-		if (!selectedPath?.length || !selectedFace) return;
-		await run(() => addConnector({ instancePath: selectedPath, geomRef: selectedFace }));
+	async function handleAddConnectorFromPick() {
+		if (!selectedPath?.length || !selectedPick) return;
+		await run(() => addConnector({ instancePath: selectedPath, geomRef: selectedPick }));
 	}
 
 	async function handleAddOriginConnector(inst) {
@@ -212,7 +230,10 @@
 			{#each asm.connectors ?? [] as c, i (c.id)}
 				<div class="row" data-testid="asm-connector-{i}">
 					<span class="name-static">{c.name}</span>
-					<span class="meta">{pathLabel(c.instance_path)} · {c.geom_ref ? 'face' : 'frame'}</span>
+					<span class="meta" data-testid="asm-connector-kind-{i}"
+						>{pathLabel(c.instance_path)} · {derivedKinds[c.id] ??
+							(c.geom_ref ? 'unresolved' : 'explicit frame')}</span
+					>
 					<button class="act" title="Remove connector" data-testid="asm-connector-remove-{i}" disabled={busy} onclick={() => run(() => removeConnector(c.id))}>×</button>
 				</div>
 			{/each}
@@ -220,11 +241,16 @@
 				<button
 					class="act primary"
 					data-testid="asm-add-connector-face"
-					title={selectedInstance && selectedFace ? 'Connector on the selected face' : 'Select a face of an instance in the viewport first'}
-					disabled={busy || !selectedInstance || !selectedFace}
-					onclick={handleAddConnectorFromFace}
-				>+ connector on selected face</button>
+					title={selectedInstance && selectedPick
+						? `Connector on the selected ${pickLabel} (a planar face, a cylindrical/conical/spherical face, or a circular or straight edge)`
+						: 'Select a face or an edge of an instance in the viewport first'}
+					disabled={busy || !selectedInstance || !selectedPick}
+					onclick={handleAddConnectorFromPick}
+				>+ connector on selected {selectedPick ? pickLabel : 'face/edge'}</button>
 			</div>
+			{#if refusal}
+				<div class="row"><span class="err" data-testid="asm-connector-refusal">{refusal}</span></div>
+			{/if}
 		</div>
 
 		<div class="section">

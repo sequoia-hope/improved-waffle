@@ -26,6 +26,35 @@ async function cubePartAndAssembly(page) {
 	return partTab;
 }
 
+/**
+ * A Part tab holding one cylinder — radius 10, height 20, axis +Z through the
+ * origin, in the units the sketch API takes (unconverted, as
+ * `helpers/geometry.js` builds its box) — then an Assembly tab with one
+ * instance of it. An imported STEP body would NOT do here: the importer keeps
+ * no analytic surface parameters, so its faces carry no axis (spec §2.2).
+ */
+async function cylinderPartAndInstance(page) {
+	await page.evaluate(() => window.__waffle.enterSketch([0, 0, 0], [0, 0, 1]));
+	await page.waitForFunction(() => window.__waffle?.getState()?.sketchMode?.active === true, { timeout: 5000 });
+	await page.evaluate(() => {
+		const w = window.__waffle;
+		w.addSketchEntity({ type: 'Point', id: 1, x: 0, y: 0, construction: true });
+		w.addSketchEntity({ type: 'Circle', id: 2, center_id: 1, radius: 10, construction: false });
+	});
+	await page.evaluate(() => window.__waffle.finishSketch());
+	await page.waitForFunction(() => (window.__waffle?.getFeatureTree()?.features?.length ?? 0) >= 1, { timeout: 10000 });
+	await page.evaluate(() => window.__waffle.showExtrudeDialog());
+	await page.evaluate(() => window.__waffle.applyExtrude(20, 0, false));
+	await page.waitForFunction(() => (window.__waffle?.getMeshes() ?? []).some((m) => m.triangleCount > 0), { timeout: 20000 });
+
+	const partTab = await page.evaluate(() => window.__waffle.getDocumentState().activeTabId);
+	await page.locator('[data-testid="tab-add-assembly"]').click();
+	await page.waitForFunction(() => window.__waffle.getAssembly() !== null, { timeout: 10000 });
+	const instance = await page.evaluate((t) => window.__waffle.addInstance({ tabId: t, name: 'Pin', fixed: true }), partTab);
+	await page.waitForFunction(() => window.__waffle.getMeshes().length === 1, { timeout: 30000 });
+	return { partTab, instance };
+}
+
 test.describe('Assemblies', () => {
 	test('instances of a part render with their placements; a fastened mate stacks them', async ({ waffle }) => {
 		const page = waffle.page;
@@ -228,6 +257,71 @@ test.describe('Assemblies: numeric mates', () => {
 		await page.waitForFunction(() => (window.__waffle.getAssemblyStatus()?.errors ?? []).length === 0, { timeout: 15000 });
 		const slid = (await page.evaluate(() => window.__waffle.getAssemblyStatus())).placements[b];
 		expect(Math.abs(slid.rotation_quat[3]) > 0.99999).toBe(true);
+	});
+});
+
+test.describe('Assemblies: mate connector frames', () => {
+	test('a connector on a cylindrical face derives the axis, and the panel says what it came from', async ({ waffle }) => {
+		const page = waffle.page;
+		const { instance } = await cylinderPartAndInstance(page);
+
+		// Which face is the barrel? Ask the engine the way the app does before
+		// creating anything — the probe judges a pick without minting one.
+		const faces = await page.evaluate(() => window.__waffle.getMeshes()[0].faceRanges.map((r) => r.geom_ref));
+		expect(faces.length).toBeGreaterThan(1);
+		const probes = await page.evaluate(
+			async ([id, refs]) => {
+				const out = [];
+				for (const ref of refs) out.push(await window.__waffle.probeConnectorRef([id], ref));
+				return out;
+			},
+			[instance, faces]
+		);
+		const barrel = probes.findIndex((p) => p.ok && p.kind === 'cylindrical face');
+		expect(barrel, 'the cylinder has a face the engine derives an axis from').toBeGreaterThanOrEqual(0);
+		expect(probes.filter((p) => p.ok && p.kind === 'planar face').length, 'the two caps').toBe(2);
+
+		const cid = await page.evaluate(
+			([id, ref]) => window.__waffle.addConnector({ instanceId: id, geomRef: ref, name: 'barrel' }),
+			[instance, faces[barrel]]
+		);
+		expect(cid).toBeTruthy();
+		await page.waitForFunction(() => (window.__waffle.getAssemblyConnectorFrames() ?? []).length === 1, { timeout: 15000 });
+
+		const status = await page.evaluate(() => window.__waffle.getAssemblyStatus());
+		expect(status.errors).toEqual([]);
+		const [frame] = await page.evaluate(() => window.__waffle.getAssemblyConnectorFrames());
+		expect(frame.kind).toBe('cylindrical face');
+		// On the axis, at the middle of the barrel's axial extent: half of 20.
+		expect(near(frame.origin[0], 0, 1e-9)).toBe(true);
+		expect(near(frame.origin[1], 0, 1e-9)).toBe(true);
+		expect(near(frame.origin[2], 10, 1e-9)).toBe(true);
+		expect(near(Math.abs(frame.z_axis[2]), 1, 1e-9)).toBe(true);
+
+		await expect(page.locator('[data-testid="asm-connector-kind-0"]')).toContainText('cylindrical face');
+	});
+
+	test('a pick the engine cannot derive a frame from is refused, and no connector is minted', async ({ waffle }) => {
+		const page = waffle.page;
+		const { instance } = await cylinderPartAndInstance(page);
+
+		// A reference into a feature this part does not have: nothing resolves.
+		const bogus = await page.evaluate(() => {
+			const ref = JSON.parse(JSON.stringify(window.__waffle.getMeshes()[0].faceRanges[0].geom_ref));
+			ref.anchor = { type: 'FeatureOutput', feature_id: '00000000-0000-4000-8000-000000000000', output_key: { type: 'Main' } };
+			return ref;
+		});
+		const probe = await page.evaluate(([id, ref]) => window.__waffle.probeConnectorRef([id], ref), [instance, bogus]);
+		expect(probe.ok).toBe(false);
+		expect(probe.reason).toBeTruthy();
+
+		const cid = await page.evaluate(
+			([id, ref]) => window.__waffle.addConnector({ instanceId: id, geomRef: ref, name: 'nope' }),
+			[instance, bogus]
+		);
+		expect(cid, 'the refused pick mints nothing').toBeNull();
+		expect(await page.evaluate(() => window.__waffle.getAssembly().connectors?.length ?? 0)).toBe(0);
+		await expect(page.locator('[data-testid="asm-connector-refusal"]')).toBeVisible();
 	});
 });
 

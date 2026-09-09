@@ -183,6 +183,60 @@ pub trait Kernel {
     }
 }
 
+/// What kind of analytic geometry an [`EntityAxis`] came from. Reported so a
+/// consumer can label a derived frame ("cylindrical axis") and decide policy
+/// per family without re-deriving the surface type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AxisKind {
+    /// A cylindrical face's axis.
+    Cylindrical,
+    /// A conical face's axis (`origin` is the apex).
+    Conical,
+    /// A toroidal face's axis (`origin` is the tube centre circle's centre).
+    Toroidal,
+    /// A spherical face. There is no intrinsic axis; `origin` is the centre
+    /// and `direction` is the kernel's canonical pole axis for a sphere.
+    Spherical,
+    /// A circular edge (full circle or arc).
+    Circular,
+    /// An elliptical edge.
+    Elliptical,
+}
+
+impl AxisKind {
+    /// Lower-case label for UI and diagnostics.
+    pub fn label(self) -> &'static str {
+        match self {
+            AxisKind::Cylindrical => "cylindrical",
+            AxisKind::Conical => "conical",
+            AxisKind::Toroidal => "toroidal",
+            AxisKind::Spherical => "spherical",
+            AxisKind::Circular => "circular",
+            AxisKind::Elliptical => "elliptical",
+        }
+    }
+}
+
+/// The analytic axis of one entity: a rotational surface's axis, or the axis
+/// of a circular/elliptical edge (its plane normal through its centre).
+///
+/// `origin` is the entity's OWN reference point on that axis — the cylinder's
+/// `axis_point`, the cone's apex, the torus's/sphere's centre, the circle's
+/// centre — never a policy choice. Where a consumer puts a frame on the axis
+/// (a rim, the mid of a face's axial extent, the apex) is the consumer's
+/// decision; see `feature_engine::connector`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EntityAxis {
+    pub kind: AxisKind,
+    /// A point ON the axis (see the type docs).
+    pub origin: [f64; 3],
+    /// Unit axis direction.
+    pub direction: [f64; 3],
+    /// Radius, where the family has one (cylinder, sphere, circle; a torus
+    /// reports its major radius, an ellipse its semi-major radius).
+    pub radius: Option<f64>,
+}
+
 /// Topology introspection trait. Provides read-only queries on kernel geometry.
 pub trait KernelIntrospect {
     /// List all faces of a solid.
@@ -234,6 +288,21 @@ pub trait KernelIntrospect {
         solid: &KernelSolidHandle,
         kind: TopoKind,
     ) -> Vec<(KernelId, TopoSignature)>;
+
+    /// The entity's analytic axis, when its geometry has one: a cylindrical,
+    /// conical, toroidal or spherical FACE, or a circular/elliptical EDGE.
+    ///
+    /// `None` for a planar face, a straight edge, a freeform/mesh-backed
+    /// surface, an entity whose curve has no axis (a surface-pair or
+    /// hyperbola piece), and for a kernel that does not track analytic
+    /// geometry — the default, so this is additive for every implementor.
+    ///
+    /// This is the ONLY door out for a rotational surface's axis:
+    /// [`TopoSignature::normal`] is the outward normal at the centroid, which
+    /// on a cylinder is radial, not axial.
+    fn entity_axis(&self, _entity: KernelId, _kind: TopoKind) -> Option<EntityAxis> {
+        None
+    }
 
     /// Persistent-identity provenance of a face (KV13 F5): its persistent id
     /// and its **lineage root** (the id where the geometry was introduced,

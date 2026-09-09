@@ -1168,6 +1168,17 @@ pub trait KernelIntrospect {
         kind: TopoKind,
     ) -> Vec<(KernelId, TopoSignature)>;
 
+    /// The entity's analytic axis, when its geometry has one: a cylindrical,
+    /// conical, toroidal or spherical FACE, or a circular/elliptical EDGE.
+    /// `origin` is the entity's own reference point on that axis (the
+    /// cylinder's axis point, the cone's apex, the torus's/sphere's centre,
+    /// the circle's centre) — where a consumer puts a frame on the axis is
+    /// the consumer's policy (`feature_engine::connector`). `None` for a
+    /// planar face, a straight edge, a freeform/mesh-backed surface, and by
+    /// default (so it is additive for every implementor). The only door out
+    /// for an axis: `TopoSignature::normal` on a cylinder is radial.
+    fn entity_axis(&self, entity: KernelId, kind: TopoKind) -> Option<EntityAxis> { None }
+
     /// Persistent-identity provenance of a face (KV13 F5): its persistent id
     /// and its lineage root (where the geometry was introduced, through
     /// chained booleans). Used by feature-engine (F6) to resolve the face's

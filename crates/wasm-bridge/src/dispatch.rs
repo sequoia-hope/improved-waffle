@@ -9,7 +9,8 @@ use waffle_types::OutputKey;
 
 use crate::engine_state::{BridgeError, EngineState};
 use crate::messages::{
-    AssemblyStatus, ContextInstanceInfo, ContextStatus, EngineToUi, SourceStatus, UiToEngine,
+    AssemblyStatus, ConnectorFrameInfo, ContextInstanceInfo, ContextStatus, EngineToUi,
+    SourceStatus, UiToEngine,
 };
 
 /// Dispatch a UI message to the engine and return a response.
@@ -450,6 +451,44 @@ fn handle_message(
             Ok(EngineToUi::SourceTabsListed { source_id, tabs })
         }
 
+        UiToEngine::ProbeConnectorRef {
+            instance_path,
+            geom_ref,
+        } => {
+            let view = state
+                .assembly
+                .as_ref()
+                .ok_or_else(|| BridgeError::InvalidRequest {
+                    reason: "no assembly is open, so there is nothing to place a connector on"
+                        .to_string(),
+                })?;
+            let engine = view.engine_for_path(&instance_path).ok_or_else(|| {
+                BridgeError::InvalidRequest {
+                    reason: format!(
+                        "{instance_path:?} is not a rendered part of the open assembly"
+                    ),
+                }
+            })?;
+            Ok(
+                match feature_engine::connector::resolve_connector_frame(
+                    &geom_ref,
+                    &engine.feature_results,
+                    kb.as_introspect(),
+                ) {
+                    Ok((_, kind)) => EngineToUi::ConnectorRefProbed {
+                        ok: true,
+                        kind: Some(kind.label().to_string()),
+                        reason: None,
+                    },
+                    Err(e) => EngineToUi::ConnectorRefProbed {
+                        ok: false,
+                        kind: None,
+                        reason: Some(e.to_string()),
+                    },
+                },
+            )
+        }
+
         UiToEngine::OpenAssembly {
             assembly,
             part_trees,
@@ -800,6 +839,31 @@ fn model_updated_response(state: &EngineState) -> EngineToUi {
             errors: v.errors.clone(),
             warnings: v.warnings.clone(),
             parts: v.parts.iter().map(|(p, _)| p.clone()).collect(),
+            connectors: v
+                .tree
+                .connectors
+                .iter()
+                .filter_map(|c| {
+                    // In WORLD coordinates: the frame is in its top-level
+                    // instance's space, which the placement puts in the world.
+                    let world = v
+                        .frames
+                        .get(&c.id)?
+                        .transformed(&v.placement(c.top_instance_id()?));
+                    let (x_axis, y_axis, z_axis) = world.basis().ok()?;
+                    Some(ConnectorFrameInfo {
+                        id: c.id,
+                        kind: v
+                            .connector_geometry
+                            .get(&c.id)
+                            .map(|k| k.label().to_string()),
+                        origin: world.origin,
+                        x_axis,
+                        y_axis,
+                        z_axis,
+                    })
+                })
+                .collect(),
         }),
         context: state.context_view.as_ref().map(|cv| ContextStatus {
             assembly_tab_id: cv.assembly_tab_id.clone(),

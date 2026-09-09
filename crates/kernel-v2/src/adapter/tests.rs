@@ -698,3 +698,103 @@ fn edge_polyline_samples_a_circle_rim_as_a_closed_chord_polyline() {
         "a non-edge id is empty"
     );
 }
+
+// ── Connector frame resolver: analytic axes out of the contract ─────────
+
+/// `entity_axis` reports the arena's stored analytic axis: the cylinder's
+/// for the lateral face, each rim circle's for the rim edges, and `None`
+/// for the planar caps and the straight seam edge (which have no axis).
+///
+/// The staged circle is centred at (u, v) = (0.5, 0.5) on the z = 0 plane
+/// with x̂ = +X, so the axis runs through (0.5, 0.5, ·) along +Z.
+#[test]
+fn entity_axis_reports_the_cylinder_axis_and_the_rim_circles() {
+    use waffle_types::kernel::AxisKind;
+
+    let mut adapter = KernelV2Adapter::new();
+    let face = stage_circle(&mut adapter, [0.0, 0.0, 0.0], (0.5, 0.5), 0.25);
+    let handle = adapter
+        .extrude_face(face, [0.0, 0.0, 1.0], 2.0)
+        .expect("circle extrude succeeds");
+
+    let axes: Vec<_> = adapter
+        .list_faces(&handle)
+        .into_iter()
+        .filter_map(|f| adapter.entity_axis(f, TopoKind::Face))
+        .collect();
+    assert_eq!(
+        axes.len(),
+        1,
+        "only the lateral face has an axis (caps do not)"
+    );
+    let ax = axes[0];
+    assert_eq!(ax.kind, AxisKind::Cylindrical);
+    assert_eq!(ax.radius, Some(0.25));
+    assert!(
+        ax.direction[2].abs() > 1.0 - 1e-12 && ax.direction[0].abs() < 1e-12,
+        "axis along ±Z, got {:?}",
+        ax.direction
+    );
+    // The reference point is ON the axis: its (x, y) is the circle centre,
+    // whatever height the constructor anchored it at.
+    assert!(
+        (ax.origin[0] - 0.5).abs() < 1e-12 && (ax.origin[1] - 0.5).abs() < 1e-12,
+        "axis point through the circle centre, got {:?}",
+        ax.origin
+    );
+
+    let edge_axes: Vec<_> = adapter
+        .list_edges(&handle)
+        .into_iter()
+        .filter_map(|e| adapter.entity_axis(e, TopoKind::Edge))
+        .collect();
+    assert_eq!(edge_axes.len(), 2, "two rim circles; the seam is straight");
+    let mut heights: Vec<f64> = Vec::new();
+    for a in &edge_axes {
+        assert_eq!(a.kind, AxisKind::Circular);
+        assert_eq!(a.radius, Some(0.25));
+        assert!(
+            (a.origin[0] - 0.5).abs() < 1e-12 && (a.origin[1] - 0.5).abs() < 1e-12,
+            "rim centre on the axis, got {:?}",
+            a.origin
+        );
+        assert!(a.direction[2].abs() > 1.0 - 1e-12, "rim normal along ±Z");
+        heights.push(a.origin[2]);
+    }
+    heights.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    assert!(
+        (heights[0] - 0.0).abs() < 1e-12 && (heights[1] - 2.0).abs() < 1e-12,
+        "rims at the extrude's two ends, got {heights:?}"
+    );
+}
+
+/// A planar face and a straight edge have no axis, and neither does an id
+/// of the wrong kind or an imported (mesh-backed) body's face — the
+/// importer keeps no axis parameters, and a fit would be a guess.
+#[test]
+fn entity_axis_is_none_without_analytic_geometry() {
+    let mut adapter = KernelV2Adapter::new();
+    let face = stage_unit_square(&mut adapter);
+    let handle = adapter
+        .extrude_face(face, [0.0, 0.0, 1.0], 1.0)
+        .expect("box extrude");
+    for f in adapter.list_faces(&handle) {
+        assert!(adapter.entity_axis(f, TopoKind::Face).is_none(), "planar");
+    }
+    for e in adapter.list_edges(&handle) {
+        assert!(adapter.entity_axis(e, TopoKind::Edge).is_none(), "straight");
+    }
+    let a_face = adapter.list_faces(&handle)[0];
+    assert!(
+        adapter.entity_axis(a_face, TopoKind::Edge).is_none(),
+        "a face id asked for as an edge is None, not a panic"
+    );
+
+    let imported = adapter.import_body(&imported_test_data()).expect("import");
+    for f in adapter.list_faces(&imported) {
+        assert!(
+            adapter.entity_axis(f, TopoKind::Face).is_none(),
+            "an imported face carries a mesh, not an axis"
+        );
+    }
+}
