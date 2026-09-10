@@ -1,10 +1,12 @@
 <script>
 	/**
 	 * Left panel for an open Assembly tab (v4 Phase 3c): instances of this
-	 * document's Part tabs, mate connectors on instance faces (or explicit
-	 * frames), Fastened mates, and the evaluation's problems. Edits go through
-	 * the store, which re-evaluates the assembly in the engine
-	 * (`OpenAssembly`) and autosaves the tab.
+	 * document's Part tabs, mate connectors on instance faces or edges (or
+	 * explicit frames) with their adjustments (anchor on the axis, flip,
+	 * turn, offset — `specs/assembly_connector_adjustments.md`), mates, and
+	 * the evaluation's problems. Edits go through the store, which
+	 * re-evaluates the assembly in the engine (`OpenAssembly`) and autosaves
+	 * the tab.
 	 */
 	import {
 		getAssembly,
@@ -14,7 +16,9 @@
 		updateInstance,
 		removeInstance,
 		addConnector,
+		updateConnector,
 		removeConnector,
+		CONNECTOR_ANCHORS,
 		addMate,
 		updateMate,
 		removeMate,
@@ -72,6 +76,11 @@
 		return by;
 	});
 	let refusal = $derived(getConnectorRefusal());
+	/** A connector on a rotational face has an axial extent to anchor along. */
+	function hasAxialExtent(kind) {
+		return /cylindrical|conical|toroidal|axial/.test(kind ?? '');
+	}
+	const ANCHOR_LABELS = { middle: 'middle', positive_end: '+z end', negative_end: '−z end' };
 
 	let newInstanceKey = $state('');
 	let mateA = $state('');
@@ -157,6 +166,14 @@
 		await run(() => addConnector({ instanceId: inst.id, name: `${inst.name} origin` }));
 	}
 
+	async function setConnectorOffset(c, axis, valueMm) {
+		const v = Number(valueMm);
+		if (!Number.isFinite(v)) return;
+		const offsetMm = [0, 1, 2].map((k) => mm(c.offset_m?.[k]));
+		offsetMm[axis] = v;
+		await run(() => updateConnector(c.id, { offsetMm }));
+	}
+
 	async function handleAddMate() {
 		if (!mateA || !mateB || mateA === mateB) return;
 		await run(() => addMate({ a: mateA, b: mateB, kind: mateKind, flip: mateFlip, rotationDeg: Number(mateRotation) || 0 }));
@@ -228,13 +245,41 @@
 		<div class="section">
 			<div class="section-header">Mate connectors ({asm.connectors?.length ?? 0})</div>
 			{#each asm.connectors ?? [] as c, i (c.id)}
-				<div class="row" data-testid="asm-connector-{i}">
-					<span class="name-static">{c.name}</span>
-					<span class="meta" data-testid="asm-connector-kind-{i}"
-						>{pathLabel(c.instance_path)} · {derivedKinds[c.id] ??
-							(c.geom_ref ? 'unresolved' : 'explicit frame')}</span
-					>
-					<button class="act" title="Remove connector" data-testid="asm-connector-remove-{i}" disabled={busy} onclick={() => run(() => removeConnector(c.id))}>×</button>
+				<div class="row connector" data-testid="asm-connector-{i}">
+					<div class="row-main">
+						<input
+							class="name"
+							value={c.name}
+							data-testid="asm-connector-name-{i}"
+							onchange={(e) => run(() => updateConnector(c.id, { name: e.currentTarget.value }))}
+						/>
+						<span class="meta" data-testid="asm-connector-kind-{i}"
+							>{pathLabel(c.instance_path)} · {derivedKinds[c.id] ??
+								(c.geom_ref ? 'unresolved' : 'explicit frame')}</span
+						>
+						<button class="act" title="Remove connector" data-testid="asm-connector-remove-{i}" disabled={busy} onclick={() => run(() => removeConnector(c.id))}>×</button>
+					</div>
+					<div class="row-sub">
+						{#if hasAxialExtent(derivedKinds[c.id])}
+							<select
+								data-testid="asm-connector-anchor-{i}"
+								title="Where on the axis the frame sits: the middle of the face, or the end its z axis points toward (+z) or away from (−z)"
+								value={c.anchor ?? 'middle'}
+								disabled={busy}
+								onchange={(e) => run(() => updateConnector(c.id, { anchor: e.currentTarget.value }))}
+							>
+								{#each CONNECTOR_ANCHORS as a}<option value={a}>{ANCHOR_LABELS[a]}</option>{/each}
+							</select>
+						{/if}
+						<label title="Reverse the z axis (the triad's blue arrow)"><input type="checkbox" data-testid="asm-connector-flip-{i}" checked={!!c.flip_z} disabled={busy} onchange={(e) => run(() => updateConnector(c.id, { flipZ: e.currentTarget.checked }))} /> flip z</label>
+						<label title="Turn about z (°) — moves the x axis, a Fastened mate's in-plane alignment">turn <input class="num" type="number" step="15" data-testid="asm-connector-rotation-{i}" value={c.rotation_deg ?? 0} disabled={busy} onchange={(e) => run(() => updateConnector(c.id, { rotationDeg: e.currentTarget.value }))} />°</label>
+						<span class="xyz" title="Offset along the connector's own x, y, z (mm)">
+							{#each ['x', 'y', 'z'] as axis, k}
+								<input class="num" type="number" step="0.5" title="offset along the connector's {axis} (mm)" data-testid="asm-connector-o{axis}-{i}" value={mm(c.offset_m?.[k])} disabled={busy} onchange={(e) => setConnectorOffset(c, k, e.currentTarget.value)} />
+							{/each}
+							<span class="unit">mm</span>
+						</span>
+					</div>
 				</div>
 			{/each}
 			<div class="row add">

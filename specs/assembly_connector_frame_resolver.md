@@ -168,9 +168,12 @@ what it was derived from.
 
 ## 4. Non-goals (this increment)
 
-- Choosing *which* point on an axis (rim vs mid vs apex) from the UI.
+- Choosing *which* point on an axis (rim vs mid vs apex) from the UI —
+  **LANDED 2026-09-10** as the connector's `anchor`, with `flip_z`,
+  `rotation_deg`, `offset_m` and `updateConnector`
+  (`specs/assembly_connector_adjustments.md`).
 - Vertex connectors.
-- Dragging a connector, or editing one after creation (no `updateConnector`).
+- Dragging a connector.
 - Quick-mate (pick two faces, infer the mate kind).
 
 ## 5. Follow-on

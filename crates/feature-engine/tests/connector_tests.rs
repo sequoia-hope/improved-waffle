@@ -13,6 +13,7 @@
 
 use std::collections::HashMap;
 
+use feature_engine::assembly::AxialAnchor;
 use feature_engine::connector::{resolve_connector_frame, ConnectorGeometry};
 use modeling_ops::{BodyOutput, Diagnostics, OpResult, Provenance};
 use uuid::Uuid;
@@ -278,9 +279,13 @@ fn near(a: [f64; 3], b: [f64; 3]) -> bool {
 #[test]
 fn a_planar_face_keeps_its_phase_3_frame() {
     let (fid, res) = results();
-    let (frame, kind) =
-        resolve_connector_frame(&geom_ref(fid, TopoKind::Face, TOP_FACE), &res, &Fixture)
-            .expect("a planar face resolves");
+    let (frame, kind) = resolve_connector_frame(
+        &geom_ref(fid, TopoKind::Face, TOP_FACE),
+        &res,
+        &Fixture,
+        AxialAnchor::Middle,
+    )
+    .expect("a planar face resolves");
     assert_eq!(kind, ConnectorGeometry::PlanarFace);
     assert!(near(frame.origin, [0.0, 0.0, PLATE_TOP]), "face centroid");
     assert!(near(frame.z_axis, [0.0, 0.0, 1.0]), "outward normal");
@@ -292,9 +297,13 @@ fn a_planar_face_keeps_its_phase_3_frame() {
 #[test]
 fn a_cylindrical_face_gives_the_axis_at_the_middle_of_its_extent() {
     let (fid, res) = results();
-    let (frame, kind) =
-        resolve_connector_frame(&geom_ref(fid, TopoKind::Face, HOLE_FACE), &res, &Fixture)
-            .expect("a cylindrical face resolves");
+    let (frame, kind) = resolve_connector_frame(
+        &geom_ref(fid, TopoKind::Face, HOLE_FACE),
+        &res,
+        &Fixture,
+        AxialAnchor::Middle,
+    )
+    .expect("a cylindrical face resolves");
     assert_eq!(kind, ConnectorGeometry::AxialFace(AxisKind::Cylindrical));
     assert!(
         near(frame.origin, [HOLE_X, HOLE_Y, PLATE_TOP / 2.0]),
@@ -309,9 +318,13 @@ fn a_cylindrical_face_gives_the_axis_at_the_middle_of_its_extent() {
 #[test]
 fn a_conical_face_measures_its_extent_from_the_apex() {
     let (fid, res) = results();
-    let (frame, kind) =
-        resolve_connector_frame(&geom_ref(fid, TopoKind::Face, CONE_FACE), &res, &Fixture)
-            .expect("a conical face resolves");
+    let (frame, kind) = resolve_connector_frame(
+        &geom_ref(fid, TopoKind::Face, CONE_FACE),
+        &res,
+        &Fixture,
+        AxialAnchor::Middle,
+    )
+    .expect("a conical face resolves");
     assert_eq!(kind, ConnectorGeometry::AxialFace(AxisKind::Conical));
     assert!(
         near(frame.origin, [HOLE_X, HOLE_Y, PLATE_TOP / 2.0]),
@@ -325,9 +338,13 @@ fn a_conical_face_measures_its_extent_from_the_apex() {
 #[test]
 fn a_spherical_face_gives_its_centre() {
     let (fid, res) = results();
-    let (frame, kind) =
-        resolve_connector_frame(&geom_ref(fid, TopoKind::Face, SPHERE_FACE), &res, &Fixture)
-            .expect("a spherical face resolves");
+    let (frame, kind) = resolve_connector_frame(
+        &geom_ref(fid, TopoKind::Face, SPHERE_FACE),
+        &res,
+        &Fixture,
+        AxialAnchor::Middle,
+    )
+    .expect("a spherical face resolves");
     assert_eq!(kind, ConnectorGeometry::SphericalFace);
     assert!(near(frame.origin, [0.01, 0.02, 0.03]), "the centre");
 }
@@ -339,9 +356,13 @@ fn a_spherical_face_gives_its_centre() {
 #[test]
 fn a_rim_points_out_of_the_face_it_sits_on() {
     let (fid, res) = results();
-    let (top, kind) =
-        resolve_connector_frame(&geom_ref(fid, TopoKind::Edge, TOP_RIM), &res, &Fixture)
-            .expect("a circular edge resolves");
+    let (top, kind) = resolve_connector_frame(
+        &geom_ref(fid, TopoKind::Edge, TOP_RIM),
+        &res,
+        &Fixture,
+        AxialAnchor::Middle,
+    )
+    .expect("a circular edge resolves");
     assert_eq!(kind, ConnectorGeometry::CircularEdge(AxisKind::Circular));
     assert!(
         near(top.origin, [HOLE_X, HOLE_Y, PLATE_TOP]),
@@ -353,9 +374,13 @@ fn a_rim_points_out_of_the_face_it_sits_on() {
         top.z_axis
     );
 
-    let (bottom, _) =
-        resolve_connector_frame(&geom_ref(fid, TopoKind::Edge, BOTTOM_RIM), &res, &Fixture)
-            .expect("resolves");
+    let (bottom, _) = resolve_connector_frame(
+        &geom_ref(fid, TopoKind::Edge, BOTTOM_RIM),
+        &res,
+        &Fixture,
+        AxialAnchor::Middle,
+    )
+    .expect("resolves");
     assert!(
         near(bottom.z_axis, [0.0, 0.0, -1.0]),
         "out of the BOTTOM face, got {:?}",
@@ -372,6 +397,7 @@ fn a_rim_between_two_curved_faces_keeps_the_curves_normal() {
         &geom_ref(fid, TopoKind::Edge, CURVED_JOIN_RIM),
         &res,
         &Fixture,
+        AxialAnchor::Middle,
     )
     .expect("resolves");
     assert!(near(frame.z_axis, [0.0, 0.0, -1.0]), "the curve's normal");
@@ -384,6 +410,7 @@ fn a_straight_edge_gives_its_midpoint_along_the_edge() {
         &geom_ref(fid, TopoKind::Edge, STRAIGHT_EDGE),
         &res,
         &Fixture,
+        AxialAnchor::Middle,
     )
     .expect("a straight edge resolves");
     assert_eq!(kind, ConnectorGeometry::StraightEdge);
@@ -401,6 +428,7 @@ fn geometry_with_no_derivable_frame_is_loud() {
         &geom_ref(fid, TopoKind::Face, FREEFORM_FACE),
         &res,
         &Fixture,
+        AxialAnchor::Middle,
     )
     .expect_err("a freeform face has no frame");
     let msg = err.to_string();
@@ -410,12 +438,18 @@ fn geometry_with_no_derivable_frame_is_loud() {
         &geom_ref(fid, TopoKind::Edge, FREEFORM_EDGE),
         &res,
         &Fixture,
+        AxialAnchor::Middle,
     )
     .expect_err("a curved edge with no axis has no frame");
     assert!(err.to_string().contains("curved"), "says why: {err}");
 
-    let err = resolve_connector_frame(&geom_ref(fid, TopoKind::Vertex, TOP_FACE), &res, &Fixture)
-        .expect_err("a vertex has no direction");
+    let err = resolve_connector_frame(
+        &geom_ref(fid, TopoKind::Vertex, TOP_FACE),
+        &res,
+        &Fixture,
+        AxialAnchor::Middle,
+    )
+    .expect_err("a vertex has no direction");
     assert!(err.to_string().contains("vertex"), "says why: {err}");
 
     // An unresolvable reference stays the resolver's error, not a frame.
@@ -425,7 +459,275 @@ fn geometry_with_no_derivable_frame_is_loud() {
         output_key: OutputKey::Main,
     };
     assert!(
-        resolve_connector_frame(&dangling, &res, &Fixture).is_err(),
+        resolve_connector_frame(&dangling, &res, &Fixture, AxialAnchor::Middle).is_err(),
         "a dangling reference does not silently produce a frame"
     );
+}
+
+// ── anchors and adjustments (specs/assembly_connector_adjustments.md) ───────
+
+use feature_engine::assembly::{Frame, MateConnector};
+use serde_json::{json, Map};
+
+/// A connector with explicit `frame` and adjustments, the way the app
+/// stores one (no `geom_ref`).
+fn adjusted_connector(
+    frame: Frame,
+    anchor: AxialAnchor,
+    flip_z: bool,
+    rotation_deg: f64,
+    offset_m: [f64; 3],
+) -> MateConnector {
+    MateConnector {
+        id: Uuid::from_u128(0xc0),
+        name: "c".into(),
+        instance_path: vec![Uuid::from_u128(0x1)],
+        geom_ref: None,
+        frame,
+        anchor,
+        flip_z,
+        rotation_deg,
+        offset_m,
+        extra: Map::new(),
+    }
+}
+
+/// A connector may ask for a rim instead of the middle: the ends of the
+/// FACE's extent along the derived axis (the hole spans z = 0 … 2 mm), with
+/// the axis unchanged.
+#[test]
+fn an_axial_face_can_anchor_at_either_end_of_its_extent() {
+    let (fid, res) = results();
+    let hole = geom_ref(fid, TopoKind::Face, HOLE_FACE);
+    let (hi, _) =
+        resolve_connector_frame(&hole, &res, &Fixture, AxialAnchor::PositiveEnd).expect("resolves");
+    assert!(
+        near(hi.origin, [HOLE_X, HOLE_Y, PLATE_TOP]),
+        "the end +z points toward (the top rim), got {:?}",
+        hi.origin
+    );
+    let (lo, _) =
+        resolve_connector_frame(&hole, &res, &Fixture, AxialAnchor::NegativeEnd).expect("resolves");
+    assert!(
+        near(lo.origin, [HOLE_X, HOLE_Y, 0.0]),
+        "the end z points away from (the bottom rim), got {:?}",
+        lo.origin
+    );
+    assert!(
+        near(hi.z_axis, [0.0, 0.0, 1.0]) && near(lo.z_axis, [0.0, 0.0, 1.0]),
+        "the axis is the same wherever the origin sits"
+    );
+
+    // A cone's ends are its rims, never its apex (4 mm below the plate).
+    let cone = geom_ref(fid, TopoKind::Face, CONE_FACE);
+    let (rim, _) =
+        resolve_connector_frame(&cone, &res, &Fixture, AxialAnchor::NegativeEnd).expect("resolves");
+    assert!(
+        near(rim.origin, [HOLE_X, HOLE_Y, 0.0]),
+        "the −z rim, not the apex, got {:?}",
+        rim.origin
+    );
+}
+
+/// Picks with no axial extent ignore the anchor: a sphere is its centre, a
+/// planar face its centroid and a rim its centre, whatever is asked.
+#[test]
+fn the_anchor_is_ignored_where_there_is_no_axial_extent() {
+    let (fid, res) = results();
+    let (sphere, _) = resolve_connector_frame(
+        &geom_ref(fid, TopoKind::Face, SPHERE_FACE),
+        &res,
+        &Fixture,
+        AxialAnchor::PositiveEnd,
+    )
+    .expect("resolves");
+    assert!(near(sphere.origin, [0.01, 0.02, 0.03]), "the centre");
+    let (plane, _) = resolve_connector_frame(
+        &geom_ref(fid, TopoKind::Face, TOP_FACE),
+        &res,
+        &Fixture,
+        AxialAnchor::NegativeEnd,
+    )
+    .expect("resolves");
+    assert!(near(plane.origin, [0.0, 0.0, PLATE_TOP]), "the centroid");
+    let (rim, _) = resolve_connector_frame(
+        &geom_ref(fid, TopoKind::Edge, TOP_RIM),
+        &res,
+        &Fixture,
+        AxialAnchor::PositiveEnd,
+    )
+    .expect("resolves");
+    assert!(
+        near(rim.origin, [HOLE_X, HOLE_Y, PLATE_TOP]),
+        "the rim centre"
+    );
+}
+
+/// `flip_z` is a 180° turn about x: z and y reverse, x stays — and the
+/// anchor's ends are named against the FINAL z, so with the flip "+z end"
+/// resolves to the bottom rim, where the flipped z now points.
+#[test]
+fn flip_z_reverses_z_and_y_keeps_x_and_mirrors_the_anchor() {
+    let base = Frame::on_plane([0.0, 0.0, PLATE_TOP], [0.0, 0.0, 1.0]);
+    let c = adjusted_connector(base, AxialAnchor::Middle, true, 0.0, [0.0; 3]);
+    let f = c.adjusted(base).expect("adjusts");
+    let (x, y, z) = f.basis().unwrap();
+    let (x0, y0, _) = base.basis().unwrap();
+    assert!(near(z, [0.0, 0.0, -1.0]), "z reversed, got {z:?}");
+    assert!(near(x, x0), "x kept, got {x:?} vs {x0:?}");
+    assert!(
+        near(y, [-y0[0], -y0[1], -y0[2]]),
+        "y reversed with z (right-handed), got {y:?}"
+    );
+    assert!(
+        near(f.origin, base.origin),
+        "a flip does not move the origin"
+    );
+    assert_eq!(c.derivation_anchor(), AxialAnchor::Middle);
+
+    let (fid, res) = results();
+    let hole = geom_ref(fid, TopoKind::Face, HOLE_FACE);
+    let c = adjusted_connector(
+        Frame::default(),
+        AxialAnchor::PositiveEnd,
+        true,
+        0.0,
+        [0.0; 3],
+    );
+    assert_eq!(
+        c.derivation_anchor(),
+        AxialAnchor::NegativeEnd,
+        "the end the FINAL z points toward is the derived axis's −z end"
+    );
+    let (derived, _) =
+        resolve_connector_frame(&hole, &res, &Fixture, c.derivation_anchor()).expect("resolves");
+    let f = c.adjusted(derived).expect("adjusts");
+    assert!(
+        near(f.origin, [HOLE_X, HOLE_Y, 0.0]),
+        "the bottom rim: where the flipped z points, got {:?}",
+        f.origin
+    );
+    assert!(near(f.z_axis, [0.0, 0.0, -1.0]), "z points down");
+}
+
+/// A turn about z moves the secondary axis only: 90° takes x onto the old
+/// y, z and the origin stay.
+#[test]
+fn rotation_about_z_turns_the_secondary_axis() {
+    let base = Frame::on_plane([0.001, 0.002, 0.003], [0.0, 0.0, 1.0]);
+    let (x0, y0, _) = base.basis().unwrap();
+    assert!(
+        near(x0, [1.0, 0.0, 0.0]) && near(y0, [0.0, 1.0, 0.0]),
+        "the fixture's basis"
+    );
+    let c = adjusted_connector(base, AxialAnchor::Middle, false, 90.0, [0.0; 3]);
+    let f = c.adjusted(base).expect("adjusts");
+    let (x, y, z) = f.basis().unwrap();
+    assert!(near(x, [0.0, 1.0, 0.0]), "x onto the old y, got {x:?}");
+    assert!(near(y, [-1.0, 0.0, 0.0]), "y onto −x, got {y:?}");
+    assert!(near(z, [0.0, 0.0, 1.0]), "z unchanged");
+    assert!(near(f.origin, base.origin), "the origin stays");
+}
+
+/// The offset is along the connector's OWN final axes, after the turn and
+/// the flip: 1 mm along x after a 90° turn is 1 mm along the part's +Y, and
+/// 1 mm along z on a flipped frame is 1 mm DOWN.
+#[test]
+fn offset_moves_along_the_final_axes() {
+    let base = Frame::on_plane([0.001, 0.002, 0.003], [0.0, 0.0, 1.0]);
+
+    let turned = adjusted_connector(base, AxialAnchor::Middle, false, 90.0, [0.001, 0.0, 0.0]);
+    let f = turned.adjusted(base).expect("adjusts");
+    assert!(
+        near(f.origin, [0.001, 0.003, 0.003]),
+        "along the TURNED x (the part's +Y), got {:?}",
+        f.origin
+    );
+
+    let flipped = adjusted_connector(base, AxialAnchor::Middle, true, 0.0, [0.0, 0.0, 0.001]);
+    let f = flipped.adjusted(base).expect("adjusts");
+    assert!(
+        near(f.origin, [0.001, 0.002, 0.002]),
+        "along the FLIPPED z (down), got {:?}",
+        f.origin
+    );
+
+    let plain = adjusted_connector(base, AxialAnchor::Middle, false, 0.0, [0.001, 0.002, 0.003]);
+    let f = plain.adjusted(base).expect("adjusts");
+    assert!(
+        near(f.origin, [0.002, 0.004, 0.006]),
+        "x, y, z of an unturned +Z frame are the part's axes, got {:?}",
+        f.origin
+    );
+}
+
+/// A degenerate z cannot carry a turn or an offset: loud, never a frame
+/// silently left unadjusted. (Nothing to adjust passes the frame through —
+/// the solver reports the degenerate z itself.)
+#[test]
+fn adjusting_a_degenerate_frame_is_loud() {
+    let bad = Frame {
+        origin: [0.0; 3],
+        z_axis: [0.0; 3],
+        x_axis: [0.0; 3],
+    };
+    assert!(
+        adjusted_connector(bad, AxialAnchor::Middle, false, 0.0, [0.0, 0.0, 0.001])
+            .adjusted(bad)
+            .is_err()
+    );
+    assert!(
+        adjusted_connector(bad, AxialAnchor::Middle, false, 10.0, [0.0; 3])
+            .adjusted(bad)
+            .is_err()
+    );
+    assert!(
+        adjusted_connector(bad, AxialAnchor::Middle, false, 0.0, [0.0; 3])
+            .adjusted(bad)
+            .is_ok()
+    );
+}
+
+/// The four adjustments are additive on the wire: at their defaults they are
+/// omitted, so a connector without them serializes exactly as before they
+/// existed; set, they round-trip; a document written before they existed
+/// reads as the defaults.
+#[test]
+fn adjustments_are_additive_on_the_wire() {
+    let plain = adjusted_connector(Frame::default(), AxialAnchor::Middle, false, 0.0, [0.0; 3]);
+    let v = serde_json::to_value(&plain).unwrap();
+    for key in ["anchor", "flip_z", "rotation_deg", "offset_m"] {
+        assert!(v.get(key).is_none(), "`{key}` omitted at its default: {v}");
+    }
+
+    let set = adjusted_connector(
+        Frame::default(),
+        AxialAnchor::PositiveEnd,
+        true,
+        30.0,
+        [0.001, 0.0, -0.002],
+    );
+    let v = serde_json::to_value(&set).unwrap();
+    assert_eq!(v["anchor"], json!("positive_end"));
+    assert_eq!(v["flip_z"], json!(true));
+    assert_eq!(v["rotation_deg"], json!(30.0));
+    assert_eq!(v["offset_m"], json!([0.001, 0.0, -0.002]));
+    let back: MateConnector = serde_json::from_value(v).unwrap();
+    assert_eq!(back.anchor, AxialAnchor::PositiveEnd);
+    assert!(back.flip_z);
+    assert_eq!(back.rotation_deg, 30.0);
+    assert_eq!(back.offset_m, [0.001, 0.0, -0.002]);
+    assert!(back.extra.is_empty(), "known keys are fields, not `extra`");
+
+    let old: MateConnector = serde_json::from_value(json!({
+        "id": "6f1c2a4e-1111-4222-8333-444455556666",
+        "name": "top",
+        "instance_path": ["6f1c2a4e-1111-4222-8333-444455556677"],
+        "frame": { "origin": [0.0, 0.0, 0.01], "z_axis": [0.0, 0.0, 1.0] }
+    }))
+    .unwrap();
+    assert_eq!(old.anchor, AxialAnchor::Middle);
+    assert!(!old.flip_z);
+    assert_eq!(old.rotation_deg, 0.0);
+    assert_eq!(old.offset_m, [0.0; 3]);
 }

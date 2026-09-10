@@ -474,6 +474,7 @@ fn handle_message(
                     &geom_ref,
                     &engine.feature_results,
                     kb.as_introspect(),
+                    feature_engine::assembly::AxialAnchor::Middle,
                 ) {
                     Ok((_, kind)) => EngineToUi::ConnectorRefProbed {
                         ok: true,

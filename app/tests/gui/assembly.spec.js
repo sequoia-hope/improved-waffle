@@ -299,6 +299,42 @@ test.describe('Assemblies: mate connector frames', () => {
 		expect(near(Math.abs(frame.z_axis[2]), 1, 1e-9)).toBe(true);
 
 		await expect(page.locator('[data-testid="asm-connector-kind-0"]')).toContainText('cylindrical face');
+
+		// Editing after creation (specs/assembly_connector_adjustments.md).
+		// The extrude spans z = 0 … 20 (raw units): the anchor moves the frame
+		// to the end its z points toward, the offset moves it along the
+		// connector's OWN z (5000 mm = 5 units), and the flip reverses z with
+		// the anchor following it to the other end.
+		const frameAt = (pred, arg = null) =>
+			page.waitForFunction(pred, arg, { timeout: 15000 }).then(() =>
+				page.evaluate(() => window.__waffle.getAssemblyConnectorFrames()[0])
+			);
+		await page.evaluate((id) => window.__waffle.updateConnector(id, { anchor: 'positive_end' }), cid);
+		const atEnd = await frameAt(() => Math.abs(window.__waffle.getAssemblyConnectorFrames()[0]?.origin[2] - 10) > 1);
+		const sign = atEnd.z_axis[2] > 0 ? 1 : -1;
+		const endZ = sign > 0 ? 20 : 0;
+		expect(near(atEnd.origin[2], endZ, 1e-9), `at the end z points toward: ${JSON.stringify(atEnd)}`).toBe(true);
+		await expect(page.locator('[data-testid="asm-connector-anchor-0"]')).toHaveValue('positive_end');
+
+		await page.evaluate((id) => window.__waffle.updateConnector(id, { offsetMm: [0, 0, 5000] }), cid);
+		const shifted = await frameAt(
+			(z) => Math.abs(window.__waffle.getAssemblyConnectorFrames()[0]?.origin[2] - z) > 1,
+			endZ
+		);
+		expect(near(shifted.origin[2], endZ + 5 * sign, 1e-9), `5 along z: ${JSON.stringify(shifted)}`).toBe(true);
+		await expect(page.locator('[data-testid="asm-connector-oz-0"]')).toHaveValue('5000');
+
+		await page.locator('[data-testid="asm-connector-flip-0"]').check();
+		const flipped = await frameAt((s) => window.__waffle.getAssemblyConnectorFrames()[0]?.z_axis[2] * s < 0, sign);
+		expect(near(flipped.z_axis[2], -sign, 1e-9)).toBe(true);
+		// "+z end" is now the OTHER end, and the 5 along z now goes the other way.
+		expect(near(flipped.origin[2], 20 - endZ - 5 * sign, 1e-9), `flipped: ${JSON.stringify(flipped)}`).toBe(true);
+		expect(await page.evaluate(() => window.__waffle.getAssembly().connectors[0].flip_z)).toBe(true);
+
+		// Renamed from the panel; the mate chooser lists the new name.
+		await page.locator('[data-testid="asm-connector-name-0"]').fill('pin axis');
+		await page.locator('[data-testid="asm-connector-name-0"]').press('Enter');
+		await page.waitForFunction(() => window.__waffle.getAssembly().connectors[0].name === 'pin axis', { timeout: 10000 });
 	});
 
 	test('a pick the engine cannot derive a frame from is refused, and no connector is minted', async ({ waffle }) => {

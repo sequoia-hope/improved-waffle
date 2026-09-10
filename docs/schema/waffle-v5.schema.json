@@ -117,6 +117,27 @@
       },
       "type": "object"
     },
+    "AxialAnchor": {
+      "description": "Where along a rotational face's axis a derived connector sits\n(`crate::connector`, `specs/assembly_connector_adjustments.md`): the\nmiddle of the face's axial extent (the default — what a Revolute or\nCylindrical mate wants) or one of its ends. The ends are named by the\nconnector's FINAL z (after `flip_z`), so they always read against the\ntriad the viewport draws: \"+z end\" is wherever the blue arrow points.\nIgnored by every other pick (a planar face, a sphere, an edge, an\nexplicit frame).",
+      "oneOf": [
+        {
+          "enum": [
+            "middle"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "positive_end",
+          "description": "The end of the face's extent that z points toward.",
+          "type": "string"
+        },
+        {
+          "const": "negative_end",
+          "description": "The end of the face's extent that z points away from.",
+          "type": "string"
+        }
+      ]
+    },
     "BooleanOp": {
       "description": "Boolean operation type.",
       "oneOf": [
@@ -1324,8 +1345,16 @@
     },
     "MateConnector": {
       "additionalProperties": true,
-      "description": "A named frame on an instance's geometry. `geom_ref` (a face of the part,\nin the part's own feature space) derives the frame from the current\ngeometry at evaluation time — origin on the face, z along its outward\nnormal — with `frame.x_axis` as the secondary direction when set; without\na `geom_ref`, `frame` is the frame.",
+      "description": "A named frame on an instance's geometry. `geom_ref` (a face or an edge\nof the part, in the part's own feature space) derives the frame from the\ncurrent geometry at evaluation time (`crate::connector`) — with\n`frame.x_axis` as the secondary direction when set; without a `geom_ref`,\n`frame` is the frame. Either way the connector's adjustments then apply\n([`MateConnector::adjusted`]): `anchor` chooses the point on a rotational\nface's axis, `flip_z` reverses z, `rotation_deg` turns about z, and\n`offset_m` moves along the resulting axes. All four default to \"as\nderived\", so a connector without them is exactly what it was before they\nexisted (additive, no reader-floor bump).",
       "properties": {
+        "anchor": {
+          "$ref": "#/$defs/AxialAnchor",
+          "description": "Where on a rotational face's axis the derived frame sits (default:\nthe middle of the face's extent). See [`AxialAnchor`]."
+        },
+        "flip_z": {
+          "description": "Reverse the frame's z axis (a 180° turn about x, so the basis stays\nright-handed). The first adjustment applied.",
+          "type": "boolean"
+        },
         "frame": {
           "$ref": "#/$defs/Frame",
           "default": {
@@ -1370,6 +1399,21 @@
         },
         "name": {
           "type": "string"
+        },
+        "offset_m": {
+          "description": "Move along the frame's OWN axes after the turn, meters: `[x, y, z]`.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "type": "array"
+        },
+        "rotation_deg": {
+          "description": "Turn about the frame's z, in degrees, after `flip_z`. What this moves\nis the secondary (x) axis — a Fastened mate's in-plane alignment.",
+          "format": "double",
+          "type": "number"
         }
       },
       "required": [

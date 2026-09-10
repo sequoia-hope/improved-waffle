@@ -832,6 +832,7 @@ export async function initEngine() {
 			updateInstance: (id, patch) => updateInstance(id, patch),
 			removeInstance: (id) => removeInstance(id),
 			addConnector: (opts) => addConnector(opts),
+			updateConnector: (id, patch) => updateConnector(id, patch),
 			removeConnector: (id) => removeConnector(id),
 			probeConnectorRef: (path, ref) => probeConnectorRef(path, ref),
 			getAssemblyConnectorFrames: () => JSON.parse(JSON.stringify(getAssemblyConnectorFrames())),
@@ -6035,6 +6036,51 @@ export async function addConnector({ instanceId = null, instancePath = null, geo
 			frame: frame ? JSON.parse(JSON.stringify(frame)) : { origin: [0, 0, 0], z_axis: [0, 0, 1], x_axis: [0, 0, 0] }
 		});
 		return id;
+	});
+}
+
+/**
+ * Where on a rotational face's axis a connector's frame sits: the middle of
+ * the face's extent, or the end its z axis points toward / away from. The
+ * ends are named by the connector's FINAL z (after `flipZ`), i.e. against
+ * the triad the viewport draws.
+ */
+export const CONNECTOR_ANCHORS = ['middle', 'positive_end', 'negative_end'];
+
+/**
+ * Edit a mate connector after creation (`specs/assembly_connector_adjustments.md`):
+ * `name`; `anchor` (one of `CONNECTOR_ANCHORS`, for a connector on a
+ * cylindrical/conical/toroidal face); `flipZ` (reverse z — a 180° turn
+ * about x); `rotationDeg` (turn about z, after the flip); `offsetMm`
+ * (`[x, y, z]` along the connector's OWN axes after the turn). Each
+ * adjustment at its default is removed from the stored connector, so an
+ * unadjusted connector is written exactly as before these fields existed.
+ */
+export async function updateConnector(connectorId, patch) {
+	return editAssembly((asm) => {
+		const c = (asm.connectors ?? []).find(x => x.id === connectorId);
+		if (!c) return false;
+		if ('name' in patch) c.name = String(patch.name ?? '') || c.name;
+		if ('anchor' in patch) {
+			if (CONNECTOR_ANCHORS.includes(patch.anchor) && patch.anchor !== 'middle') c.anchor = patch.anchor;
+			else delete c.anchor;
+		}
+		if ('flipZ' in patch) {
+			if (patch.flipZ) c.flip_z = true;
+			else delete c.flip_z;
+		}
+		if ('rotationDeg' in patch) {
+			const r = Number(patch.rotationDeg) || 0;
+			if (r) c.rotation_deg = r;
+			else delete c.rotation_deg;
+		}
+		if ('offsetMm' in patch) {
+			// Stored in meters, like every length in the document.
+			const o = [0, 1, 2].map(k => (Number(patch.offsetMm?.[k]) || 0) / 1000);
+			if (o.some(v => v !== 0)) c.offset_m = o;
+			else delete c.offset_m;
+		}
+		return true;
 	});
 }
 

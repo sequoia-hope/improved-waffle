@@ -331,12 +331,13 @@ fn evaluate_tree(
                 }
             }
         };
-        let frame = match (&c.geom_ref, part_idx) {
+        let base = match (&c.geom_ref, part_idx) {
             (Some(geom_ref), Some(idx)) => {
                 match resolve_connector_frame(
                     geom_ref,
                     &ctx.parts[idx].1.feature_results,
                     introspect,
+                    c.derivation_anchor(),
                 ) {
                     Ok((mut frame, kind)) => {
                         // An author-set secondary direction still wins; the
@@ -345,7 +346,7 @@ fn evaluate_tree(
                             frame.x_axis = c.frame.x_axis;
                         }
                         geometry.insert(c.id, kind);
-                        frame.transformed(&rel)
+                        frame
                     }
                     Err(e) => {
                         // The geometry the connector was placed on is gone or
@@ -357,13 +358,27 @@ fn evaluate_tree(
                              ({e}); using its explicit frame",
                             c.name, c.id
                         ));
-                        c.frame.transformed(&rel)
+                        c.frame
                     }
                 }
             }
-            _ => c.frame.transformed(&rel),
+            _ => c.frame,
         };
-        frames.insert(c.id, frame);
+        // The connector's own adjustments (flip, turn, offset) apply to the
+        // derived or explicit frame alike, in its own axes — before the
+        // member's placement takes it into the top-level instance's space.
+        let frame = match c.adjusted(base) {
+            Ok(f) => f,
+            Err(e) => {
+                ctx.errors.push(format!(
+                    "connector `{}` ({}): its adjustments cannot be applied ({e}); \
+                     using the unadjusted frame",
+                    c.name, c.id
+                ));
+                base
+            }
+        };
+        frames.insert(c.id, frame.transformed(&rel));
     }
 
     let solved = solve_mates(tree, &frames, 1e-6);

@@ -340,6 +340,54 @@ impl Frame {
             x_axis: t.apply_dir(self.x_axis),
         }
     }
+
+    /// The frame with its z axis reversed: a turn of 180° about x, so x
+    /// stays and y reverses with z (the basis stays right-handed). A zero
+    /// `x_axis` stays zero — [`Frame::basis`] picks the same world axis for
+    /// z and −z, so the derived x is the same either way.
+    pub fn flipped(&self) -> Frame {
+        Frame {
+            origin: self.origin,
+            z_axis: [-self.z_axis[0], -self.z_axis[1], -self.z_axis[2]],
+            x_axis: self.x_axis,
+        }
+    }
+
+    /// The frame turned by `deg` about its own z axis. The secondary axis
+    /// becomes explicit (the turned x), so the turn survives `basis`'s
+    /// deterministic choice. Errors when z is degenerate; a zero turn is the
+    /// frame unchanged.
+    pub fn rotated_about_z(&self, deg: f64) -> Result<Frame, String> {
+        if deg == 0.0 {
+            return Ok(*self);
+        }
+        let (x, y, _) = self.basis()?;
+        let (s, c) = deg.to_radians().sin_cos();
+        Ok(Frame {
+            origin: self.origin,
+            z_axis: self.z_axis,
+            x_axis: [
+                c * x[0] + s * y[0],
+                c * x[1] + s * y[1],
+                c * x[2] + s * y[2],
+            ],
+        })
+    }
+
+    /// The frame moved along its OWN axes: `offset[0]` along x, `[1]` along
+    /// y, `[2]` along z (meters). Errors when z is degenerate; a zero offset
+    /// is the frame unchanged.
+    pub fn offset_along_axes(&self, offset: [f64; 3]) -> Result<Frame, String> {
+        if offset == [0.0; 3] {
+            return Ok(*self);
+        }
+        let (x, y, z) = self.basis()?;
+        let mut origin = self.origin;
+        for k in 0..3 {
+            origin[k] += offset[0] * x[k] + offset[1] * y[k] + offset[2] * z[k];
+        }
+        Ok(Frame { origin, ..*self })
+    }
 }
 
 // -------------------------------------------------------------------- model
@@ -386,11 +434,55 @@ fn is_false(b: &bool) -> bool {
     !*b
 }
 
-/// A named frame on an instance's geometry. `geom_ref` (a face of the part,
-/// in the part's own feature space) derives the frame from the current
-/// geometry at evaluation time — origin on the face, z along its outward
-/// normal — with `frame.x_axis` as the secondary direction when set; without
-/// a `geom_ref`, `frame` is the frame.
+fn is_zero3(v: &[f64; 3]) -> bool {
+    *v == [0.0; 3]
+}
+
+/// Where along a rotational face's axis a derived connector sits
+/// (`crate::connector`, `specs/assembly_connector_adjustments.md`): the
+/// middle of the face's axial extent (the default — what a Revolute or
+/// Cylindrical mate wants) or one of its ends. The ends are named by the
+/// connector's FINAL z (after `flip_z`), so they always read against the
+/// triad the viewport draws: "+z end" is wherever the blue arrow points.
+/// Ignored by every other pick (a planar face, a sphere, an edge, an
+/// explicit frame).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum AxialAnchor {
+    #[default]
+    Middle,
+    /// The end of the face's extent that z points toward.
+    PositiveEnd,
+    /// The end of the face's extent that z points away from.
+    NegativeEnd,
+}
+
+impl AxialAnchor {
+    /// The same end seen along the reversed axis.
+    pub fn mirrored(self) -> Self {
+        match self {
+            AxialAnchor::Middle => AxialAnchor::Middle,
+            AxialAnchor::PositiveEnd => AxialAnchor::NegativeEnd,
+            AxialAnchor::NegativeEnd => AxialAnchor::PositiveEnd,
+        }
+    }
+
+    fn is_middle(&self) -> bool {
+        *self == AxialAnchor::Middle
+    }
+}
+
+/// A named frame on an instance's geometry. `geom_ref` (a face or an edge
+/// of the part, in the part's own feature space) derives the frame from the
+/// current geometry at evaluation time (`crate::connector`) — with
+/// `frame.x_axis` as the secondary direction when set; without a `geom_ref`,
+/// `frame` is the frame. Either way the connector's adjustments then apply
+/// ([`MateConnector::adjusted`]): `anchor` chooses the point on a rotational
+/// face's axis, `flip_z` reverses z, `rotation_deg` turns about z, and
+/// `offset_m` moves along the resulting axes. All four default to "as
+/// derived", so a connector without them is exactly what it was before they
+/// existed (additive, no reader-floor bump).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "json-schema", derive(schemars::JsonSchema))]
 pub struct MateConnector {
@@ -406,11 +498,49 @@ pub struct MateConnector {
     pub geom_ref: Option<GeomRef>,
     #[serde(default)]
     pub frame: Frame,
+    /// Where on a rotational face's axis the derived frame sits (default:
+    /// the middle of the face's extent). See [`AxialAnchor`].
+    #[serde(default, skip_serializing_if = "AxialAnchor::is_middle")]
+    pub anchor: AxialAnchor,
+    /// Reverse the frame's z axis (a 180° turn about x, so the basis stays
+    /// right-handed). The first adjustment applied.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub flip_z: bool,
+    /// Turn about the frame's z, in degrees, after `flip_z`. What this moves
+    /// is the secondary (x) axis — a Fastened mate's in-plane alignment.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub rotation_deg: f64,
+    /// Move along the frame's OWN axes after the turn, meters: `[x, y, z]`.
+    #[serde(default, skip_serializing_if = "is_zero3")]
+    pub offset_m: [f64; 3],
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
 
 impl MateConnector {
+    /// The anchor the resolver applies along the DERIVED axis. The ends are
+    /// named against the connector's final z, so with `flip_z` they swap.
+    pub fn derivation_anchor(&self) -> AxialAnchor {
+        if self.flip_z {
+            self.anchor.mirrored()
+        } else {
+            self.anchor
+        }
+    }
+
+    /// This connector's adjustments applied to a frame (the one derived from
+    /// its geometry, or its explicit `frame`), in this order: `flip_z`, then
+    /// `rotation_deg` about z, then `offset_m` along the resulting axes.
+    /// Every step is in the frame's own coordinates, so what a user types
+    /// reads against the triad the viewport draws. Errors when the frame's z
+    /// is degenerate (the caller reports it; nothing is substituted).
+    pub fn adjusted(&self, frame: Frame) -> Result<Frame, String> {
+        let frame = if self.flip_z { frame.flipped() } else { frame };
+        frame
+            .rotated_about_z(self.rotation_deg)?
+            .offset_along_axes(self.offset_m)
+    }
+
     /// The owning instance when the connector is on a direct part instance
     /// (a one-element path).
     pub fn instance_id(&self) -> Option<Uuid> {
@@ -964,6 +1094,10 @@ mod tests {
             instance_path: vec![inst_id],
             geom_ref: None,
             frame: Frame::default(),
+            anchor: AxialAnchor::Middle,
+            flip_z: false,
+            rotation_deg: 0.0,
+            offset_m: [0.0; 3],
             extra: Map::new(),
         };
         let tree = AssemblyTree {

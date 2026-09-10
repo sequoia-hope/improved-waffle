@@ -7,7 +7,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use feature_engine::assembly::{
-    AssemblyTree, Frame, Instance, Mate, MateConnector, MateKind, PartRef, Transform,
+    AssemblyTree, AxialAnchor, Frame, Instance, Mate, MateConnector, MateKind, PartRef, Transform,
 };
 use feature_engine::types::*;
 use kernel_v2::KernelV2Adapter;
@@ -58,6 +58,10 @@ fn connector(name: &str, inst: Uuid, geom_ref: Option<GeomRef>, frame: Frame) ->
         instance_path: vec![inst],
         geom_ref,
         frame,
+        anchor: AxialAnchor::Middle,
+        flip_z: false,
+        rotation_deg: 0.0,
+        offset_m: [0.0; 3],
         extra: Map::new(),
     }
 }
@@ -1222,4 +1226,124 @@ fn probe_connector_ref_accepts_a_cylindrical_pick_and_refuses_what_has_no_frame(
     let (ok, _, reason) = probe(&mut state, &mut kernel, cube_top_face(Uuid::new_v4(), None));
     assert!(!ok, "an unresolvable pick is refused");
     assert!(reason.is_some(), "with a reason the panel can show");
+}
+
+/// A connector's adjustments (`specs/assembly_connector_adjustments.md`) on
+/// real geometry — the washer's bore anchored at an end, flipped, and
+/// offset, and an explicit-frame connector turned about z. The bore spans
+/// z = 0 … 4 mm; "+z end" is the end the REPORTED z points toward, whichever
+/// sense the kernel drilled the hole in.
+#[test]
+fn connector_adjustments_move_the_frame_in_its_own_axes() {
+    let mut state = EngineState::new();
+    let mut kernel = KernelV2Adapter::new();
+
+    circle_extrude(
+        &mut state,
+        &mut kernel,
+        (0.0, [0.0, 0.0, 1.0]),
+        0.010,
+        0.004,
+        CombineMode::Add,
+    );
+    circle_extrude(
+        &mut state,
+        &mut kernel,
+        (0.004, [0.0, 0.0, 1.0]),
+        0.003,
+        0.006,
+        CombineMode::Cut,
+    );
+    let (bore_ref, _) = smallest_cylinder_face_ref(&state, &kernel);
+    let washer = state.engine.tree.clone();
+    dispatch(&mut state, UiToEngine::NewDocument, &mut kernel);
+    let parts: HashMap<String, FeatureTree> = HashMap::from([("washer".to_string(), washer)]);
+
+    let w = instance("W", "washer", Transform::identity(), true);
+    let idw = w.id;
+    let mut end = connector("end", idw, Some(bore_ref.clone()), Frame::default());
+    end.anchor = AxialAnchor::PositiveEnd;
+    let mut flipped = connector("flipped", idw, Some(bore_ref.clone()), Frame::default());
+    flipped.anchor = AxialAnchor::PositiveEnd;
+    flipped.flip_z = true;
+    let mut shifted = connector("shifted", idw, Some(bore_ref), Frame::default());
+    shifted.offset_m = [0.0, 0.0, 0.001];
+    let mut turned = connector(
+        "turned",
+        idw,
+        None,
+        Frame::on_plane([0.0, 0.0, 0.004], [0.0, 0.0, 1.0]),
+    );
+    turned.rotation_deg = 90.0;
+    turned.offset_m = [0.001, 0.0, 0.0];
+    let (id_end, id_flipped, id_shifted, id_turned) = (end.id, flipped.id, shifted.id, turned.id);
+    let tree = AssemblyTree {
+        instances: vec![w],
+        connectors: vec![end, flipped, shifted, turned],
+        mates: Vec::new(),
+        placements: BTreeMap::new(),
+        extra: Map::new(),
+    };
+
+    let status = open(&mut state, &mut kernel, &tree, &parts);
+    assert!(status.errors.is_empty(), "{:?}", status.errors);
+    let frame_of = |id: Uuid| {
+        status
+            .connectors
+            .iter()
+            .find(|c| c.id == id)
+            .unwrap_or_else(|| panic!("connector {id} reported"))
+            .clone()
+    };
+
+    let e = frame_of(id_end);
+    assert_eq!(e.kind.as_deref(), Some("cylindrical face"));
+    let rim_z = if e.z_axis[2] > 0.0 { 0.004 } else { 0.0 };
+    assert!(
+        near3(e.origin, [0.0, 0.0, rim_z], 1e-9),
+        "the rim +z points toward (z = {rim_z}), got {:?} with z {:?}",
+        e.origin,
+        e.z_axis
+    );
+
+    // Flipping reverses the reported z, and "+z end" follows it to the
+    // other rim.
+    let f = frame_of(id_flipped);
+    assert!(
+        (f.z_axis[2] + e.z_axis[2]).abs() < 1e-9,
+        "z reversed: {:?} vs {:?}",
+        f.z_axis,
+        e.z_axis
+    );
+    assert!(
+        near3(f.origin, [0.0, 0.0, 0.004 - rim_z], 1e-9),
+        "the other rim, got {:?}",
+        f.origin
+    );
+
+    // 1 mm along the connector's own z from mid-depth, the way z points.
+    let s = frame_of(id_shifted);
+    assert!(
+        near3(s.origin, [0.0, 0.0, 0.002 + 0.001 * s.z_axis[2]], 1e-9),
+        "mid-depth + 1 mm along z, got {:?} with z {:?}",
+        s.origin,
+        s.z_axis
+    );
+
+    // An explicit frame: x turned onto +Y, then 1 mm along that x.
+    let t = frame_of(id_turned);
+    assert!(
+        t.kind.is_none(),
+        "an explicit frame is derived from nothing"
+    );
+    assert!(
+        near3(t.x_axis, [0.0, 1.0, 0.0], 1e-9),
+        "x turned, got {:?}",
+        t.x_axis
+    );
+    assert!(
+        near3(t.origin, [0.0, 0.001, 0.004], 1e-9),
+        "offset along the turned x, got {:?}",
+        t.origin
+    );
 }

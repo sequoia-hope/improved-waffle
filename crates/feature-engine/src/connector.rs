@@ -17,7 +17,7 @@
 //! | pick | origin | z |
 //! |---|---|---|
 //! | planar face | face centroid | outward normal |
-//! | cylindrical / conical / toroidal face | the point on the axis at the middle of the FACE's own axial extent | the surface axis |
+//! | cylindrical / conical / toroidal face | the point on the axis at the middle of the FACE's own axial extent — or at either end, by the connector's [`AxialAnchor`] | the surface axis |
 //! | spherical face | the centre | the kernel's canonical sphere axis |
 //! | circular / elliptical edge | the centre | the rim's outward sense (see [`rim_axis_sense`]) |
 //! | straight edge | the midpoint | along the edge |
@@ -28,11 +28,15 @@
 //! mid-depth, so "origins coincide, axes parallel" centres the pin in the
 //! hole. It is a policy choice, which is why the kernel contract reports the
 //! surface's own reference point ([`EntityAxis::origin`]) and leaves the
-//! placement on that axis here.
+//! placement on that axis here — and why the connector can choose an end of
+//! the extent instead (`specs/assembly_connector_adjustments.md`).
 //!
 //! There is deliberately no in-plane x: a cylinder has no canonical one.
 //! [`crate::assembly::Frame::basis`] derives a stable x from z, and the
-//! mate's `rotation_deg` is the control — never a fabricated direction.
+//! connector's `rotation_deg` (or the mate's) is the control — never a
+//! fabricated direction. The connector's other adjustments (`flip_z`,
+//! `rotation_deg`, `offset_m`) are applied by
+//! [`crate::assembly::MateConnector::adjusted`] to what this module derives.
 
 use std::collections::HashMap;
 
@@ -42,7 +46,7 @@ use waffle_types::kernel::units::TAU_WORK;
 use waffle_types::kernel::{AxisKind, EntityAxis, KernelId, KernelIntrospect};
 use waffle_types::{GeomRef, TopoKind};
 
-use crate::assembly::Frame;
+use crate::assembly::{AxialAnchor, Frame};
 use crate::resolve::resolve_with_fallback;
 use crate::types::EngineError;
 
@@ -80,7 +84,10 @@ impl ConnectorGeometry {
 }
 
 /// Derive a connector's frame from the geometry its `GeomRef` names, in the
-/// part's own coordinates.
+/// part's own coordinates. `anchor` is where on a rotational face's axis the
+/// frame sits, measured along the DERIVED axis (a connector with `flip_z`
+/// passes [`crate::assembly::MateConnector::derivation_anchor`]); it is
+/// ignored by every other pick.
 ///
 /// Loud (typed [`EngineError::ResolutionFailed`]) when the reference does not
 /// resolve, or resolves to geometry with no derivable frame — an imported
@@ -91,12 +98,13 @@ pub fn resolve_connector_frame(
     geom_ref: &GeomRef,
     feature_results: &HashMap<Uuid, OpResult>,
     introspect: &dyn KernelIntrospect,
+    anchor: AxialAnchor,
 ) -> Result<(Frame, ConnectorGeometry), EngineError> {
     let resolved = resolve_with_fallback(geom_ref, feature_results)?;
     let id = resolved.kernel_id;
 
     match geom_ref.kind {
-        TopoKind::Face => face_frame(id, introspect),
+        TopoKind::Face => face_frame(id, introspect, anchor),
         TopoKind::Edge => edge_frame(id, introspect),
         TopoKind::Vertex => Err(EngineError::ResolutionFailed {
             reason: "a vertex carries no direction, so it cannot define a connector frame; \
@@ -112,6 +120,7 @@ pub fn resolve_connector_frame(
 fn face_frame(
     id: KernelId,
     introspect: &dyn KernelIntrospect,
+    anchor: AxialAnchor,
 ) -> Result<(Frame, ConnectorGeometry), EngineError> {
     let sig = introspect.compute_signature(id, TopoKind::Face);
 
@@ -151,7 +160,7 @@ fn face_frame(
         )),
         kind => Ok((
             Frame {
-                origin: axial_extent_midpoint(id, &axis, direction, introspect),
+                origin: axial_extent_point(id, &axis, direction, introspect, anchor),
                 z_axis: direction,
                 x_axis: [0.0; 3],
             },
@@ -213,19 +222,22 @@ fn edge_frame(
     ))
 }
 
-/// The point on `axis` at the middle of the face's own axial extent: every
+/// The point on `axis` at the middle of the face's own axial extent — or at
+/// the end `direction` points toward / away from, by `anchor`: every
 /// boundary point of the face (its edges at render density) projected onto
-/// the axis, halfway between the extremes.
+/// the axis, then the extremes or halfway between them.
 ///
 /// So a drilled hole's connector sits at mid-depth and a shaft's at
 /// mid-height — the axis point a Revolute or Cylindrical mate should bring
-/// together. Falls back to the surface's own reference point when the face
-/// reports no boundary geometry (never a wrong answer, just an unrefined one).
-fn axial_extent_midpoint(
+/// together — unless the connector asks for a rim. Falls back to the
+/// surface's own reference point when the face reports no boundary geometry
+/// (never a wrong answer, just an unrefined one).
+fn axial_extent_point(
     face: KernelId,
     axis: &EntityAxis,
     direction: [f64; 3],
     introspect: &dyn KernelIntrospect,
+    anchor: AxialAnchor,
 ) -> [f64; 3] {
     let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
     for edge in introspect.face_edges(face) {
@@ -243,11 +255,15 @@ fn axial_extent_midpoint(
     if !lo.is_finite() || !hi.is_finite() {
         return axis.origin;
     }
-    let mid = (lo + hi) / 2.0;
+    let t = match anchor {
+        AxialAnchor::Middle => (lo + hi) / 2.0,
+        AxialAnchor::PositiveEnd => hi,
+        AxialAnchor::NegativeEnd => lo,
+    };
     [
-        axis.origin[0] + direction[0] * mid,
-        axis.origin[1] + direction[1] * mid,
-        axis.origin[2] + direction[2] * mid,
+        axis.origin[0] + direction[0] * t,
+        axis.origin[1] + direction[1] * t,
+        axis.origin[2] + direction[2] * t,
     ]
 }
 

@@ -332,7 +332,7 @@ pub fn solve_mates(tree: &AssemblyTree, frames: &HashMap<Uuid, Frame>, tol_m: f6
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::assembly::{Instance, MateConnector, PartRef};
+    use crate::assembly::{AxialAnchor, Instance, MateConnector, PartRef};
     use serde_json::Map;
     use std::collections::BTreeMap;
 
@@ -364,6 +364,10 @@ mod tests {
             instance_path: vec![i],
             geom_ref: None,
             frame,
+            anchor: AxialAnchor::Middle,
+            flip_z: false,
+            rotation_deg: 0.0,
+            offset_m: [0.0; 3],
             extra: Map::new(),
         }
     }
