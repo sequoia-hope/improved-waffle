@@ -9,6 +9,18 @@
 
 ## 0. Honest status (refreshed 2026-06-26; addendum 2026-09-04 below)
 
+> **2026-09-11 (night, fourth) refresh.** Canonical corpus **283C / 0W / 22E / 4EE / 0T + 3 UNSUPPORTED(coplanar-boolean)** (release, 8 jobs, 600 s; F0085 335.0 s, R0044 290.7 s).
+> **R0070 ERROR → UNSUPPORTED(coplanar-boolean)**: Stage-6's curved branch
+> labelled a bounded cylinder patch's outer loop as the MOST-EDGES cycle
+> (a 226-edge ellipse-chain hole vs a 14-edge rim), so the next op's holed
+> chart CDT emptied the face. `select_outer_cycle` now takes the largest
+> |Newell area| on BOUNDED cylinder/cone patches (no cycle winds the axis)
+> and keeps the historical choice for strips — R0099 showed kernel-v2's
+> `from_yang_brep` is sensitive to which rim of a tube is "outer"
+> (`cylpatch-vertex` one op later; a latent, ledgered). R0070's next wall
+> is the M8 `disc-poly-holed` residue (the cut disc vs a holed planar
+> face), the F0064/F0072 bucket.
+>
 > **2026-09-11 (night, third) refresh.** Canonical corpus **283C / 0W / 23E / 4EE / 0T** (release, 8 jobs, 600 s; F0085 331.0 s, R0044 290.8 s).
 > **R0015 FLIPPED CORRECT** — M8 slice h closing (spec
 > `m8_mixed_orientation_nary.md` §6): an n-ary Stage-0 plane group stamped

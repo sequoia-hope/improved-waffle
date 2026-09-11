@@ -43,6 +43,44 @@ after the reconciliation run (release, 8 jobs, 360 s; wall 577 s, F0085
 regression since 2026-08-01 is outstanding (checked over every commit of
 `results.json`).
 
+## 2026-09-11 (night, fourth) — R0070 advances ERROR → UNSUPPORTED(coplanar-boolean): Stage-6 labelled a bounded cylinder patch inside-out (outer = the MOST-EDGES cycle; its 226-edge ellipse-chain hole outnumbered the 14-edge outer rim), the next op's holed chart CDT emptied the face; outer loop now chosen by EXTENT on bounded cylinder/cone patches; canonical 283C / 0W / 22E / 4EE / 0T (+3 U)
+
+R0070 (6 s; revolve(rectangle) + extrude(gear, cut) + extrude(circle, cut),
+scale 1.7e-2) failed at op 3's INPUT conversion: `face 134: holed lateral CDT
+failed: degenerate CDT input`. Anatomy (`YANG_T145_PROBE`, `YANG_T133_PROBE`,
+offline polygon census): face 134 is a cylinder lateral (r 0.0228) of op 2's
+output bounded by an outer loop of 226 two-point Ellipse arcs (the gear
+flanks' sections) — chart area 3.7e-5 — and ONE hole of 14 edges — chart area
+7.3e-4, twenty times larger. The labels were inverted: `stage5_topology`'s
+curved branch chose the outer loop as the cycle with the MOST edges (tie →
+lowest vertex), while the planar branch chooses the largest |Newell area|.
+Edge count is sampling density, not extent; the Slice-A chart CDT dropped
+everything inside the "hole" and emitted nothing (`tris.is_empty()` ⇒
+`DegenerateInput`).
+
+Fix: `select_outer_cycle` (stage5_topology.rs) — for a BOUNDED patch on a
+cylinder or cone (no cycle winds the axis: the Slice-A/D shapes whose labels
+the chart CDT consumes) the outer loop is the largest-|N| cycle, ties → most
+edges → lowest vertex; a periodic STRIP (any encircling cycle) and every other
+surface kind keep the historical most-edges choice byte-identically. Tests
+`tests_unit/s6_outer_loop_by_extent.rs` (2).
+
+**A latent found on the way (R0099):** the first cut applied the extent rule
+to strips too; R0099's tube (two rims, equal edge counts, |N| within 0.13 %)
+relabelled its rims and ONE OP LATER kernel-v2's import tripped
+`VertexOffSurface` on FaceId(18) (`cylpatch-vertex`, a vertex 6.1e-2 off a
+r = 3.125 cylinder, band 8e-9). A strip's rim labels carry no geometry
+(Slice B classifies by winding), so kernel-v2's `from_yang_brep` has a label
+SENSITIVITY on cylinder patches — unprobed; the guard restores the historical
+labels (R0099 CORRECT again), and this row records the latent.
+
+Corpus (release, 8 jobs, 600 s; F0085 335.0 s, R0044 290.7 s): **283C / 0W /
+22E / 4EE / 0T, 3 UNSUPPORTED(coplanar-boolean)** — exactly one category move
+(R0070 ERROR → UNSUPPORTED: with its face labels right, op 3 reaches the M8
+Stage-0 boundary `disc-poly-holed | pair=(133,0)` — the cut disc against a
+HOLED planar face of the gear-cut output, `YANG_COPLANAR_PROBE`; the same
+bucket as F0064/F0072), zero detail moves.
+
 ## 2026-09-11 (night, third) — R0015 CONVERTED: an n-ary Stage-0 plane group stamped ONE `opposite` flag on every pair while A's sketch-plane fragments have MIXED orientation, and the §4.5.5 sheet rule matched a membrane to the FIRST pair on its plane — a STACKED membrane was kept as flush; NEW CANONICAL 283C / 0W / 23E / 4EE / 0T
 
 R0015 (0.6 s; 3 ops at scale 1.1e-4: revolve(rectangle, 60°) + extrude(circle)
@@ -804,7 +842,7 @@ moved. The 30 ERROR rows are the ACTIVE rows below.
 | ~~R0003~~ | Stage-4 OffCurve v4233 | **FLIPPED CORRECT 2026-08-29 (e8127391); reconciled 2026-09-04 from the committed results.json history** multi-map over-band chain (v4233→v8508); needs ellipse×hyperbola junction handling, band-fixing exhausted (N45/N46). **§4-I12 2026-08-22: v4233 AND v10583 measured as §4.5.1's first confirmed customers** — interior, bounded 1 hop each side by converged vertices sharing cone+plane; the paper's first-strategy repair (midpoint + truncated cross-boundary re-optimize) is the owner, not more junction vocabulary | CONFIRMED (N51/N52; I12) | **§4.5.1 increment 1 (pin case)** — was P3-junction. **inc-2b 2026-08-22: repair landed gated; under `YANG_451=1` the Stage-4 wall clears (11/11 regions) and the case advances to the KV9-F2 developable fold (FaceId 435, cone tan 2.3961 — not a repaired cone ⇒ developable-ring family latent). Post-flip owner: that family** **2026-08-24b: the fold ANCHORED (extended `KV2_PATCH_FOLD_PROBE`): KV9-F2a deep-chord strip fold — a boundary Chord-split node keeps its ORIGINAL chord's sagitta as a permanent off-surface deviation (dev=0.242 vs facet band 0.188), the adjacent Interior splits are exactly on-surface, and a 0.044-thin sliver bridging the layers folds. The deep chords are yang-rs's pair-curve LineSegment polylines at MESH density = the §4.3.4 refine-after-repair debt (trigger fired). Owner: spec `yang_434_output_chord_refinement.md` (design checkpoint landed; R0100/R0020 same mechanism; R0017 is F2b — all-on-surface inversion, unanchored, NOT this fix's customer)** |
 | ~~R0015~~ | ~~Stage-4 OffCurve v84~~ ~~Stage-6 non-2-manifold (`i6-edge-overuse`)~~ | **CONVERTED 2026-09-11 (night, third): the false partner-hull STOP (R0026's layer), then the n-ary group's per-pair `opposite` + the face-keyed sheet rule (section above).** probe 2026-07-18: N51 "no-curve-type" REFUTED — v84 IS in the torus map (`torus=true`); `YANG_TORUS_PROBE` shows the pair Newton relocates it EXACTLY (rho=0, F_torus(proj)=0) and it passes the displacement gate, so the STOP is the **bounded-face containment** check below the gate (`stage4_correct.rs:4225`) — the C0065 grazing-loop-outside-face signature, at MICRO scale (torus R=5.97e-5/r=3.98e-5, coords ~1e-4) | CONFIRMED (#171 pass 2) | P3b-#137 (C0065 containment class, micro-scale) |
 | ~~R0026~~ | ~~Stage-4 OffCurve v218~~ ~~Stage-3 AmbiguousCurve{2,0} (218,220), 2026-08 → 2026-09-11~~ Stage-4 OffCurve v677 (partner-hull containment `:12483`) | **2026-09-11 (night): the Stage-3 layer was KV14 Slice G — the chart CDT's chord contract (section above), FIXED; back at the containment wall, partner AABB unprobed.** probe 2026-07-18: same as R0015 — v218 `torus=true`, pair Newton rho=9.65e-6 ≪ gate 3.0e-3, then bounded-face containment STOP; micro torus∩plane (R=0.0214/r=0.0143) | CONFIRMED (#171 pass 2) | P3b-#137 (C0065 containment class, micro-scale) **CONVERTED 2026-09-11 (night, later): Slice G + the shared plane identity (sections above).** |
-| R0070 | Stage-4 OffCurve v1028 (+op2 LRR v47) | probe 2026-07-18: v1028 sits on a micro Ellipse edge (1025,1028; major_r 0.028) AND a LineSegment edge (1028,1029) — an ellipse∩line conic junction endpoint whose ellipse relocation lands beyond band at micro scale. ~~**op2 v47** is the surface-pair endpoint-mix STOP, R0044 class~~ **op2's endpoint-mix layer RESOLVED 2026-07-28 (triple-block wiring)** — R0070 raises no LRR at all now; the surviving failure is the v1028 OffCurve half only | CONFIRMED (#171 pass 2; op2 half closed 2026-07-28) | P3-junction (v1028 OffCurve half only) |
+| R0070 | ~~Stage-4 OffCurve v1028 (+op2 LRR v47)~~ ~~input `face 134: holed lateral CDT failed: degenerate CDT input`~~ UNSUPPORTED(coplanar-boolean): M8 `disc-poly-holed` pair (133,0) | **2026-09-11 (night, fourth): the input wall was Stage-6's most-edges outer-loop rule labelling a bounded cylinder patch inside-out (fixed, section above); now an M8 residue row — the cut disc vs a HOLED planar face — in the F0064/F0072 bucket.** probe 2026-07-18: v1028 sits on a micro Ellipse edge (1025,1028; major_r 0.028) AND a LineSegment edge (1028,1029) — an ellipse∩line conic junction endpoint whose ellipse relocation lands beyond band at micro scale. ~~**op2 v47** is the surface-pair endpoint-mix STOP, R0044 class~~ **op2's endpoint-mix layer RESOLVED 2026-07-28 (triple-block wiring)** — R0070 raises no LRR at all now; the surviving failure is the v1028 OffCurve half only | CONFIRMED (#171 pass 2; op2 half closed 2026-07-28) | P3-junction (v1028 OffCurve half only) |
 
 ### Reassembly non-2-manifold (8) — the #146 junction-mint bucket
 

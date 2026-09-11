@@ -51,6 +51,7 @@ mod s451_crease_domain;
 mod s453_line_overtake;
 mod s4_boundary_curve;
 mod s4_partner_hull_pair_plane;
+mod s6_outer_loop_by_extent;
 mod stage0_rim_projection;
 mod stage1_cdt_flap;
 mod topology;

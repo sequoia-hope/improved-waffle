@@ -7030,20 +7030,45 @@ pub(crate) fn emit_topology(
                 ));
             }
 
-            // Deterministic loop assignment: outer = the cycle with the MOST
-            // edges; tie-break = lowest min start-vertex index within the
-            // cycle. All other cycles = inner_loops.
-            let cycle_min_vert = |c: &[(u32, u32)]| c.iter().map(|&(s, _)| s).min().unwrap_or(0);
-            let mut outer_idx = 0usize;
-            for i in 1..cycles.len() {
-                let cur_len = cycles[i].len();
-                let best_len = cycles[outer_idx].len();
-                if cur_len > best_len
-                    || (cur_len == best_len
-                        && cycle_min_vert(&cycles[i]) < cycle_min_vert(&cycles[outer_idx]))
-                {
-                    outer_idx = i;
-                }
+            // Loop assignment: outer = the cycle of LARGEST |Newell area|
+            // (the planar branch's own rule, `select_outer_cycle`); ties →
+            // most edges → lowest min start-vertex index. All other cycles
+            // = inner_loops. Formerly the MOST-EDGES cycle: R0070
+            // (2026-09-11) — a cylinder lateral of the gear-cut output whose
+            // 226-edge ellipse-chain HOLE outnumbered its 14-edge outer rim
+            // loop (chart areas 3.7e-5 vs 7.3e-4) was labelled inside-out,
+            // and the next op's holed chart CDT emptied it ("degenerate CDT
+            // input"). Edge count is sampling density, not extent.
+            let outer_idx = select_outer_cycle(cycles, &mesh.verts, inherited);
+            if std::env::var_os("YANG_S6_OUTER_PROBE").is_some() && cycles.len() > 1 {
+                let most_edges = (0..cycles.len())
+                    .max_by_key(|&i| {
+                        (
+                            cycles[i].len(),
+                            std::cmp::Reverse(cycles[i].iter().map(|&(s, _)| s).min().unwrap_or(0)),
+                        )
+                    })
+                    .unwrap_or(0);
+                let mags: Vec<String> = cycles
+                    .iter()
+                    .map(|c| {
+                        let m = c.len();
+                        let (mut nx, mut ny, mut nz) = (0.0f64, 0.0f64, 0.0f64);
+                        for i in 0..m {
+                            let a = mesh.verts[c[i].0 as usize].as_array();
+                            let b = mesh.verts[c[(i + 1) % m].0 as usize].as_array();
+                            nx += a[1] * b[2] - a[2] * b[1];
+                            ny += a[2] * b[0] - a[0] * b[2];
+                            nz += a[0] * b[1] - a[1] * b[0];
+                        }
+                        format!("len={} |N|={:.3e}", m, (nx * nx + ny * ny + nz * nz).sqrt())
+                    })
+                    .collect();
+                eprintln!(
+                    "[s6-outer] face {face_idx} surface={:?} outer_by_extent={outer_idx} outer_by_edges={most_edges} {} cycles: {mags:?}",
+                    crate::stage4_correct::surface_kind_name(inherited),
+                    if outer_idx == most_edges { "AGREE" } else { "DISAGREE" }
+                );
             }
 
             let outer_loop = push_loop(&mut edges, outer_idx, &cycles[outer_idx]);
@@ -9324,4 +9349,106 @@ pub(crate) fn subdivide_loops_at_shared_vertices(
         out.push(info_cycles);
     }
     out
+}
+
+/// The outer boundary of a face among its boundary cycles.
+///
+/// For a BOUNDED patch on a cylinder or cone — no cycle encircles the axis —
+/// the outer loop is the cycle of LARGEST |Newell area vector| (the loop's
+/// extent: its projection onto its own mean plane, the reading the planar
+/// branch uses). Edge COUNT is sampling density, not extent: R0070's 226-edge
+/// ellipse-chain hole outnumbered its 14-edge outer rim loop (chart areas
+/// 3.7e-5 vs 7.3e-4) and the face was labelled inside-out — the next op's
+/// holed chart CDT then emptied it.
+///
+/// For a periodic STRIP (some cycle winds the axis — two rims and their
+/// windows) and for every other surface kind, the labels carry no geometric
+/// meaning (KV14 Slice B classifies strip loops by winding) and the
+/// historical deterministic choice is kept byte-identically: MOST edges, then
+/// the lowest start-vertex index. (R0099, 2026-09-11: relabelling a tube's
+/// two rims — equal edge counts, |N| within 0.13 % — tripped kernel-v2's
+/// `cylpatch-vertex` import check one op later; a latent label sensitivity
+/// there, not a reason to relabel.)
+pub(crate) fn select_outer_cycle(
+    cycles: &[Vec<(u32, u32)>],
+    verts: &[Point3],
+    surface: Surface,
+) -> usize {
+    let cycle_min_vert = |c: &[(u32, u32)]| c.iter().map(|&(s, _)| s).min().unwrap_or(0);
+    let by_edges = {
+        let mut best = 0usize;
+        for i in 1..cycles.len() {
+            let (cur, b) = (cycles[i].len(), cycles[best].len());
+            if cur > b || (cur == b && cycle_min_vert(&cycles[i]) < cycle_min_vert(&cycles[best])) {
+                best = i;
+            }
+        }
+        best
+    };
+    let (ap, ad) = match surface {
+        Surface::Cylinder {
+            axis_point,
+            axis_dir,
+            ..
+        } => (axis_point, axis_dir),
+        Surface::Cone { apex, axis_dir, .. } => (apex, axis_dir),
+        _ => return by_edges,
+    };
+    let au = normalize3(ad.as_array());
+    let (e1, e2) = ortho_basis(ad);
+    let (e1a, e2a, apa) = (e1.as_array(), e2.as_array(), ap.as_array());
+    let theta = |g: u32| -> f64 {
+        let p = verts[g as usize].as_array();
+        let w = [p[0] - apa[0], p[1] - apa[1], p[2] - apa[2]];
+        let h = w[0] * au[0] + w[1] * au[1] + w[2] * au[2];
+        let r = [w[0] - h * au[0], w[1] - h * au[1], w[2] - h * au[2]];
+        (r[0] * e2a[0] + r[1] * e2a[1] + r[2] * e2a[2])
+            .atan2(r[0] * e1a[0] + r[1] * e1a[1] + r[2] * e1a[2])
+    };
+    let two_pi = 2.0 * std::f64::consts::PI;
+    let encircles = |c: &[(u32, u32)]| -> bool {
+        let m = c.len();
+        let mut sum = 0.0;
+        for i in 0..m {
+            let mut d = theta(c[(i + 1) % m].0) - theta(c[i].0);
+            while d > std::f64::consts::PI {
+                d -= two_pi;
+            }
+            while d < -std::f64::consts::PI {
+                d += two_pi;
+            }
+            sum += d;
+        }
+        sum.abs() > 1.5 * std::f64::consts::PI
+    };
+    if cycles.iter().any(|c| encircles(c)) {
+        return by_edges;
+    }
+    let newell_mag = |c: &[(u32, u32)]| -> f64 {
+        let m = c.len();
+        let (mut nx, mut ny, mut nz) = (0.0f64, 0.0f64, 0.0f64);
+        for i in 0..m {
+            let a = verts[c[i].0 as usize].as_array();
+            let b = verts[c[(i + 1) % m].0 as usize].as_array();
+            nx += a[1] * b[2] - a[2] * b[1];
+            ny += a[2] * b[0] - a[0] * b[2];
+            nz += a[0] * b[1] - a[1] * b[0];
+        }
+        (nx * nx + ny * ny + nz * nz).sqrt()
+    };
+    let mut outer_idx = 0usize;
+    let mut best = cycles.first().map_or(0.0, |c| newell_mag(c));
+    for (i, c) in cycles.iter().enumerate().skip(1) {
+        let mag = newell_mag(c);
+        let better = mag > best
+            || (mag == best
+                && (c.len() > cycles[outer_idx].len()
+                    || (c.len() == cycles[outer_idx].len()
+                        && cycle_min_vert(c) < cycle_min_vert(&cycles[outer_idx]))));
+        if better {
+            outer_idx = i;
+            best = mag;
+        }
+    }
+    outer_idx
 }

@@ -267,3 +267,27 @@ as a rule-4 deviation that PR-YR6 closes.
 - Yang 2025 §4.4.2 — `refs/text/yang2025_hybrid_boolean.txt:574-700`
 - PR-YR3 spec — `specs/yang_rs_vertex_provenance.md`
 - PR-YR4 spec — `specs/yang_rs_triangle_attribution.md`
+
+
+## Outer-loop selection on curved faces (2026-09-11, R0070)
+
+The curved branch chose a face's outer loop as the cycle with the MOST edges
+(tie → lowest start vertex); the planar branch as the largest-|Newell area|
+cycle. Edge count is sampling density: R0070's op-2 cylinder lateral (face
+134) had a 226-edge ellipse-chain HOLE (the gear flanks' sections, two-point
+arcs) and a 14-edge outer rim loop — chart areas 3.7e-5 vs 7.3e-4 — and was
+labelled inside-out; op 3's holed chart CDT (KV14 Slice A consumes the
+labels) removed everything inside the "hole" and failed `DegenerateInput`.
+
+`select_outer_cycle(cycles, verts, surface)`: on a BOUNDED cylinder / cone
+patch — no cycle winds the axis (`|Σ Δθ| > 1.5π`, the Slice-B encircling
+test) — the outer loop is the largest-|N| cycle (ties → most edges → lowest
+vertex). A periodic strip and every other surface kind keep the historical
+most-edges choice byte-identically: a strip's rim labels carry no geometry
+(Slice B classifies by winding), and R0099 proved kernel-v2's
+`from_yang_brep` sensitive to them (relabelling a tube's rims — equal edge
+counts, |N| within 0.13 % — tripped `VertexOffSurface`/`cylpatch-vertex` one
+op later; a latent, ledgered in `docs/yang_tail_triage.md`). Tests
+`tests_unit/s6_outer_loop_by_extent.rs`. Corpus: R0070 ERROR →
+UNSUPPORTED(coplanar-boolean) (the M8 `disc-poly-holed` residue), zero other
+moves.
