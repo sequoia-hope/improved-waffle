@@ -383,6 +383,70 @@ pub(crate) fn relocate_onto_implicit_triple(
     None
 }
 
+/// The displacement divergence of a 3-surface junction relocation whose
+/// surfaces include exactly TWO transversal planes (spec
+/// `yang_stage4_conic_triple_junction.md`, "Junction-line amendment"):
+/// the vertex is an arrangement crossing of the planes' shared mesh edge with
+/// the third surface's facet, so it sits on BOTH planes exactly and the exact
+/// junction lies on their line `L = n₁ × n₂`; the relocation moves ALONG `L`,
+/// closing the third surface's chord offset `δ` (|δ| ≤ d_ε) by `|δ| / |L̂·n₃|`
+/// to first order — the PR-KV11 box-edge line metric `2·d_ε / |d̂·r̂|`
+/// (`stage4_correct` ellipse-junction arm), with `n₃` the third surface's unit
+/// normal at the relocated point `q`. The surface-pair corridor
+/// `2·d_ε / sin θ` (θ between two SURFACE normals) is the bound for a vertex
+/// sliding within one surface toward the pair's CURVE and says nothing about
+/// a move along a line: measured on R0077 (2026-09-11, box edge × torus at a
+/// 17° grazing pierce, chord offset 58 within a 100 band) the line move was
+/// 259 against a curve corridor of 251 and a line corridor of 688 — the
+/// curve metric refused an exact junction. Because each plane normal is
+/// perpendicular to `L`, `sin θ ≥ |L̂·n₃|` always (equality when the line
+/// runs along the third surface's normal), so the line corridor is never
+/// below the curve corridor: this admits ONLY plane-pair junctions the curve
+/// corridor mis-measured — a metric correction (the SAME line metric the
+/// cylinder box-edge arm has used since PR-KV11), not a new band — and a
+/// relocation the chord offset cannot explain (`ρ > 2·d_ε/|L̂·n₃|`) stays a
+/// loud STOP, as does every non-line junction (curve corridor, byte-identical).
+///
+/// `None` (the caller keeps its surface-pair metric, byte-identical): not
+/// exactly two planes; the planes are parallel to `MIN_FEATURE_SIZE` (the
+/// triple Newton is rank-deficient there and STOPs before any gate); or the
+/// third surface's normal is undefined at `q`.
+pub(crate) fn junction_line_divergence(surfs: [Surface; 3], q: [f64; 3]) -> Option<f64> {
+    // Measurement gate (the gated-increment convention): `YANG_JUNCTION_LINE=0`
+    // (or `off`) restores the surface-pair corridor at every caller,
+    // byte-identical to the pre-2026-09-11 behaviour.
+    if matches!(
+        std::env::var("YANG_JUNCTION_LINE").as_deref(),
+        Ok("0") | Ok("off")
+    ) {
+        return None;
+    }
+    let mut planes: Vec<[f64; 3]> = Vec::with_capacity(2);
+    let mut third: Option<Surface> = None;
+    for s in surfs {
+        match s {
+            Surface::Plane { normal, .. } => planes.push(normalize3(normal.as_array())),
+            other => third = Some(other),
+        }
+    }
+    if planes.len() != 2 {
+        return None;
+    }
+    let third = third?;
+    let (a, b) = (planes[0], planes[1]);
+    let l = [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ];
+    let ll = (l[0] * l[0] + l[1] * l[1] + l[2] * l[2]).sqrt();
+    if ll < cad_primitives::MIN_FEATURE_SIZE {
+        return None;
+    }
+    let (_, n3) = surface_value_and_normal(third, q)?;
+    Some(((l[0] * n3[0] + l[1] * n3[1] + l[2] * n3[2]) / ll).abs())
+}
+
 /// #137 N-137.1 (spec `specs/yang_137_torus_plane_grazing_corner.md`): the exact
 /// grazing-CORNER junction `torus ∩ cutting_plane ∩ clip_plane`, refined from a
 /// mesh `seed` via the existing 3-surface Newton and then VALIDATED to lie on all

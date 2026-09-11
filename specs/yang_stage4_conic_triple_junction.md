@@ -1,5 +1,43 @@
 # Spec: Stage-4 general conic triple-surface junction relocation
 
+> **Junction-line amendment (2026-09-11, R0077): the displacement gate of a
+> 3-surface junction with TWO PLANES is the line corridor
+> `2·d_ε / |L̂·n₃|`, not the surface-pair corridor `2·d_ε / sin θ`.** Both
+> triple arms — the torus block (`stage4_correct` "(2t) KV6d Tier B", the
+> `[s1, s2]` partner arm) and this spec's conic triple handler — gated the
+> relocation at `2·d_ε / sin θ`, θ the angle between two incident SURFACE
+> normals at the relocated point. That corridor bounds a vertex sliding
+> within one surface toward the pair's intersection CURVE. A vertex whose
+> incident surfaces include two planes is an arrangement crossing of the
+> planes' shared mesh EDGE with the third surface's facet: it sits on both
+> planes exactly (R0077 v154/v161: plane residuals 0) and the exact junction
+> lies on their line `L = n₁ × n₂`, so the relocation moves ALONG `L`,
+> closing the third surface's chord offset δ (|δ| ≤ d_ε) by `|δ| / |L̂·n₃|`
+> to first order (`n₃` the third surface's unit normal at `q`). That is the
+> PR-KV11 box-edge line metric the cylinder ellipse-junction arm has used
+> since KV11 (`2·d_ε/|d̂·r̂|`, spec `kv9_f1_tangency_inout_labels.md` row J2);
+> the two triple arms were the odd ones out ("fix all gates sharing a
+> metric"). Measured on R0077 (`YANG_TORUS_PROBE`, 2026-09-11): a lateral
+> edge of the extrude operand pierces the 267° revolve torus (R 2051, r 1367,
+> scale 4.5e3) at 16.9° / 17.9° grazing incidence; the chord points are 58 /
+> 73 inside the torus (d_ε = 99.98) and the exact junctions 259 / 371 along
+> the edge (the move has ZERO off-line component); the curve corridor (sin θ
+> 0.796 / 0.822 ⇒ 251 / 243) refused both, the line corridor (|L̂·n| 0.291 /
+> 0.308 ⇒ 688 / 650) admits both. Since each plane normal is ⊥ L,
+> `sin θ ≥ |L̂·n₃|` always (equality when the edge runs along the surface
+> normal): the line corridor is never below the curve corridor, so the
+> amendment admits ONLY plane-pair junctions the curve metric mis-measured
+> and is a metric correction, not a new band; a move the chord offset cannot
+> explain stays a loud `OffCurveBeyondChordBand`, the bounded-face
+> containment check below the gate is untouched, and every non-line junction
+> (one plane or none; parallel planes, where the triple Newton is
+> rank-deficient before any gate) keeps the curve corridor byte-identical.
+> Shared helper `stage4_relocate::junction_line_divergence` (`None` ⇒ the
+> caller's metric); pins `tests_unit/kv11_junction_line_metric.rs` (the two
+> R0077 pierces RED under the curve corridor, GREEN under the line corridor;
+> the φ = 0 coincidence; the never-undercuts sweep; the `None` arms).
+
+
 > **Status (2026-07-10, N2 epic increment 5): WIRED — the inexact
 > ≥3-surface junction class this design record anticipated has arrived.**
 > After increment 4 (spec `yang_rim_junction_insertion` §4: plane-arm rim
@@ -155,6 +193,7 @@ In the 3-surface relocation:
 | Newton diverges / degenerate 3×3 (`relocate_onto_implicit_triple` → `None`) | STOP `LocalRefinementRequired` |
 | `surface_value_and_normal` fails at proj | STOP `LocalRefinementRequired` |
 | displacement `ρ = |proj−p|` > `2·d_eps / sinθ` (θ = angle between two incident normals at proj) | STOP `OffCurveBeyondChordBand` |
+| **(2026-09-11 amendment)** two of the three surfaces are transversal PLANES: `ρ` > `2·d_eps / |L̂·n₃|` (`L = n₁ × n₂` the planes' line, `n₃` the third surface's normal at proj — the KV11 line metric; `junction_line_divergence`) | STOP `OffCurveBeyondChordBand` (replaces the row above for this configuration only) |
 | `ρ ≤ TAU_WORK` | retag only (no move) |
 | otherwise | move vertex to proj, add to `moved` |
 

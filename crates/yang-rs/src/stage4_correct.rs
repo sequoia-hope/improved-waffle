@@ -10419,7 +10419,11 @@ fn stage4_relocate_and_correct_inner(
             };
             // Derived displacement gate: a chord vertex moves to the exact
             // junction by ≤ 2·d_ε / sin θ (the torus-block metric — NOT a
-            // tolerance widening). Beyond it is a real off-curve error.
+            // tolerance widening). Beyond it is a real off-curve error. Two
+            // planes among the three (a box edge piercing the third surface):
+            // the vertex moves along their LINE and the bound is the PR-KV11
+            // line metric (`junction_line_divergence`; the torus block's
+            // R0077 amendment, one metric for every plane-pair junction).
             let pa = p.as_array();
             let rho = ((qa[0] - pa[0]).powi(2) + (qa[1] - pa[1]).powi(2) + (qa[2] - pa[2]).powi(2))
                 .sqrt();
@@ -10428,8 +10432,18 @@ fn stage4_relocate_and_correct_inner(
                 n0[2] * n1[0] - n0[0] * n1[2],
                 n0[0] * n1[1] - n0[1] * n1[0],
             ];
-            let sin_theta = (cx[0] * cx[0] + cx[1] * cx[1] + cx[2] * cx[2]).sqrt();
+            let line_div = junction_line_divergence([surfs[0], surfs[1], surfs[2]], qa);
+            let sin_theta =
+                line_div.unwrap_or_else(|| (cx[0] * cx[0] + cx[1] * cx[1] + cx[2] * cx[2]).sqrt());
             let gate = tangent_plane_corridor(d_eps, sin_theta);
+            if probe_v || std::env::var_os("YANG_LRR_PROBE").is_some() {
+                let metric = if line_div.is_some() { "line" } else { "curve" };
+                eprintln!(
+                    "[triple-gate] v={v} rho={rho:.4e} gate={gate:.4e} d_eps={d_eps:.4e} \
+                     sin_theta={sin_theta:.4e} metric={metric} p={:?} q={qa:?} surfs={surfs:?}",
+                    pa
+                );
+            }
             if rho > gate {
                 if let Some(e) = s451_stop(s451_collect, &mut s45_failures, v, &curves0, &inc0) {
                     return Err(e);
@@ -12325,7 +12339,7 @@ fn stage4_relocate_and_correct_inner(
             }
             let partners = &vert_partners[&v];
             let p = mesh.verts[v as usize];
-            let (proj, n0, n1) = match partners.as_slice() {
+            let (proj, n0, n1, line_div) = match partners.as_slice() {
                 [s1] => {
                     if std::env::var_os("YANG_TORUS_PROBE").is_some()
                         && relocate_onto_implicit_pair(p, t_surf, *s1).is_none()
@@ -12354,12 +12368,16 @@ fn stage4_relocate_and_correct_inner(
                             Stage4InvalidReason::LocalRefinementRequired,
                         )
                     })?;
-                    (proj, n0, n1)
+                    (proj, n0, n1, None)
                 }
                 [s1, s2] => {
                     // 3-surface junction: relocate onto {torus, s1, s2}. The
-                    // displacement gate uses the torus∩s1 angle (the junction is
-                    // a point; any incident curve's metric bounds the move).
+                    // displacement gate uses the torus∩s1 curve corridor —
+                    // EXCEPT when s1 and s2 are two planes: the vertex then
+                    // sits on their LINE and moves along it, and the bound is
+                    // the PR-KV11 line metric `2·d_ε/|L̂·n_torus|`
+                    // (`junction_line_divergence`; R0077, 2026-09-11 — the
+                    // curve corridor refused an exact box-edge pierce).
                     if std::env::var_os("YANG_TORUS_PROBE").is_some()
                         && relocate_onto_implicit_triple(p, t_surf, *s1, *s2).is_none()
                     {
@@ -12388,7 +12406,8 @@ fn stage4_relocate_and_correct_inner(
                             Stage4InvalidReason::LocalRefinementRequired,
                         )
                     })?;
-                    (proj, n0, n1)
+                    let line_div = junction_line_divergence([t_surf, *s1, *s2], qa);
+                    (proj, n0, n1, line_div)
                 }
                 _ => {
                     if std::env::var_os("YANG_TORUS_PROBE").is_some() {
@@ -12407,7 +12426,9 @@ fn stage4_relocate_and_correct_inner(
             // by ≤ 2·d_ε / sin θ, θ the angle between two incident surface
             // normals at the relocated point (the same metric as the disc∩disc /
             // cyl×cyl junction bands — NOT tolerance widening). Beyond it is a
-            // real off-curve error, not a Stage-1 chord artifact → STOP.
+            // real off-curve error, not a Stage-1 chord artifact → STOP. A
+            // plane×plane junction moves along the planes' LINE instead and
+            // takes the line metric (`line_div`, see the `[s1, s2]` arm).
             let pa = p.as_array();
             let qa = proj.as_array();
             let rho = ((qa[0] - pa[0]).powi(2) + (qa[1] - pa[1]).powi(2) + (qa[2] - pa[2]).powi(2))
@@ -12417,16 +12438,18 @@ fn stage4_relocate_and_correct_inner(
                 n0[2] * n1[0] - n0[0] * n1[2],
                 n0[0] * n1[1] - n0[1] * n1[0],
             ];
-            let sin_theta = (cx[0] * cx[0] + cx[1] * cx[1] + cx[2] * cx[2]).sqrt();
+            let sin_theta =
+                line_div.unwrap_or_else(|| (cx[0] * cx[0] + cx[1] * cx[1] + cx[2] * cx[2]).sqrt());
             let gate = tangent_plane_corridor(d_eps, sin_theta);
             if std::env::var_os("YANG_TORUS_PROBE").is_some() {
                 let fv = surface_value_and_normal(t_surf, proj.as_array())
                     .map(|(f, _)| f)
                     .unwrap_or(f64::NAN);
+                let metric = if line_div.is_some() { "line" } else { "curve" };
                 eprintln!(
                     "YANG_TORUS_PROBE v={v} rho={rho:.4e} gate={gate:.4e} d_eps={d_eps:.4e} \
-                     sin_theta={sin_theta:.4e} F_torus(proj)={fv:.2e} p={p:?} proj={proj:?} \
-                     t_surf={t_surf:?} partners={partners:?}"
+                     sin_theta={sin_theta:.4e} metric={metric} F_torus(proj)={fv:.2e} p={p:?} \
+                     proj={proj:?} t_surf={t_surf:?} partners={partners:?}"
                 );
             }
             if rho > gate {

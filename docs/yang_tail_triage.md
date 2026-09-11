@@ -43,6 +43,82 @@ after the reconciliation run (release, 8 jobs, 360 s; wall 577 s, F0085
 regression since 2026-08-01 is outstanding (checked over every commit of
 `results.json`).
 
+## 2026-09-11 — R0077 CONVERTED (a plane-pair junction takes the KV11 LINE corridor, not the surface-pair corridor); the 2026-09-07 `float_roundtrip` file-format commit had SILENTLY regressed R0017 / R0025 / R0059 (ULP-parse latents, unmasked — ledgered ACTIVE below); NEW CANONICAL 278C / 0W / 28E / 4EE / 0T
+
+**R0077** (0.2 s; the row below carried `Stage-4 LRR v3 pair_newton_none` from
+2026-07-18 although the committed results.json shows `OffCurveBeyondChordBand
+v154` since 2026-07-28 — never re-probed). Probed (`YANG_LRR_PROBE` +
+`YANG_TORUS_PROBE`, offline Python on the printed positions): v154 and v161
+are the two points where ONE lateral edge of the extrude operand (its two
+faces `n₁ = [0.770, −0.638, 0]`, `n₂ = [−0.141, −0.171, −0.975]`) pierces
+the 267° revolve torus (R 2051.25 / r 1367.50, scale 4.5e3). Each chord
+point sits EXACTLY on both planes (residuals 0 — an arrangement crossing of
+the box edge with a torus facet), 58.06 / 72.57 INSIDE the torus (Stage-4
+band d_ε = 99.98), and the triple Newton's junction lies 258.96 / 370.85
+along the edge with ZERO off-line component; the edge meets the torus at
+16.9° / 17.9° (|L̂·n_torus| 0.291 / 0.308 at the junction, 0.153 / 0.079
+at the chord point). The torus block's `[s1, s2]` arm gated that move at the
+surface-pair corridor `2·d_ε / sin(n_torus, n₁)` = 251.2 / 243.3 (sin θ
+0.796 / 0.822) — the bound for a vertex sliding within one surface toward
+the pair's CURVE, which says nothing about a move ALONG A LINE — and
+refused an exact junction (the §4.5.1 repair then declined, clause 1). The
+cylinder ellipse-junction arm has gated the SAME configuration (a box edge
+piercing a curved surface) at the line metric `2·d_ε / |d̂·r̂|` since
+PR-KV11 (spec `kv9_f1_tangency_inout_labels.md` row J2); the two triple arms
+(torus block, conic triple handler) were the odd ones out.
+
+**Fix (always-on; measurement gate `YANG_JUNCTION_LINE=0` restores the
+surface-pair corridor):** `stage4_relocate::junction_line_divergence` —
+when exactly two of a triple's surfaces are transversal planes the
+divergence is `|L̂·n₃|` (`L = n₁ × n₂`, `n₃` the third surface's unit normal
+at the relocated point), i.e. the gate `2·d_ε / |L̂·n₃|` = 687.8 / 650.1
+here; every other triple keeps `sin θ` byte-identical. Since each plane
+normal is ⊥ L, `sin θ ≥ |L̂·n₃|` always (equality when the edge runs along
+the surface normal): the line corridor never undercuts the curve corridor,
+so this admits ONLY plane-pair junctions the curve metric mis-measured — a
+metric correction shared with KV11, not a new band; a move the chord offset
+cannot explain stays a loud `OffCurveBeyondChordBand` and the bounded-face
+containment check below the gate is untouched. Spec
+`yang_stage4_conic_triple_junction.md` "Junction-line amendment"; pins
+`tests_unit/kv11_junction_line_metric.rs` (the two R0077 pierces: RED under
+the curve corridor, GREEN under the line corridor; the φ = 0 coincidence;
+the never-undercuts sweep; the `None` arms). yang-rs 899 green, clippy
+`--all-targets` clean. R0077: **SUPPORTED_CORRECT, 1.0 s**, all in-line
+oracles.
+
+**Corpus (release, 8 jobs, 600 s; wall 721.8 s, F0085 honest): 278C / 0W /
+28E / 4EE / 0T.** Category moves: R0077 ERROR → CORRECT; **R0017, R0025,
+R0059 CORRECT → ERROR**; detail moves R0019 (`ring rejected` FaceId 649 →
+`input B-Rep is not 2-manifold`, 318 s → 161 s) and R0085 (v387 → v386) —
+both reproduced with `YANG_JUNCTION_LINE=off` (155 s / 87 s), so they are
+the parser's too, not this increment's (R0019's `NonManifoldInput` family
+is therefore NOT empty: re-vehicled to the I6 backstop, R0025 kin).
+The three regressions are NOT this increment's: all three fail on PRISTINE
+HEAD (`git stash` + rebuild, 2026-09-11) and with `YANG_JUNCTION_LINE=off`,
+and their plane-pair vertices pass the curve corridor with room (R0017's
+four `[triple-gate]` sites: ρ 0.5–24 against gates 257–311). `git bisect`
+(R0017 as the oracle, 5 builds) names **d6909ee7 (2026-09-07 22:02, the
+`.waffle` v4 file-format commit)** as the first bad commit — two and a half
+hours AFTER the 280C run (18878173, 19:32) and never corpus-validated
+(nor were the 24 app / file-format / feature-engine commits after it). Its
+own message names the mechanism: serde_json's `float_roundtrip` feature
+was enabled build-wide, so every corpus coordinate now parses EXACTLY
+instead of one ULP off. **Proof:** with the feature toggled off on HEAD +
+this increment, R0017 / R0025 / R0059 replay SUPPORTED_CORRECT (1.0 s /
+22.9 s / 3.5 s) and R0077 stays CORRECT; toggled on, the three fail. They
+are ULP-parse-sensitive LATENTS — a one-ULP input perturbation must never
+flip a case — unmasked by a correct change that stays (the standing rule:
+`feedback_regressions_can_be_unmasked_latents`). The honest ledger is:
+HEAD's un-run corpus was 277C; this increment makes it 278C.
+
+### Unmasked 2026-09-07 by exact float parsing (ULP-parse latents; measured 2026-09-11)
+
+| Case | Loud error | Root cause | Confidence | Vehicle |
+|---|---|---|---|---|
+| R0017 | Stage-4 `LocalRefinementRequired` u32::MAX at `degenerate_no_longedge ndeg=2` (0.1 s; op 2 union, revolve(rectangle) × extrude(rectangle), scale 4.0e3) | The §4.4.1 unzip finds B face 2 (a plane) triangles `[49, 117, 50]` / `[50, 117, 49]` degenerate: vertex 50 — relocated by the conic triple arm (Cone A × plane B × plane B, a prism-edge pierce; ρ 0.5, gate 257, `metric=curve` and `=line` alike) — lands 4e-11 from the UNMOVED vertex 49 (a zero-length edge, `height_b 1e-12` over the 688-unit edge (48, 49)); the unzip's model is a vertex in an edge's INTERIOR, so no long edge qualifies. Two arrangement vertices for one junction — the "mint once, share by identity" contract; whether 49 is a Stage-1 mint is UNMEASURED (next: `YANG_LRR_PROBE` + provenance on 49/50). Same case, old parser: CORRECT | CONFIRMED (site + toggle) | junction merge (I8 Fig-11 family) — PROBE the provenance first |
+| R0025 | `yang-rs: input B-Rep is not 2-manifold` = the I6 `NonManifoldInput` backstop (3.7 s; op 2 union, extrude(gear) × extrude(circle) whose sketch plane is the gear's end cap ⇒ flush caps ⇒ Stage-0 overlay) | `NONMANIFOLD_SITE_PROBE`: `i6-coincident-tris` compact `[765, 766, 768]` carried by input 0 (the gear) face 1 (a Plane) raw triangles 760 `[765, 768, 766]` and 799 `[765, 766, 808]`, OPPOSITE windings (`i6-wedge-dedup REJECT(winding)`), 768 ≡ 808 welded (`i6-cluster 768: [768, 808]`); 766–768 are 0.07 apart, 765 is 2.5 away — a MACROSCOPIC same-face fold, not the I6.6 sub-resolution pleat (band 1e-12·scale). A single input's plane face emitted two overlapping triangles: the Stage-0 overlay emission on the gear cap (R0053 / R0081 family) or the cap CDT — UNMEASURED which (next: `YANG_STAGE0_DUMP_DIR` on op 2). Old parser: CORRECT (22.9 s) | CONFIRMED (site + toggle); emitter UNMEASURED | Stage-0 overlay emission (M8) — PROBE first |
+| R0059 | kernel-v2 `TessellationFailed { face: FaceId(29), reason: "ring rejected by CDT" }` (0.5 s; op 3 union, extrude(rectangle) × (extrude(circle) ∪ revolve(circle) torus), scale 3.8e2) | The chained union completes and its OUTPUT ring for face 29 folds — UNPROBED (`KV2_RING_REJECT_PROBE` / `KV2_RING_PROVENANCE` next). Old parser: CORRECT (3.5 s) | PROBE | ring-reject family (R0100 kin) |
+
 ## 2026-09-06 — R0003 flipped back (the §I13(f) NEEDLE corner); canonical 276C / 0W / 30E / 4EE / 0T
 
 R0003's density-sensitive latent is anatomized and closed (spec
@@ -389,7 +465,7 @@ moved. The 30 ERROR rows are the ACTIVE rows below.
 | ~~R0049~~ | ~~non-2-manifold (reassembly)~~ ~~ring rejected by CDT (FaceId 575)~~ **FLIPPED CORRECT 2026-09-07 (night): the live wall was the I6 `NonManifoldInput` backstop on a ROUNDING PLEAT (two sub-band slivers, cone × gear-flank plane, apexes welded bit-identically) — never fragmentation; I6.6 band-scoped membrane cancellation** | (history: ~~probe 2026-07-17: `s6-planar-loop-nonplanar` face 134 vert 337 off-plane 1.449e-6 (band 1.0e-7) — the F0064 class (N51)~~ **DRIFTED 2026-07-29:** now fails as a ring-reject on a **developable** patch (FaceId 575, `tessellate_developable_patch` — not planar). 214 origin nodes, 0 arc samples, folds at idx 1/45/46 (144.2°, 180.0°, 176.6°). **NOT counted as seam-class:** the ring breaks into **~97 adjacency runs**, so ~45% of ring indices are seams and "fold near seam" carries no information. The **fragmentation itself** is the signal — a boundary shattered into ~97 micro-chains against different neighbour faces, which reads as the near-coincident-surface incidence family (R0050/R0053 kin) and is consistent with the old `s6-planar-loop-nonplanar` diagnosis. **CAVEAT: the run-splitting heuristic (twin-id delta > 12 or sign change) is crude and may over-fragment on irregular id allocation — verify the 97 before building on it** | PARTIAL (builder + fragmentation measured 2026-07-29; mint unconfirmed) | Stage-2/3 incidence (near-coincident surfaces) — was P3a-#146) | CONFIRMED (i6-coincident-tris probe) | DONE |
 | R0050 | Stage-4 LRR v58 | probe 2026-07-18: `YANG_TORUS_STOP site=gt2_partners` with **partners=[] (EMPTY)** — v58 (and v362 on the sibling torus) sit on torus intersection edges whose incidence records only ONE distinct surface (the base torus itself); the model has two near-identical revolve tori (R=3.95/r=2.63 vs R=3.78/r=2.52) — a Stage-2/3 **incidence gap between near-coincident revolve surfaces** (no partner to relocate onto). #131/N28 theory refuted | CONFIRMED (#171 pass 2) | P3a-#146 / Stage-2/3 incidence (near-coincident surfaces) |
 | ~~R0063~~ | Stage-4 LRR (u32::MAX) | **FLIPPED CORRECT 2026-07-30 (1a9cee36); reconciled 2026-09-04 from the committed results.json history** probe 2026-07-17: `site=split_max_passes` — same class as R0009 (the #145 zigzag residual resolves into the split-budget class) | CONFIRMED (#171 sweep) | P3-§4.5.2 |
-| R0077 | Stage-4 LRR v3 | probe 2026-07-18: `YANG_TORUS_STOP site=pair_newton_none` — torus×plane implicit-pair Newton non-convergence at extreme scale (torus R=2051/r=1367, coords ~2700; the op's other two torus verts converge with rho ≈ 2e-13). Same class as R0025 | CONFIRMED (#171 pass 2) | P3b-#137 (torus∩plane relocation family) |
+| ~~R0077~~ | ~~Stage-4 LRR v3~~ OffCurve v154 (since 2026-07-28) | probe 2026-07-18: `YANG_TORUS_STOP site=pair_newton_none` — torus×plane implicit-pair Newton non-convergence at extreme scale (torus R=2051/r=1367, coords ~2700; the op's other two torus verts converge with rho ≈ 2e-13). Same class as R0025 | CONFIRMED (#171 pass 2) | ~~P3b-#137 (torus∩plane relocation family)~~ **FLIPPED CORRECT 2026-09-11: the pair-Newton wall was closed 2026-07-28 (ulp floor); the live wall was the torus block's `[s1, s2]` arm gating a box-edge × torus pierce (v154 / v161, 17° grazing, moves 259 / 371 along the edge) at the surface-pair corridor (251 / 243) instead of the KV11 LINE corridor (688 / 650) — `junction_line_divergence`, spec `yang_stage4_conic_triple_junction` "Junction-line amendment"; see the 2026-09-11 section** DONE |
 | ~~R0091~~ | Stage-4 LRR (u32::MAX) | **FLIPPED CORRECT 2026-07-21 (92188eaa); reconciled 2026-09-04 from the committed results.json history** probe 2026-07-17: `site=split_max_passes` — same class as R0009; STILL the historical silent-wrong trap: any fix must be re-CDT/refinement, never a merge | CONFIRMED (#171 sweep) | P3-§4.5.2 |
 
 ### OffCurveBeyondChordBand (6)

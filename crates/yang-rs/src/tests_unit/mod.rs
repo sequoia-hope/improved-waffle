@@ -14,6 +14,7 @@ mod construction_stage1;
 mod i13_junction_overrun;
 mod i5_seam_density;
 mod i6_subres_pleat;
+mod kv11_junction_line_metric;
 mod kv14_chord_sided_band;
 mod m4_substitute;
 mod m5_case_iii;
