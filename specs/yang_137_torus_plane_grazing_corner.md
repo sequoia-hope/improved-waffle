@@ -158,3 +158,18 @@ balanced (cf. the N2/CDT two-sided conformality blocker,
 - Do not globally raise n_seg — it is wasteful and, per §3, wrong without (b).
 - The current STOP stays until N-137.4 greens the case with the gate ON; only
   N-137.5 removes it as the default path.
+
+
+## 2026-09-11 — R0026 was NOT this class (ledger correction)
+
+The 2026-07-18 rows filed R0026 and R0015 under "the C0065 containment
+class, micro scale". Both STOPs were the containment READING's identity, not
+the geometry: `planar_partner_hull_contains` matched faces to the partner
+plane bit-exactly while `merge_same_plane_patches` (PR-YR27, whose merged
+patch the incidence names) matches within `TAU_WORK` on the unit `(n̂, d̂)`; a
+Stage-0 coplanar pair's B face keeps its own stored plane one ULP of `d` off
+A's, so the hull omitted B's face and refused a correct relocation that lived
+on it (R0026 v677: escape 4.2e-3 vs d_ε 1.5e-3, entirely inside B's bottom
+cap). Fixed by sharing the merge's identity (`unit_planes_coincide`);
+R0026 CORRECT, R0015 advances to Stage 6. **C0065's escape (0.050 beyond the
+wall's ±0.25) is genuine and unchanged** — this spec's scope is C0065/R0074.

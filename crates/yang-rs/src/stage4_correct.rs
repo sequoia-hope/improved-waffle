@@ -944,6 +944,32 @@ fn dist3(p: [f64; 3], q: [f64; 3]) -> f64 {
     ((p[0] - q[0]).powi(2) + (p[1] - q[1]).powi(2) + (p[2] - q[2]).powi(2)).sqrt()
 }
 
+/// A `Plane` as its unit-normalized `(n̂, d̂)` — the key `merge_same_plane_patches`
+/// merges on. `None` for a non-plane or a degenerate normal.
+pub(crate) fn unit_plane(s: Surface) -> Option<([f64; 3], f64)> {
+    let Surface::Plane { normal, d } = s else {
+        return None;
+    };
+    let n = normal.as_array();
+    let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
+    if len < cad_primitives::MIN_FEATURE_SIZE {
+        return None;
+    }
+    Some(([n[0] / len, n[1] / len, n[2] / len], d / len))
+}
+
+/// PR-YR27's same-plane-same-orientation identity: two unit-normalized planes
+/// coincide iff `n̂` agrees component-wise and `d̂` agrees, each within
+/// `TAU_WORK`. An opposite-normal pair never coincides. ONE reading for every
+/// consumer that asks "is this face on that plane" — the patch merge and the
+/// partner-hull containment (R0026, 2026-09-11: the box's bottom cap sat one
+/// ULP of `d` from the base cap it had been merged with, so the hull saw only
+/// the base cap and refused a junction outside the cylinder's disk).
+pub(crate) fn unit_planes_coincide(p: ([f64; 3], f64), q: ([f64; 3], f64)) -> bool {
+    (p.1 - q.1).abs() <= cad_primitives::TAU_WORK
+        && (0..3).all(|k| (p.0[k] - q.0[k]).abs() <= cad_primitives::TAU_WORK)
+}
+
 /// The torus block's owner-face containment reading, EXTRACTED (§4.5.1
 /// inc-3) so the torus-region repair applies the SAME acceptance its gate
 /// uses — one reading, two callers, no drift.
@@ -956,7 +982,7 @@ fn dist3(p: [f64; 3], q: [f64; 3]) -> f64 {
 /// (non-planar partner, a loop curve without a cheap conservative bound, or
 /// no matching input face) — callers must treat `None` as "no wall",
 /// exactly as the gate always has (defensive: never a false wall).
-fn planar_partner_hull_contains(
+pub(crate) fn planar_partner_hull_contains(
     a: &BRep,
     b: &BRep,
     partner: Surface,
@@ -966,10 +992,16 @@ fn planar_partner_hull_contains(
     let Surface::Plane { .. } = partner else {
         return None;
     };
+    // Faces "on the partner plane" are the ones `merge_same_plane_patches`
+    // folds into one output face — the same-plane-same-orientation reading
+    // (`unit_planes_coincide`), NOT bit-equality: a coplanar pair's B face
+    // keeps its own stored plane (Stage 0 snaps the loop, not the surface),
+    // one ULP of `d` from A's, and the merged patch inherits A's surface.
+    let partner_key = unit_plane(partner)?;
     let mut hull: Option<[f64; 6]> = None;
     for brep in [a, b] {
         for face in brep.faces() {
-            if face.surface != partner {
+            if unit_plane(face.surface).is_none_or(|k| !unit_planes_coincide(k, partner_key)) {
                 continue;
             }
             let mut lo = [f64::MAX; 3];
@@ -1025,7 +1057,65 @@ fn planar_partner_hull_contains(
         }
     }
     let h = hull?;
-    Some((0..3).all(|k| pos[k] >= h[k] - d_eps && pos[k] <= h[3 + k] + d_eps))
+    let inside = (0..3).all(|k| pos[k] >= h[k] - d_eps && pos[k] <= h[3 + k] + d_eps);
+    // Diagnosis probe (read-only, env-gated): the failing reading's anatomy —
+    // the partner, the hull, the position and the per-axis escape (R0026 v677).
+    if !inside && std::env::var_os("YANG_TORUS_PROBE").is_some() {
+        let escape: Vec<f64> = (0..3)
+            .map(|k| (h[k] - pos[k]).max(pos[k] - h[3 + k]).max(0.0))
+            .collect();
+        let mut faces: Vec<String> = Vec::new();
+        for (tag, brep) in [("A", a), ("B", b)] {
+            for (fi, face) in brep.faces().iter().enumerate() {
+                if unit_plane(face.surface).is_none_or(|k| !unit_planes_coincide(k, partner_key)) {
+                    continue;
+                }
+                let kinds: Vec<String> = face
+                    .outer_loop
+                    .iter()
+                    .chain(face.inner_loops.iter().flatten())
+                    .map(|&e| match brep.edges()[e as usize].curve {
+                        Curve::LineSegment => "L".to_string(),
+                        Curve::Circle { .. } => "C".to_string(),
+                        Curve::Ellipse { .. } => "E".to_string(),
+                        _ => "?".to_string(),
+                    })
+                    .collect();
+                faces.push(format!(
+                    "{tag}#{fi}[outer {} inner {}: {}]",
+                    face.outer_loop.len(),
+                    face.inner_loops.len(),
+                    kinds.join("")
+                ));
+            }
+        }
+        eprintln!(
+            "YANG_TORUS_STOP site=partner_hull partner={partner:?} pos={pos:?} \
+             hull_lo={:?} hull_hi={:?} d_eps={d_eps:.4e} escape={escape:?} faces={faces:?}",
+            &h[..3],
+            &h[3..]
+        );
+        if let Surface::Plane { normal: pn, d: pd } = partner {
+            let pnu = normalize3(pn.as_array());
+            for (tag, brep) in [("A", a), ("B", b)] {
+                for (fi, face) in brep.faces().iter().enumerate() {
+                    if let Surface::Plane { normal, d } = face.surface {
+                        let nu = normalize3(normal.as_array());
+                        let c = nu[0] * pnu[0] + nu[1] * pnu[1] + nu[2] * pnu[2];
+                        if c.abs() > 0.99 {
+                            eprintln!(
+                                "YANG_TORUS_STOP   near-parallel {tag}#{fi}: n={nu:?} d={d:e} \
+                                 cos={c:.12} d_diff={:e} exact_eq={}",
+                                d - pd,
+                                face.surface == partner
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Some(inside)
 }
 
 /// PR-YR10: compute the Phase-A structures (adjacency → patches → cycles →
@@ -1320,8 +1410,7 @@ pub(crate) fn merge_same_plane_patches(
     let mergeable = |i: usize, j: usize| -> bool {
         match (&keys[i], &keys[j]) {
             (Some(SurfKey::Plane { n: ni, d: di }), Some(SurfKey::Plane { n: nj, d: dj })) => {
-                (di - dj).abs() <= cad_primitives::TAU_WORK
-                    && (0..3).all(|k| (ni[k] - nj[k]).abs() <= cad_primitives::TAU_WORK)
+                unit_planes_coincide((*ni, *di), (*nj, *dj))
             }
             (
                 Some(SurfKey::Cyl {

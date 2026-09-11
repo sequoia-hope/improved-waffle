@@ -1254,6 +1254,18 @@ fn smoke_corpus_boundary_categories() {
         // `m8_stage0_multiclass_cavity_arm` §18). CORRECT under the old
         // float parse only by the sign of the noise. 23.8 s release.
         ("R0025", Category::SupportedCorrect),
+        // R0026 FLIPPED (2026-09-11, two layers): (1) KV14 Slice G — the
+        // holed / partial cylinder chart CDT now seeds Yang §4.1's domain grid
+        // at the rim step and enforces the chord budget on every interior
+        // edge (its boundary-only diagonals spanned 39–41° against a 32.7°
+        // rim step, 1.50 × d_ε, and Stage 3's generator band correctly
+        // refused the arrangement points); (2) the torus block's partner-hull
+        // containment reading now shares PR-YR27's same-plane-same-
+        // orientation identity with the patch merge — the box's bottom cap
+        // sat one ULP of `d` from the base cap it had been merged with, so
+        // the bit-exact hull saw only the base cap and refused a junction on
+        // the cap outside the cylinder's disk. 4.1 s release.
+        ("R0026", Category::SupportedCorrect),
         // R0044 FLIPPED (2026-09-05, thin-band chart guard) is deliberately
         // NOT pinned here: it costs ≈ 270 s CPU in release — ≈ 1200 s in the
         // debug build this gate runs under on CI and in `test.sh` — against

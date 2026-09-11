@@ -1,8 +1,8 @@
 {
-  "errored": 25,
+  "errored": 24,
   "failed": 0,
   "generated": "kernel-v2 (assay_kv2 categorized run)",
-  "passed": 281,
+  "passed": 282,
   "results": [
     {
       "category": "SUPPORTED_CORRECT",
@@ -90,7 +90,7 @@
     },
     {
       "category": "ERROR",
-      "detail": "1 auto-union failure(s): Revolve 3: Auto-union failed: kernel error: boolean operation failed: kernel-v2 boolean_union failed: BooleanFailed(\"yang-rs: Stage-4 relocation region around vertex 107 is invalid: OffCurveBeyondChordBand\"). Body created as standalone.",
+      "detail": "1 auto-union failure(s): Revolve 3: Auto-union failed: kernel error: boolean operation failed: kernel-v2 boolean_union failed: BooleanFailed(\"yang-rs: reassembled output would be non-2-manifold\"). Body created as standalone.",
       "id": "R0015",
       "status": "error"
     },
@@ -155,10 +155,10 @@
       "status": "pass"
     },
     {
-      "category": "ERROR",
-      "detail": "1 auto-union failure(s): Extrude 3: Auto-union failed: kernel error: boolean operation failed: kernel-v2 boolean_union failed: BooleanFailed(\"yang-rs: Stage-4 relocation region around vertex 677 is invalid: OffCurveBeyondChordBand\"). Body created as standalone.",
+      "category": "SUPPORTED_CORRECT",
+      "detail": "all checks passed",
       "id": "R0026",
-      "status": "error"
+      "status": "pass"
     },
     {
       "category": "EXPECTED_ERROR",

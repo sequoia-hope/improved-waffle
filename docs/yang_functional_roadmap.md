@@ -9,6 +9,17 @@
 
 ## 0. Honest status (refreshed 2026-06-26; addendum 2026-09-04 below)
 
+> **2026-09-11 (night, later) refresh.** Canonical corpus **282C / 0W / 24E / 4EE / 0T** (release, 8 jobs, 600 s; F0085 329.4 s, R0044 290.6 s).
+> **R0026 FLIPPED CORRECT** (second layer): the torus block's partner-hull
+> containment reading identified "faces on the partner plane" bit-exactly,
+> while the PR-YR27 patch merge — whose merged patch the incidence names —
+> identifies them within `TAU_WORK` on the unit `(n̂, d̂)`; a Stage-0
+> coplanar pair's B face keeps its own stored plane one ULP of `d` off, so
+> the hull saw only A's cap and refused a correct junction on B's bottom
+> cap outside the cylinder's disk. ONE reading now (`unit_planes_coincide`)
+> for both consumers. R0015 advances the same false STOP to a Stage-6
+> `i6-edge-overuse` at scale 1e-4 (unprobed).
+>
 > **2026-09-11 (night) refresh.** Canonical corpus **281C / 0W / 25E / 4EE / 0T** (release, 8 jobs, 600 s; wall 726.9 s, F0085 332.2 s, R0044 292.8 s) — category-identical; R0026 advances Stage 3 → Stage 4.
 > **KV14 Slice G LANDED — the Stage-1 chart chord contract** (spec
 > `yang_stage1_curved_holed_patch.md` §"Slice G"; deviations N61): Yang §4.1
