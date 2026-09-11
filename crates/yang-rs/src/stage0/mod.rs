@@ -1105,6 +1105,13 @@ pub(crate) fn stage0_preprocess(a: &BRep, b: &BRep) -> Result<Option<Stage0>, Ya
             };
             coords.push(pt);
         }
+        // Amendment 20 (spec `m8_stage0_multiclass_cavity_arm` §18): the
+        // resolve-step snapshot the ladder's exact position oracle
+        // (`ExactPos`) reads residency against — taken BEFORE the sub-floor
+        // mint collapse below, so a collapsed / absorbed vertex reads as
+        // moved (its rounded projection is then its position; a vertex
+        // still at its sweep resolution keeps the overlay's exact rational).
+        let coords0: Vec<Point3> = coords.clone();
 
         // Twin-origin probe (read-only, env-gated): `YANG_INPUT_VERT_PROBE=
         // x,y,z,r` — report every RESOLVED overlay vertex within r of the
@@ -1439,9 +1446,22 @@ pub(crate) fn stage0_preprocess(a: &BRep, b: &BRep) -> Result<Option<Stage0>, Ya
         let tri_degenerate = gate_tri_degenerate;
         let tri_area = |t: &[u32; 3], coords: &[Point3]| gate_tri_area(t, coords, frame);
         // A replacement triangle is valid under the current resolved
-        // coordinates if it winds material-CCW (positive area) or its 3D
-        // image is bit-degenerate (the M-B emission-drop class).
-        let tri_valid = |t: &[u32; 3], coords: &[Point3]| gate_tri_valid(t, coords, frame);
+        // coordinates if it winds material-CCW (positive area) AND is
+        // positively oriented on the EXACT positions (amendment 20 — never a
+        // zero-area triangle of collinear sweep vertices), or its 3D image
+        // is bit-degenerate (the M-B emission-drop class). The oracle is
+        // built at each use: the ladder mutates `coords`, `minted_mark` and
+        // the overlay's vertex tables between uses.
+        macro_rules! exact_pos {
+            () => {
+                ExactPos {
+                    exact: &overlay.exact_verts,
+                    verts: &overlay.verts,
+                    coords0: &coords0,
+                    minted: &minted_mark,
+                }
+            };
+        }
 
         // Amendment 4 (spec `n2_stage4_junction_cluster_merge` §3, M8
         // increment 7): edge → incident-triangle map for the constrained
@@ -1548,7 +1568,9 @@ pub(crate) fn stage0_preprocess(a: &BRep, b: &BRep) -> Result<Option<Stage0>, Ya
                     // termination).
                     let n1 = [ea, d, c];
                     let n2 = [d, eb, c];
-                    if !tri_valid(&n1, &coords) || !tri_valid(&n2, &coords) {
+                    if !gate_tri_valid_ex(&n1, &coords, frame, &exact_pos!())
+                        || !gate_tri_valid_ex(&n2, &coords, frame, &exact_pos!())
+                    {
                         reject("replacements invalid");
                         continue;
                     }
@@ -1628,6 +1650,7 @@ pub(crate) fn stage0_preprocess(a: &BRep, b: &BRep) -> Result<Option<Stage0>, Ya
                         vv,
                         &coords,
                         frame,
+                        &exact_pos!(),
                         &minted_mark,
                         probe_flip,
                     ) {
@@ -1672,6 +1695,7 @@ pub(crate) fn stage0_preprocess(a: &BRep, b: &BRep) -> Result<Option<Stage0>, Ya
                         &seeds,
                         &coords,
                         frame,
+                        &exact_pos!(),
                         &minted_mark,
                         probe_flip,
                     ) {
@@ -1849,6 +1873,7 @@ pub(crate) fn stage0_preprocess(a: &BRep, b: &BRep) -> Result<Option<Stage0>, Ya
                                 &mut minted_mark,
                                 &mut mergeable_mark,
                                 frame,
+                                &coords0,
                                 Some(sag),
                                 &ctx.chords,
                                 &ctx.other_segs,

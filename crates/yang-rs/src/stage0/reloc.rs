@@ -84,25 +84,35 @@ pub(crate) fn earclip_cavity_polygon(
     cls0: RegionClass,
     coords: &[Point3],
     frame: &Frame,
+    ex: &ExactPos,
     edge_map: &BTreeMap<[u32; 2], Vec<usize>>,
     probe: bool,
     probe_who: &str,
 ) -> Result<Vec<([u32; 3], RegionClass)>, EarclipErr> {
     let edge_key = |a: u32, b: u32| if a < b { [a, b] } else { [b, a] };
     let pos = |i: u32| frame.project(coords[i as usize]);
+    if probe {
+        eprintln!("  [reloc-poly] {probe_who} poly={poly:?}");
+    }
 
     // Exact simplicity + CCW on the DEDUPLICATED position ring (collapsed
     // sub-floor twins share one resolved position; their zero-length edges
-    // cannot cross anything).
-    let ring: Vec<(f64, f64)> = {
-        let mut r: Vec<(f64, f64)> = Vec::with_capacity(poly.len());
+    // cannot cross anything). Amendment 20 (spec
+    // `m8_stage0_multiclass_cavity_arm` §18): the predicates run on the
+    // EXACT positions (`ExactPos` — the sweep's rational coordinate for a
+    // vertex still at its sweep resolution, the rounded projection for a
+    // moved one); the f64 projections remain the deduplication / pinch key
+    // and the `NotSimple` crossing payload (the caller identifies ring
+    // mints by that projection).
+    let ring: Vec<(u32, (f64, f64))> = {
+        let mut r: Vec<(u32, (f64, f64))> = Vec::with_capacity(poly.len());
         for &pi in poly {
             let q = pos(pi);
-            if r.last() != Some(&q) {
-                r.push(q);
+            if r.last().map(|&(_, lq)| lq) != Some(q) {
+                r.push((pi, q));
             }
         }
-        while r.len() > 1 && r.first() == r.last() {
+        while r.len() > 1 && r.first().map(|&(_, q)| q) == r.last().map(|&(_, q)| q) {
             r.pop();
         }
         r
@@ -110,6 +120,13 @@ pub(crate) fn earclip_cavity_polygon(
     if ring.len() < 3 {
         return Err(EarclipErr::Other("degenerate cavity polygon"));
     }
+    let Some(ring_ex) = ring
+        .iter()
+        .map(|&(pi, _)| ex.at(pi, coords, frame))
+        .collect::<Option<Vec<ExactPoint2>>>()
+    else {
+        return Err(EarclipErr::Other("non-finite cavity polygon"));
+    };
     // Simplicity BEFORE orientation (amendment 11, M8 increment 14): a
     // bow-tie's signed area is lobe-balance noise — a net-CW non-simple
     // ring (measured F0088 vert 674: hair-thin full-height strip whose
@@ -123,49 +140,30 @@ pub(crate) fn earclip_cavity_polygon(
             if b == a + 1 || (a == 0 && b == n - 1) {
                 continue;
             }
-            let (p1, p2) = (ring[a], ring[(a + 1) % n]);
-            let (q1, q2) = (ring[b], ring[(b + 1) % n]);
+            let (p1, p2) = (ring[a].1, ring[(a + 1) % n].1);
+            let (q1, q2) = (ring[b].1, ring[(b + 1) % n].1);
             // Non-adjacent shared position = a pinch.
             if p1 == q1 || p1 == q2 || p2 == q1 || p2 == q2 {
                 return Err(EarclipErr::Other(
                     "cavity polygon pinched (repeated position)",
                 ));
             }
-            let (Some(o1), Some(o2), Some(o3), Some(o4)) = (
-                orient_sign_exact(p1, p2, q1),
-                orient_sign_exact(p1, p2, q2),
-                orient_sign_exact(q1, q2, p1),
-                orient_sign_exact(q1, q2, p2),
-            ) else {
-                return Err(EarclipErr::Other("non-finite cavity polygon"));
-            };
             // Proper crossing, or an endpoint on the other segment's
-            // INTERIOR. Bare collinearity (o == 0 with the point outside
-            // the segment) is NOT an intersection — sweep-event columns
-            // legitimately put many ring vertices on one exact vertical
-            // line, so rejecting all collinear pairs falsely rejects
-            // repairable cavities (measured: F0087 cut 10, vert 186).
-            // Endpoint coincidence was excluded above, so on-segment
-            // here means strictly interior; collinear-overlapping
-            // segments have an endpoint interior to the other and are
-            // caught by the same test.
-            let within = |o: i8, e1: (f64, f64), e2: (f64, f64), q: (f64, f64)| {
-                o == 0
-                    && q.0 >= e1.0.min(e2.0)
-                    && q.0 <= e1.0.max(e2.0)
-                    && q.1 >= e1.1.min(e2.1)
-                    && q.1 <= e1.1.max(e2.1)
-            };
-            if (o1 * o2 < 0 && o3 * o4 < 0)
-                || within(o1, p1, p2, q1)
-                || within(o2, p1, p2, q2)
-                || within(o3, q1, q2, p1)
-                || within(o4, q1, q2, p2)
-            {
+            // INTERIOR (collinear-overlapping segments included). Bare
+            // collinearity with the point outside the segment is NOT an
+            // intersection — sweep-event columns legitimately put many ring
+            // vertices on one exact line (measured: F0087 cut 10, vert 186).
+            if segments_cross_exact(
+                &ring_ex[a],
+                &ring_ex[(a + 1) % n],
+                &ring_ex[b],
+                &ring_ex[(b + 1) % n],
+            ) {
                 if probe {
+                    let ring_f: Vec<(f64, f64)> = ring.iter().map(|r| r.1).collect();
                     eprintln!(
                         "  [reloc-ring] edges {a}:({p1:?}->{p2:?}) x {b}:({q1:?}->{q2:?}) \
-                         o=({o1},{o2},{o3},{o4}) ring={ring:?}"
+                         ring={ring_f:?}"
                     );
                 }
                 return Err(EarclipErr::NotSimple {
@@ -175,22 +173,18 @@ pub(crate) fn earclip_cavity_polygon(
         }
     }
     {
-        use crate::coplanar_overlay::rat;
         let mut two_area = RBig::ZERO;
-        for k in 0..ring.len() {
-            let (ax, ay) = ring[k];
-            let (bx, by) = ring[(k + 1) % ring.len()];
-            let Ok(t) = rat(ax).and_then(|axr| Ok(axr * rat(by)? - rat(bx)? * rat(ay)?)) else {
-                return Err(EarclipErr::Other("non-finite cavity polygon"));
-            };
-            two_area += t;
+        for k in 0..n {
+            let (a, b) = (&ring_ex[k], &ring_ex[(k + 1) % n]);
+            two_area += &a.x * &b.y - &b.x * &a.y;
         }
         if two_area <= RBig::ZERO {
             // The ring is SIMPLE (checked above) yet winds CW or is
             // degenerate: a genuinely inside-out cavity — terminal.
             if probe {
+                let ring_f: Vec<(f64, f64)> = ring.iter().map(|r| r.1).collect();
                 eprintln!(
-                    "  [reloc-ccw] {probe_who} two_area {} ring={ring:?}",
+                    "  [reloc-ccw] {probe_who} two_area {} ring={ring_f:?}",
                     if two_area == RBig::ZERO {
                         "ZERO"
                     } else {
@@ -203,6 +197,21 @@ pub(crate) fn earclip_cavity_polygon(
     }
 
     // Constrained ear-clip: deterministic first-clippable-ear order.
+    // Amendment 20: convexity and emptiness are decided on the EXACT
+    // positions (cached once per polygon vertex — positions are fixed for
+    // the whole clip); an ear of three exactly collinear sweep vertices is
+    // never convex, so a collinear boundary chain is consumed only as the
+    // base of ears with an off-line apex.
+    let mut ex_of: BTreeMap<u32, ExactPoint2> = BTreeMap::new();
+    for &pi in poly {
+        if let std::collections::btree_map::Entry::Vacant(slot) = ex_of.entry(pi) {
+            let Some(e) = ex.at(pi, coords, frame) else {
+                return Err(EarclipErr::Other("non-finite cavity polygon"));
+            };
+            slot.insert(e);
+        }
+    }
+    let ori = |i: u32, j: u32, k: u32| sign_r(&cross_r(&ex_of[&i], &ex_of[&j], &ex_of[&k]));
     let mut work: Vec<u32> = poly.to_vec();
     let mut ears: Vec<([u32; 3], RegionClass)> = Vec::with_capacity(poly.len());
     while work.len() > 3 {
@@ -212,14 +221,11 @@ pub(crate) fn earclip_cavity_polygon(
             let (ia, ib, ic) = (work[(k + m - 1) % m], work[k], work[(k + 1) % m]);
             let ear = [ia, ib, ic];
             if !gate_tri_degenerate(&ear, coords) {
-                // Convex, gate-valid, empty, and a NEW diagonal.
-                if !gate_tri_valid(&ear, coords, frame) {
+                // Convex (exact + f64 gate), empty, and a NEW diagonal.
+                if !gate_tri_valid_ex(&ear, coords, frame, ex) {
                     continue;
                 }
                 let (pa, pb, pc) = (pos(ia), pos(ib), pos(ic));
-                if orient_sign_exact(pa, pb, pc) != Some(1) {
-                    continue;
-                }
                 for &other in work.iter() {
                     if other == ia || other == ib || other == ic {
                         continue;
@@ -230,13 +236,7 @@ pub(crate) fn earclip_cavity_polygon(
                     if q == pa || q == pb || q == pc {
                         continue;
                     }
-                    let (Some(s1), Some(s2), Some(s3)) = (
-                        orient_sign_exact(pa, pb, q),
-                        orient_sign_exact(pb, pc, q),
-                        orient_sign_exact(pc, pa, q),
-                    ) else {
-                        return Err(EarclipErr::Other("non-finite cavity polygon"));
-                    };
+                    let (s1, s2, s3) = (ori(ia, ib, other), ori(ib, ic, other), ori(ic, ia, other));
                     if s1 >= 0 && s2 >= 0 && s3 >= 0 {
                         continue 'ear; // inside or on the ear
                     }
@@ -257,7 +257,7 @@ pub(crate) fn earclip_cavity_polygon(
         }
     }
     let last = [work[0], work[1], work[2]];
-    if !gate_tri_valid(&last, coords, frame) {
+    if !gate_tri_valid_ex(&last, coords, frame, ex) {
         return Err(EarclipErr::Other("final ear invalid"));
     }
     ears.push((last, cls0));
@@ -292,6 +292,7 @@ pub(crate) fn carve_star_cavity(
     v: u32,
     coords: &[Point3],
     frame: &Frame,
+    ex: &ExactPos,
 ) -> Result<Carved, &'static str> {
     let edge_key = |a: u32, b: u32| if a < b { [a, b] } else { [b, a] };
 
@@ -351,7 +352,7 @@ pub(crate) fn carve_star_cavity(
     let mut i = 0;
     while i < link.len() {
         let (a, b, cls) = link[i];
-        if gate_tri_valid(&[v, a, b], coords, frame) {
+        if gate_tri_valid_ex(&[v, a, b], coords, frame, ex) {
             i += 1;
             continue;
         }
@@ -479,6 +480,7 @@ pub(crate) fn relocate_minted_vertex(
     v: u32,
     coords: &[Point3],
     frame: &Frame,
+    ex: &ExactPos,
     minted_mark: &[bool],
     probe: bool,
 ) -> RelocOutcome {
@@ -498,7 +500,7 @@ pub(crate) fn relocate_minted_vertex(
         link,
         starts,
         deferred,
-    } = match carve_star_cavity(tris, class, edge_map, v, coords, frame) {
+    } = match carve_star_cavity(tris, class, edge_map, v, coords, frame, ex) {
         Ok(c) => c,
         Err(why) => return reject(why),
     };
@@ -545,6 +547,7 @@ pub(crate) fn relocate_minted_vertex(
             cls0,
             coords,
             frame,
+            ex,
             edge_map,
             probe,
             &format!("vert {v}"),
@@ -560,7 +563,7 @@ pub(crate) fn relocate_minted_vertex(
                 // position match against the same frame projection the
                 // ear-clip used. Amendment 13: the first raw-poly crossing
                 // may carry the backtrack merge pair or the split chord.
-                let cross_idx = first_ring_crossing(&poly, coords, frame);
+                let cross_idx = first_ring_crossing(&poly, coords, frame, ex);
                 return RelocOutcome::NonSimple {
                     ring_mints: poly
                         .iter()
@@ -640,7 +643,7 @@ pub(crate) fn relocate_minted_vertex(
             // deferral (growth defers only on an invalid fan triangle):
             // the fan IS its re-triangulation and v keeps every spoke.
             if w.iter()
-                .all(|&i| gate_tri_valid(&[v, link[i].0, link[i].1], coords, frame))
+                .all(|&i| gate_tri_valid_ex(&[v, link[i].0, link[i].1], coords, frame, ex))
             {
                 if probe {
                     eprintln!(
@@ -663,6 +666,7 @@ pub(crate) fn relocate_minted_vertex(
                 cls,
                 coords,
                 frame,
+                ex,
                 edge_map,
                 probe,
                 &format!("vert {v} wedge {wi}"),
@@ -681,7 +685,7 @@ pub(crate) fn relocate_minted_vertex(
                     // first raw-poly crossing may carry the backtrack merge
                     // pair or the split chord (the singleton-NonSimple
                     // customers, R0099 verts 4/9).
-                    let cross_idx = first_ring_crossing(&poly, coords, frame);
+                    let cross_idx = first_ring_crossing(&poly, coords, frame, ex);
                     return RelocOutcome::NonSimple {
                         ring_mints: poly
                             .iter()
@@ -775,6 +779,7 @@ pub(crate) fn relocate_minted_region(
     seeds: &[u32],
     coords: &[Point3],
     frame: &Frame,
+    ex: &ExactPos,
     minted_mark: &[bool],
     probe: bool,
 ) -> RegionOutcome {
@@ -845,6 +850,7 @@ pub(crate) fn relocate_minted_region(
                 cls0,
                 coords,
                 frame,
+                ex,
                 minted_mark,
                 probe,
                 &mut merge_candidate,
@@ -888,6 +894,7 @@ pub(crate) fn relocate_region_single_class(
     cls0: RegionClass,
     coords: &[Point3],
     frame: &Frame,
+    ex: &ExactPos,
     minted_mark: &[bool],
     probe: bool,
     merge_candidate: &mut Option<(u32, u32, f64, f64)>,
@@ -1014,7 +1021,7 @@ pub(crate) fn relocate_region_single_class(
         // exactly simple. Constraint edges (domain boundary, intersection
         // curve) are never crossed; an apex already on the cycle would
         // pinch the ring (both defer to the partner edge, else reject).
-        let Some((ei, ej)) = first_ring_crossing(&poly, coords, frame) else {
+        let Some((ei, ej)) = first_ring_crossing(&poly, coords, frame, ex) else {
             break poly;
         };
         let mut grew = false;
@@ -1128,6 +1135,7 @@ pub(crate) fn relocate_region_single_class(
         cls0,
         coords,
         frame,
+        ex,
         edge_map,
         probe,
         &format!("region {seeds:?}"),
@@ -1294,9 +1302,14 @@ pub(crate) fn first_ring_crossing(
     poly: &[u32],
     coords: &[Point3],
     frame: &Frame,
+    ex: &ExactPos,
 ) -> Option<(usize, usize)> {
     let n = poly.len();
     let pos = |i: usize| frame.project(coords[poly[i] as usize]);
+    // Amendment 20: the crossing test runs on the EXACT positions (the
+    // same predicate as `earclip_cavity_polygon`'s guard); the f64
+    // projections keep the zero-length / shared-position skips.
+    let exact: Vec<Option<ExactPoint2>> = poly.iter().map(|&i| ex.at(i, coords, frame)).collect();
     for a in 0..n {
         let (p1, p2) = (pos(a), pos((a + 1) % n));
         if p1 == p2 {
@@ -1312,27 +1325,15 @@ pub(crate) fn first_ring_crossing(
             if p1 == q1 || p1 == q2 || p2 == q1 || p2 == q2 {
                 continue;
             }
-            let (Some(o1), Some(o2), Some(o3), Some(o4)) = (
-                orient_sign_exact(p1, p2, q1),
-                orient_sign_exact(p1, p2, q2),
-                orient_sign_exact(q1, q2, p1),
-                orient_sign_exact(q1, q2, p2),
+            let (Some(e1), Some(e2), Some(f1), Some(f2)) = (
+                &exact[a],
+                &exact[(a + 1) % n],
+                &exact[b],
+                &exact[(b + 1) % n],
             ) else {
                 return None; // non-finite: leave for the ear-clip to reject
             };
-            let within = |o: i8, e1: (f64, f64), e2: (f64, f64), q: (f64, f64)| {
-                o == 0
-                    && q.0 >= e1.0.min(e2.0)
-                    && q.0 <= e1.0.max(e2.0)
-                    && q.1 >= e1.1.min(e2.1)
-                    && q.1 <= e1.1.max(e2.1)
-            };
-            if (o1 * o2 < 0 && o3 * o4 < 0)
-                || within(o1, p1, p2, q1)
-                || within(o2, p1, p2, q2)
-                || within(o3, q1, q2, p1)
-                || within(o4, q1, q2, p2)
-            {
+            if segments_cross_exact(e1, e2, f1, f2) {
                 return Some((a, b));
             }
         }
@@ -1370,6 +1371,7 @@ pub(crate) fn fig11_split_cavity(
     minted_mark: &mut Vec<bool>,
     mergeable_mark: &mut Vec<bool>,
     frame: &Frame,
+    coords0: &[Point3],
     sagitta: Option<f64>,
     own_chords: &[(ExactPoint2, ExactPoint2)],
     other_segs: &[(ExactPoint2, ExactPoint2)],
@@ -1387,10 +1389,25 @@ pub(crate) fn fig11_split_cavity(
     let edge_key = |a: u32, b: u32| if a < b { [a, b] } else { [b, a] };
 
     // ── 1. Shared carve (star + link + growth). ──────────────────────────
-    let carved = match carve_star_cavity(&overlay.tris, &overlay.class, edge_map, v, coords, frame)
-    {
-        Ok(c) => c,
-        Err(why) => return reject(why),
+    let carved = {
+        let ex = ExactPos {
+            exact: &overlay.exact_verts,
+            verts: &overlay.verts,
+            coords0,
+            minted: minted_mark,
+        };
+        match carve_star_cavity(
+            &overlay.tris,
+            &overlay.class,
+            edge_map,
+            v,
+            coords,
+            frame,
+            &ex,
+        ) {
+            Ok(c) => c,
+            Err(why) => return reject(why),
+        }
     };
     if !carved.starts.is_empty() {
         // Amendment 15 (spec `m8_stage0_multiclass_cavity_arm` §13f/§13g,
@@ -1408,6 +1425,7 @@ pub(crate) fn fig11_split_cavity(
             coords,
             minted_mark,
             frame,
+            coords0,
             own_chords,
             other_segs,
             other_is_b,
@@ -1647,9 +1665,18 @@ pub(crate) fn fig11_split_cavity(
     p_rem_in.push(c_first);
     let p_bulge = [qa_id, qb_id, v];
 
+    // Amendment 20: the exact position oracle over the EXTENDED vertex
+    // tables (q_a / q_b are residents: exact UVs on C, coords = their lift).
+    let ex = ExactPos {
+        exact: &overlay.exact_verts,
+        verts: &overlay.verts,
+        coords0,
+        minted: minted_mark,
+    };
     let build = || -> Result<Vec<([u32; 3], RegionClass)>, String> {
         let mut ears: Vec<([u32; 3], RegionClass)> = Vec::with_capacity(cavity.len() + 2);
-        if !gate_tri_valid(&p_bulge, coords, frame) || gate_tri_degenerate(&p_bulge, coords) {
+        if !gate_tri_valid_ex(&p_bulge, coords, frame, &ex) || gate_tri_degenerate(&p_bulge, coords)
+        {
             return Err("split-bulge-invalid".into());
         }
         ears.push((p_bulge, bulge_cls));
@@ -1664,6 +1691,7 @@ pub(crate) fn fig11_split_cavity(
                 cls,
                 coords,
                 frame,
+                &ex,
                 edge_map,
                 probe,
                 &format!("vert {v} {who}"),
@@ -1906,6 +1934,7 @@ pub(crate) fn fig11_slide_splice(
     coords: &[Point3],
     minted_mark: &[bool],
     frame: &Frame,
+    coords0: &[Point3],
     own_chords: &[(ExactPoint2, ExactPoint2)],
     other_segs: &[(ExactPoint2, ExactPoint2)],
     other_is_b: bool,
@@ -2175,12 +2204,20 @@ pub(crate) fn fig11_slide_splice(
     }
 
     let mut new_tris: Vec<([u32; 3], RegionClass)> = Vec::with_capacity(cavity.len() + tail.len());
+    // Amendment 20: the exact position oracle (the splice inserts no vertex).
+    let ex = ExactPos {
+        exact: &overlay.exact_verts,
+        verts: &overlay.verts,
+        coords0,
+        minted: minted_mark,
+    };
     match earclip_cavity_polygon(
         &side_poly,
         cavity,
         side_cls,
         coords,
         frame,
+        &ex,
         edge_map,
         probe,
         &format!("vert {v} slide-side"),
@@ -2189,12 +2226,8 @@ pub(crate) fn fig11_slide_splice(
         Err(EarclipErr::NotSimple { .. }) => return reject("side polygon not simple"),
         Err(EarclipErr::Other(why)) => return reject(why),
     }
-    let pos2 = |i: u32| frame.project(coords[i as usize]);
     let push_checked = |t: [u32; 3], cls: RegionClass, out: &mut Vec<([u32; 3], RegionClass)>| {
-        if gate_tri_degenerate(&t, coords)
-            || !gate_tri_valid(&t, coords, frame)
-            || orient_sign_exact(pos2(t[0]), pos2(t[1]), pos2(t[2])) != Some(1)
-        {
+        if gate_tri_degenerate(&t, coords) || !gate_tri_valid_ex(&t, coords, frame, &ex) {
             return false;
         }
         out.push((t, cls));
@@ -2330,6 +2363,7 @@ mod reloc_tests {
     //! mutation. All fixtures live on the z=0 plane with the identity
     //! frame, so the resolved 3D coords ARE the 2D positions.
 
+    use super::ExactPos;
     use super::RelocOutcome;
     use super::{
         gate_tri_valid, relocate_minted_region, relocate_minted_vertex, Frame, RegionOutcome,
@@ -2412,7 +2446,15 @@ mod reloc_tests {
         let minted = vec![true, false, false, false, false];
         assert!(matches!(
             relocate_minted_vertex(
-                &mut tris, &mut class, &mut em, 0, &coords, &frame, &minted, false
+                &mut tris,
+                &mut class,
+                &mut em,
+                0,
+                &coords,
+                &frame,
+                &ExactPos::NONE,
+                &minted,
+                false
             ),
             RelocOutcome::Committed
         ));
@@ -2449,7 +2491,15 @@ mod reloc_tests {
         let frame = frame_z0();
         let minted = vec![true, false, false, false, false];
         let out = relocate_minted_vertex(
-            &mut tris, &mut class, &mut em, 0, &coords, &frame, &minted, false,
+            &mut tris,
+            &mut class,
+            &mut em,
+            0,
+            &coords,
+            &frame,
+            &ExactPos::NONE,
+            &minted,
+            false,
         );
         let RelocOutcome::NonSimple {
             merge_candidate,
@@ -2513,7 +2563,15 @@ mod reloc_tests {
         let minted = vec![true, false, false, false, false, false, false];
         assert!(matches!(
             relocate_minted_vertex(
-                &mut tris, &mut class, &mut em, 0, &coords, &frame, &minted, false
+                &mut tris,
+                &mut class,
+                &mut em,
+                0,
+                &coords,
+                &frame,
+                &ExactPos::NONE,
+                &minted,
+                false
             ),
             RelocOutcome::Committed
         ));
@@ -2597,6 +2655,7 @@ mod reloc_tests {
                 &[0],
                 &coords,
                 &frame,
+                &ExactPos::NONE,
                 &minted,
                 false
             ),
@@ -2650,6 +2709,7 @@ mod reloc_tests {
                 &[0],
                 &coords,
                 &frame,
+                &ExactPos::NONE,
                 &minted,
                 false
             ),
@@ -2712,6 +2772,7 @@ mod reloc_tests {
                 &[0],
                 &coords,
                 &frame,
+                &ExactPos::NONE,
                 &minted,
                 false
             ),
@@ -2747,6 +2808,7 @@ mod reloc_tests {
                 &[0],
                 &coords,
                 &frame,
+                &ExactPos::NONE,
                 &minted,
                 false
             ),
@@ -2811,6 +2873,7 @@ mod reloc_tests {
                 &[0],
                 &coords,
                 &frame,
+                &ExactPos::NONE,
                 &minted,
                 false
             ),
@@ -2893,6 +2956,7 @@ mod reloc_tests {
                 &[0],
                 &coords,
                 &frame,
+                &ExactPos::NONE,
                 &minted,
                 false
             ),
@@ -2937,7 +3001,15 @@ mod reloc_tests {
         );
         let minted = vec![true, false, false, true, true];
         let out = relocate_minted_vertex(
-            &mut tris, &mut class, &mut em, 0, &coords, &frame, &minted, false,
+            &mut tris,
+            &mut class,
+            &mut em,
+            0,
+            &coords,
+            &frame,
+            &ExactPos::NONE,
+            &minted,
+            false,
         );
         let RelocOutcome::NonSimple { ring_mints, .. } = out else {
             panic!("fixture must reach the non-simple cavity polygon");
@@ -2977,7 +3049,15 @@ mod reloc_tests {
         );
         let minted = vec![true, true, false, false];
         let out = relocate_minted_vertex(
-            &mut tris, &mut class, &mut em, 0, &coords, &frame, &minted, false,
+            &mut tris,
+            &mut class,
+            &mut em,
+            0,
+            &coords,
+            &frame,
+            &ExactPos::NONE,
+            &minted,
+            false,
         );
         let RelocOutcome::NonSimple { ring_mints, .. } = out else {
             panic!(
@@ -3032,6 +3112,7 @@ mod reloc_tests {
                 &[0, off],
                 &coords,
                 &frame,
+                &ExactPos::NONE,
                 &minted,
                 false
             ),
@@ -3130,7 +3211,15 @@ mod reloc_tests {
         let minted = vec![true, false, false, false, false, false, false];
         assert!(matches!(
             relocate_minted_vertex(
-                &mut tris, &mut class, &mut em, 0, &coords, &frame, &minted, false
+                &mut tris,
+                &mut class,
+                &mut em,
+                0,
+                &coords,
+                &frame,
+                &ExactPos::NONE,
+                &minted,
+                false
             ),
             RelocOutcome::Committed
         ));
@@ -3209,7 +3298,15 @@ mod reloc_tests {
         let minted = vec![true, false, false, false, false, false, false, false];
         assert!(matches!(
             relocate_minted_vertex(
-                &mut tris, &mut class, &mut em, 0, &coords, &frame, &minted, false
+                &mut tris,
+                &mut class,
+                &mut em,
+                0,
+                &coords,
+                &frame,
+                &ExactPos::NONE,
+                &minted,
+                false
             ),
             RelocOutcome::Committed
         ));
@@ -3263,7 +3360,15 @@ mod reloc_tests {
         let minted = vec![true, false, false, false, false, false, false, false];
         assert!(matches!(
             relocate_minted_vertex(
-                &mut tris, &mut class, &mut em, 0, &coords, &frame, &minted, false
+                &mut tris,
+                &mut class,
+                &mut em,
+                0,
+                &coords,
+                &frame,
+                &ExactPos::NONE,
+                &minted,
+                false
             ),
             RelocOutcome::Committed
         ));
@@ -3306,7 +3411,15 @@ mod reloc_tests {
         let minted = vec![true, false, false, false, false, false, false];
         assert!(matches!(
             relocate_minted_vertex(
-                &mut tris, &mut class, &mut em, 0, &coords, &frame, &minted, false
+                &mut tris,
+                &mut class,
+                &mut em,
+                0,
+                &coords,
+                &frame,
+                &ExactPos::NONE,
+                &minted,
+                false
             ),
             RelocOutcome::Committed
         ));
@@ -3340,7 +3453,15 @@ mod reloc_tests {
         let minted = vec![true, false, false, false, false];
         assert!(matches!(
             relocate_minted_vertex(
-                &mut tris, &mut class, &mut em, 0, &coords, &frame, &minted, false
+                &mut tris,
+                &mut class,
+                &mut em,
+                0,
+                &coords,
+                &frame,
+                &ExactPos::NONE,
+                &minted,
+                false
             ),
             RelocOutcome::Rejected
         ));
@@ -3366,7 +3487,15 @@ mod reloc_tests {
         let frame = frame_z0();
         let minted = vec![true, false, false, true, false, false, true];
         let out = relocate_minted_vertex(
-            &mut tris, &mut class, &mut em, 0, &coords, &frame, &minted, false,
+            &mut tris,
+            &mut class,
+            &mut em,
+            0,
+            &coords,
+            &frame,
+            &ExactPos::NONE,
+            &minted,
+            false,
         );
         let RelocOutcome::NonSimple { ring_mints, .. } = out else {
             panic!("the non-simple wedge polygon must surface the joint trigger");
@@ -3428,6 +3557,7 @@ mod reloc_tests {
             &[0, 4],
             &coords,
             &frame,
+            &ExactPos::NONE,
             &minted,
             false,
         );
@@ -3480,6 +3610,7 @@ mod reloc_tests {
                 &[0, 4],
                 &coords,
                 &frame,
+                &ExactPos::NONE,
                 &minted,
                 false,
             ),
@@ -3521,7 +3652,15 @@ mod reloc_tests {
         let minted = vec![true, false, false, false, false, false, false];
         assert!(matches!(
             relocate_minted_vertex(
-                &mut tris, &mut class, &mut em, 0, &coords, &frame, &minted, false
+                &mut tris,
+                &mut class,
+                &mut em,
+                0,
+                &coords,
+                &frame,
+                &ExactPos::NONE,
+                &minted,
+                false
             ),
             RelocOutcome::Committed
         ));
@@ -3695,6 +3834,7 @@ mod split_tests {
             &mut minted,
             &mut mergeable,
             &frame,
+            &[],
             Some(0.1),
             &own_chords(),
             &other_segs(),
@@ -3723,6 +3863,7 @@ mod split_tests {
             &mut minted,
             &mut mergeable,
             &frame,
+            &[],
             Some(0.1),
             &own_chords(),
             &other_segs(),
@@ -3786,6 +3927,7 @@ mod split_tests {
             &mut minted,
             &mut mergeable,
             &frame_z0(),
+            &[],
             Some(0.01), // overshoot 0.05 exceeds the sagitta premise
             &own_chords(),
             &other_segs(),
@@ -3815,6 +3957,7 @@ mod split_tests {
             &mut minted,
             &mut mergeable,
             &frame_z0(),
+            &[],
             Some(0.1),
             &own_chords(),
             &[],
@@ -3834,6 +3977,7 @@ mod split_tests {
             &mut minted,
             &mut mergeable,
             &frame_z0(),
+            &[],
             Some(0.1),
             &[],
             &other_segs(),
@@ -3861,6 +4005,7 @@ mod slide_tests {
     //! triangles, per-class signed area EXACTLY conserved), and reject
     //! loudly — with no mutation — on each §13f certificate.
 
+    use super::ExactPos;
     use super::{carve_star_cavity, fig11_slide_splice, Carved, Frame};
     use crate::coplanar_overlay::{ClassifiedOverlay, ExactPoint2, RegionClass};
     use cad_primitives::{Point2, Point3};
@@ -3994,6 +4139,7 @@ mod slide_tests {
             0,
             coords,
             &frame_z0(),
+            &ExactPos::NONE,
         )
         .expect("fixture star carves")
     }
@@ -4016,6 +4162,7 @@ mod slide_tests {
             &coords,
             &minted,
             &frame,
+            &[],
             &own_chords_v(),
             &other_segs(),
             false, // chord on input A's edge ⇒ side class AOnly
@@ -4080,6 +4227,7 @@ mod slide_tests {
             &coords,
             &minted,
             &frame_z0(),
+            &[],
             &own_chords_v(),
             &other_segs(),
             false,
@@ -4111,6 +4259,7 @@ mod slide_tests {
             &coords,
             &minted,
             &frame_z0(),
+            &[],
             &own_chords_v(),
             &other_segs(),
             false,
@@ -4154,6 +4303,7 @@ mod slide_tests {
             &coords,
             &minted,
             &frame_z0(),
+            &[],
             &own_chords_v(),
             &other_segs(),
             false,
@@ -4198,6 +4348,7 @@ mod slide_tests {
             &coords,
             &minted,
             &frame_z0(),
+            &[],
             &own_chords_v(),
             &other_segs(),
             false,
@@ -4262,9 +4413,16 @@ mod slide_tests {
             ExactPoint2::from_f64(4.0, 0.0).unwrap(),
         )];
         let frame = frame_z0();
-        let carved =
-            carve_star_cavity(&overlay.tris, &overlay.class, &edge_map, 0, &coords, &frame)
-                .expect("mirror star carves");
+        let carved = carve_star_cavity(
+            &overlay.tris,
+            &overlay.class,
+            &edge_map,
+            0,
+            &coords,
+            &frame,
+            &ExactPos::NONE,
+        )
+        .expect("mirror star carves");
         let ok = fig11_slide_splice(
             &mut overlay,
             &mut edge_map,
@@ -4273,6 +4431,7 @@ mod slide_tests {
             &coords,
             &minted,
             &frame,
+            &[],
             &own_chords_mirror(),
             &segs,
             false,
@@ -4400,5 +4559,366 @@ mod slide_tests {
             (cl - 0.5).abs() < 1e-15,
             "split chord is the flank edge, got {cl}"
         );
+    }
+}
+
+#[cfg(test)]
+mod exact_pos_tests {
+    //! Amendment 20 (spec `m8_stage0_multiclass_cavity_arm` §18) unit
+    //! oracles: the exact position oracle's residency rules, and the R0025
+    //! anatomy — a cavity polygon carrying an exactly collinear sweep chain
+    //! (the split points of one gear flank) in the R0025 pair frame, whose
+    //! f64 lift/project round trip scatters the chain by ~1e-13. The
+    //! historical predicate (exact arithmetic on the ROUNDED projections)
+    //! blesses a zero-area needle; the oracle never does, and the
+    //! constrained ear-clip consumes the chain only as ear bases.
+
+    use super::{
+        earclip_cavity_polygon, gate_tri_valid, gate_tri_valid_ex, normalize3, ortho_basis, sign_r,
+        EarclipErr, ExactPos, Frame,
+    };
+    use crate::coplanar_overlay::{cross_r, rat, ExactPoint2, RegionClass};
+    use cad_primitives::{Point2, Point3, Vector3};
+    use dashu::rational::RBig;
+    use std::collections::{BTreeMap, BTreeSet};
+
+    /// R0025's pair frame (face A#1 of the gear, `canonical_frame` rule).
+    fn r0025_frame() -> Frame {
+        let normal: [f64; 3] = [
+            0.15636822443106654,
+            -0.926318227830043,
+            -0.34275868942753895,
+        ];
+        let d = -302.89001520836206;
+        let len = (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt();
+        let n = [normal[0] / len, normal[1] / len, normal[2] / len];
+        let du = d / len;
+        let (e1, e2) = ortho_basis(Vector3::new(normal[0], normal[1], normal[2]));
+        let _ = normalize3;
+        Frame {
+            n,
+            d: du,
+            o: [-du * n[0], -du * n[1], -du * n[2]],
+            e1: e1.as_array(),
+            e2: e2.as_array(),
+        }
+    }
+
+    /// The overlay's exact corners of gear flank (309, 310) in that frame
+    /// (`overlay_000_pair1_0.txt`, verts 539 / 451) and the measured split
+    /// parameters of the eleven sweep-column points on it (`[split-probe]
+    /// f=1 edge (309,310)`, 2026-09-11).
+    const U309: f64 = -952.0787531840999;
+    const V309: f64 = -713.1373372506649;
+    const U310: f64 = -1006.653175821931;
+    const V310: f64 = -803.3733982430243;
+    const SPLIT_T: [f64; 11] = [
+        0.022269397679142103,
+        0.030126894607717114,
+        0.05022961784749886,
+        0.07435818021512519,
+        0.07724202362028104,
+        0.10569128864509915,
+        0.12226938239636433,
+        0.13001471993511995,
+        0.14387342075029125,
+        0.1446079240681544,
+        0.6869201531553197,
+    ];
+
+    /// An exact point ON the exact flank line at parameter `t` (the sweep's
+    /// construction: the column's f64 `u` is exact, `v` is the exact line
+    /// value there), plus its f64 rounding and its 3D lift.
+    fn flank_point(frame: &Frame, t: f64) -> (ExactPoint2, Point2, Point3) {
+        let (u0, v0, u1, v1) = (
+            rat(U309).unwrap(),
+            rat(V309).unwrap(),
+            rat(U310).unwrap(),
+            rat(V310).unwrap(),
+        );
+        // Column x: the f64 interpolate (an event column IS an f64 value).
+        let u_f = U309 + t * (U310 - U309);
+        let u = rat(u_f).unwrap();
+        let v = &v0 + &(&(&u - &u0) * &(&v1 - &v0)) / &(&u1 - &u0);
+        let v_f = v.to_f64().value();
+        let p3 = frame.lift(u_f, v_f);
+        (ExactPoint2 { x: u, y: v }, Point2::new(u_f, v_f), p3)
+    }
+
+    struct Fixture {
+        exact: Vec<ExactPoint2>,
+        verts: Vec<Point2>,
+        coords: Vec<Point3>,
+        minted: Vec<bool>,
+        /// Polygon in CCW order; index 0 is the moved apex.
+        poly: Vec<u32>,
+        chain: BTreeSet<u32>,
+    }
+
+    /// The R0025 wedge in miniature: a moved apex `X` (a mint, resolved off
+    /// its sweep position, 127 units off the flank line and 210 back along
+    /// it — the real 546), corner 309, the eleven collinear split points
+    /// down the flank, then a vertex `Y` beyond the chain's end on X's side
+    /// of the line (so the closing edge runs parallel to the flank and the
+    /// polygon is simple) and back to `X`.
+    fn fixture(frame: &Frame) -> Fixture {
+        let mut exact = Vec::new();
+        let mut verts = Vec::new();
+        let mut coords = Vec::new();
+        let mut minted = Vec::new();
+        let mut push = |e: ExactPoint2, q: Point2, p: Point3, m: bool| -> u32 {
+            exact.push(e);
+            verts.push(q);
+            coords.push(p);
+            minted.push(m);
+            (coords.len() - 1) as u32
+        };
+        // X: a mint whose sweep position was the chord point (u,v) but which
+        // now sits (resolved) somewhere else — near the real 546.
+        let (xu, xv) = (-951.8, -467.7);
+        let x_sweep = ExactPoint2::from_f64(xu, xv).unwrap();
+        let x = push(
+            x_sweep,
+            Point2::new(xu, xv),
+            frame.lift(-951.79, -467.69),
+            true,
+        );
+        // Corner 309 (a resident: its 3D coordinate is the input vertex, its
+        // exact coordinate the rational of that vertex's projection).
+        let c309 = push(
+            ExactPoint2::from_f64(U309, V309).unwrap(),
+            Point2::new(U309, V309),
+            frame.lift(U309, V309),
+            false,
+        );
+        let mut chain: BTreeSet<u32> = BTreeSet::new();
+        chain.insert(c309);
+        let mut ids = vec![x, c309];
+        for &t in &SPLIT_T {
+            let (e, q, p) = flank_point(frame, t);
+            let id = push(e, q, p, false);
+            chain.insert(id);
+            ids.push(id);
+        }
+        // Y: 236 along the flank direction from 309 (past the chain's last
+        // point at 72) and 127 off the line on X's side.
+        let (du, dv) = (U310 - U309, V310 - V309);
+        let l = (du * du + dv * dv).sqrt();
+        let (ax, ay) = (du / l, dv / l);
+        let (nx, ny) = (dv / l, -du / l);
+        let (yu, yv) = (
+            U309 + 236.0 * ax + 127.0 * nx,
+            V309 + 236.0 * ay + 127.0 * ny,
+        );
+        let y = push(
+            ExactPoint2::from_f64(yu, yv).unwrap(),
+            Point2::new(yu, yv),
+            frame.lift(yu, yv),
+            false,
+        );
+        ids.push(y);
+        // CCW in the frame (exact shoelace on the sweep positions).
+        let mut two_a = RBig::ZERO;
+        for k in 0..ids.len() {
+            let (a, b) = (
+                &exact[ids[k] as usize],
+                &exact[ids[(k + 1) % ids.len()] as usize],
+            );
+            two_a += &a.x * &b.y - &b.x * &a.y;
+        }
+        if two_a < RBig::ZERO {
+            ids[1..].reverse();
+        }
+        Fixture {
+            exact,
+            verts,
+            coords,
+            minted,
+            poly: ids,
+            chain,
+        }
+    }
+
+    #[test]
+    fn residency_rules() {
+        let frame = r0025_frame();
+        let f = fixture(&frame);
+        let coords0 = f.coords.clone();
+        let ex = ExactPos {
+            exact: &f.exact,
+            verts: &f.verts,
+            coords0: &coords0,
+            minted: &f.minted,
+        };
+        // The moved mint answers with its rounded projection, not its stale
+        // sweep coordinate.
+        assert!(!ex.is_resident(0, &f.coords, &frame));
+        let (xu, xv) = frame.project(f.coords[0]);
+        assert_eq!(
+            ex.at(0, &f.coords, &frame),
+            ExactPoint2::from_f64(xu, xv),
+            "moved mint → rounded projection"
+        );
+        // Every chain point is a resident: its exact coordinate IS the
+        // sweep's rational, bit for bit.
+        for &i in &f.chain {
+            assert!(ex.is_resident(i, &f.coords, &frame), "vert {i}");
+            assert_eq!(
+                ex.at(i, &f.coords, &frame).as_ref(),
+                Some(&f.exact[i as usize])
+            );
+        }
+        // A reverted mint (minted, but back at its lift) is a resident.
+        let mut minted = f.minted.clone();
+        minted[2] = true;
+        let ex2 = ExactPos {
+            exact: &f.exact,
+            verts: &f.verts,
+            coords0: &coords0,
+            minted: &minted,
+        };
+        assert!(ex2.is_resident(2, &f.coords, &frame));
+        // A Fig-11 merge target (position changed, not a mint) is moved.
+        let mut coords = f.coords.clone();
+        coords[3] = coords[4];
+        assert!(!ex.is_resident(3, &coords, &frame));
+        // A corner whose 3D coordinate is not bit-equal to its own lift is a
+        // resident as long as no arm moved it (coords0 rule).
+        let mut coords = f.coords.clone();
+        let c = coords[1].as_array();
+        coords[1] = Point3::new(c[0] + 1e-13, c[1], c[2]);
+        let coords0b = coords.clone();
+        let ex3 = ExactPos {
+            exact: &f.exact,
+            verts: &f.verts,
+            coords0: &coords0b,
+            minted: &f.minted,
+        };
+        assert!(ex3.is_resident(1, &coords, &frame));
+        // NONE: nothing is resident.
+        assert!(!ExactPos::NONE.is_resident(1, &f.coords, &frame));
+    }
+
+    /// The defect, at predicate level: the round trip makes SOME triple of
+    /// exactly collinear chain points positively oriented on its rounded
+    /// projections (accepted by the historical f64 gate + exact-on-rounded
+    /// orientation), while the oracle reads it as the zero-area needle it
+    /// is. Every chain triple is rejected by the oracle.
+    #[test]
+    fn collinear_chain_needle_is_rejected_only_by_the_oracle() {
+        let frame = r0025_frame();
+        let f = fixture(&frame);
+        let coords0 = f.coords.clone();
+        let ex = ExactPos {
+            exact: &f.exact,
+            verts: &f.verts,
+            coords0: &coords0,
+            minted: &f.minted,
+        };
+        let chain: Vec<u32> = f.chain.iter().copied().collect();
+        let mut historical_accepts = 0usize;
+        let mut noisy = 0usize;
+        for i in 0..chain.len() {
+            for j in (i + 1)..chain.len() {
+                for k in (j + 1)..chain.len() {
+                    for t in [
+                        [chain[i], chain[j], chain[k]],
+                        [chain[i], chain[k], chain[j]],
+                    ] {
+                        assert!(
+                            !gate_tri_valid_ex(&t, &f.coords, &frame, &ex),
+                            "oracle blessed a collinear triple {t:?}"
+                        );
+                        assert_eq!(ex.orient(t[0], t[1], t[2], &f.coords, &frame), Some(0));
+                        // The historical acceptance: f64 gate + exact
+                        // orientation of the rounded projections.
+                        let rp = |v: u32| {
+                            let (u, w) = frame.project(f.coords[v as usize]);
+                            ExactPoint2::from_f64(u, w).unwrap()
+                        };
+                        let o = sign_r(&cross_r(&rp(t[0]), &rp(t[1]), &rp(t[2])));
+                        if o != 0 {
+                            noisy += 1;
+                        }
+                        if gate_tri_valid(&t, &f.coords, &frame) && o == 1 {
+                            historical_accepts += 1;
+                        }
+                    }
+                }
+            }
+        }
+        assert!(
+            noisy > 0,
+            "the round trip must scatter the chain (else the fixture is inert)"
+        );
+        assert!(
+            historical_accepts > 0,
+            "the historical predicate must bless at least one needle here (R0025 did)"
+        );
+    }
+
+    /// End to end on the wedge polygon: the constrained ear-clip with the
+    /// oracle emits `n − 2` ears, none of them three chain vertices, every
+    /// one positively oriented on the exact positions AND on the f64 gate.
+    #[test]
+    fn earclip_consumes_the_collinear_chain_only_as_ear_bases() {
+        let frame = r0025_frame();
+        let f = fixture(&frame);
+        let coords0 = f.coords.clone();
+        let ex = ExactPos {
+            exact: &f.exact,
+            verts: &f.verts,
+            coords0: &coords0,
+            minted: &f.minted,
+        };
+        let edge_map: BTreeMap<[u32; 2], Vec<usize>> = BTreeMap::new();
+        let cavity: BTreeSet<usize> = BTreeSet::new();
+        let ears = match earclip_cavity_polygon(
+            &f.poly,
+            &cavity,
+            RegionClass::AOnly,
+            &f.coords,
+            &frame,
+            &ex,
+            &edge_map,
+            false,
+            "amendment-20 fixture",
+        ) {
+            Ok(e) => e,
+            Err(EarclipErr::NotSimple { crossing }) => panic!("not simple: {crossing:?}"),
+            Err(EarclipErr::Other(why)) => panic!("{why}"),
+        };
+        assert_eq!(ears.len(), f.poly.len() - 2);
+        for (t, cls) in &ears {
+            assert_eq!(*cls, RegionClass::AOnly);
+            assert!(
+                !t.iter().all(|v| f.chain.contains(v)),
+                "needle {t:?}: three collinear chain vertices"
+            );
+            assert_eq!(
+                ex.orient(t[0], t[1], t[2], &f.coords, &frame),
+                Some(1),
+                "{t:?} not exact-CCW"
+            );
+            assert!(
+                gate_tri_valid(t, &f.coords, &frame),
+                "{t:?} fails the f64 gate"
+            );
+        }
+        // Coverage: the ears' exact signed areas sum to the polygon's.
+        let area = |ids: &[u32]| {
+            let mut two_a = RBig::ZERO;
+            for k in 0..ids.len() {
+                let a = ex.at(ids[k], &f.coords, &frame).unwrap();
+                let b = ex.at(ids[(k + 1) % ids.len()], &f.coords, &frame).unwrap();
+                two_a += &a.x * &b.y - &b.x * &a.y;
+            }
+            two_a
+        };
+        let total: RBig = ears
+            .iter()
+            .map(|(t, _)| area(t))
+            .fold(RBig::ZERO, |acc, x| acc + x);
+        assert_eq!(total, area(&f.poly));
     }
 }

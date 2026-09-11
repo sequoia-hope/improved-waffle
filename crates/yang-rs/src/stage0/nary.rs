@@ -490,6 +490,9 @@ pub(crate) fn overlay_nary_group(
         };
         coords.push(pt);
     }
+    // Amendment 20: the resolve-step snapshot for the exact position oracle
+    // (1×1 path rationale, `stage0/mod.rs`), taken BEFORE the collapse.
+    let coords0: Vec<Point3> = coords.clone();
 
     // ── Sub-floor shared-mint collapse (spec `m8_holed_disc_coplanar_
     // overlay` §8; slot space = every rim circle of the group). ──────────
@@ -530,7 +533,6 @@ pub(crate) fn overlay_nary_group(
     // reverts its mints to the chord lift (observable downstream via
     // kernel-v2's vertex-on-surface tripwire — P9-loud, never blessed). ──
     let tri_area = |t: &[u32; 3], coords: &[Point3]| gate_tri_area(t, coords, frame);
-    let tri_valid = |t: &[u32; 3], coords: &[Point3]| gate_tri_valid(t, coords, frame);
     let edge_key = |x: u32, y: u32| if x < y { [x, y] } else { [y, x] };
     let mut edge_map: BTreeMap<[u32; 2], Vec<usize>> = BTreeMap::new();
     for (ti, t) in overlay.tris.iter().enumerate() {
@@ -581,7 +583,18 @@ pub(crate) fn overlay_nary_group(
                 }
                 let n1 = [ea, d, c];
                 let n2 = [d, eb, c];
-                if !tri_valid(&n1, &coords) || !tri_valid(&n2, &coords) {
+                // Amendment 20: flip products are validated on the exact
+                // positions too (never a zero-area triangle of collinear
+                // sweep vertices).
+                let ex = ExactPos {
+                    exact: &overlay.exact_verts,
+                    verts: &overlay.verts,
+                    coords0: &coords0,
+                    minted: &minted_mark,
+                };
+                if !gate_tri_valid_ex(&n1, &coords, frame, &ex)
+                    || !gate_tri_valid_ex(&n2, &coords, frame, &ex)
+                {
                     continue;
                 }
                 for (idx, old) in [(ti, t), (tj, tn)] {

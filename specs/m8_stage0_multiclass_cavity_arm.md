@@ -1,5 +1,11 @@
 # SPEC — M8 Stage-0 overlay mesh-updating: the MULTI-CLASS cavity arm (amendment 12)
 
+**2026-09-11 — amendment 20 (§18): every predicate by which the fold
+ladder CREATES a triangle or decides ring simplicity now runs on the
+overlay's EXACT positions (`ExactPos`, `stage0/frame.rs`) instead of the
+f64 lift/project round trip of them; R0025's collinear-chain needle fan
+is CONVERTED (ERROR → SUPPORTED_CORRECT).**
+
 **Status: amendment-14 inc-3.2d FLIPPED ALWAYS-ON (2026-07-30, §11) —
 the Fig-11(a) vertex-inserting SPLIT is live and R0099 is CONVERTED
 (ERROR → SUPPORTED_CORRECT, the flip's only category change, seam-free
@@ -1834,3 +1840,143 @@ absorbs at a genuinely large sub-band distance.
 F0067's (`face 888 vert 1049`, 4.096e-5) are the same Stage-6
 face-loop-assembly family (#153 NonPlanarFace / #146), and are now
 the frontier for both cases.
+
+## 18. AMENDMENT 20 — exact positions for the ladder's own vertices: the R0025 collinear-chain needle fan (2026-09-11)
+
+### 18a. The anchor chain (measured end to end)
+
+R0025 (op 2 union: extrude(gear) × extrude(circle) whose sketch plane is
+the gear's end cap ⇒ flush caps ⇒ Stage-0 overlay; scale 2.2e3) failed at
+the I6 `NonManifoldInput` backstop: `i6-coincident-tris` compact
+`[765, 766, 768]`, two gear-cap (face 1, a Plane) triangles over one vertex
+triple with OPPOSITE windings. It had been CORRECT (22.9 s) under the
+best-effort float parse and became ERROR (3.7 s) under the 2026-09-07
+`float_roundtrip` parse — the third ULP-parse latent of
+`docs/yang_tail_triage.md` §"Unmasked 2026-09-07".
+
+Offline census of the dumped post-Stage-0 operand (`YANG_STAGE0_DUMP_DIR`,
+`000_union_a.obj` + `tri_face.csv`, face 1 = 1588 triangles):
+
+- nine face-1 triangles of |area| 1.5e-14 … 3.6e-12 (edge lengths 0.08 …
+  70) over ELEVEN vertices, all Stage-0 mints (ids ≥ 560, the Stage-1
+  count), all on ONE line: gear flank edge (309, 310), 105.5 long. Exact
+  (rational) distance of each to the flank line in the pair frame ≤
+  1.2e-13; exact orientation of each needle on the frame projections of
+  the emitted f64 coordinates +4e-15 … +3.8e-12 — all POSITIVE, i.e. the
+  emission gates saw nine valid triangles;
+- none of the eleven is in mesh B, so no B edge is near: B's circle
+  (r 253.7) is centred EXACTLY on the flank's line (the flank is radial
+  through the shared sketch origin; centre→line 1.2e-12), inside the
+  gear's root radius (417). The eleven are the overlay's sweep-column
+  splits of the flank (`[split-probe] f=1 edge (309,310) … SPLIT t=0.022 …
+  0.687 merged=false`, `overlay_000_pair1_0.txt` verts 531 … 455, every
+  one tagged `lift`);
+- the needles sit in overlay triangle slots 481/482, 491/492, 501/502,
+  511/512, 521 — interleaved with the sweep's emission order, the
+  signature of an IN-PLACE cavity commit, not of the exact sweep;
+- the new `[reloc-poly]` probe (this amendment; `YANG_SPLIT_PROBE`) names
+  the owner: `vert 546 wedge 1 poly=[546, 540, 539, 531, 523, 515, 507,
+  499, 491, 483, 475, 466, 460, 455, 459, 465, …, 552]` — the AOnly wedge
+  of rim-column mint 546's amendment-5 relocation (29-triangle cavity: the
+  tall sweep cells on the gear's left side connect rim-column points
+  straight to flank-column points) carries corner 309 (539) and the whole
+  collinear run as its boundary chain. `earclip_cavity_polygon` then
+  clipped, in first-clippable-ear order, the collinear triples
+  (531, 523, 515), (515, 507, 499), … whose orientation on the ROUNDED
+  projections happened to be positive; the chord (531, 455) closed the
+  strip and the remaining polygon triangulated normally through 459.
+
+### 18b. Why the ladder was blind
+
+The overlay is exact: split points are rational intersections of an exact
+event column with an exact sub-segment, so the run is exactly collinear in
+`exact_verts`. The ladder, however, evaluated EVERY 2D predicate on
+`frame.project(coords[i])` — rational → f64 rounding → 3D lift → f64
+projection — and then ran exact rational predicates on those f64 pairs
+(`orient_sign_exact`). At |coord| ≈ 1e3 the round trip scatters an exactly
+collinear chain by ~1e-13 with a random sign: exact arithmetic on noise.
+The sign of the noise is what the input's last ULP decided — hence the
+ULP-parse flip. (The M-B bit-degenerate clause could not help: the needles
+are not bit-identical, merely collinear to rounding.)
+
+### 18c. Design — `ExactPos`, the exact position oracle (`stage0/frame.rs`)
+
+The ladder gets ONE position oracle and every predicate that CREATES a
+triangle or decides ring simplicity runs on it:
+
+- `ExactPos { exact: &overlay.exact_verts, verts: &overlay.verts,
+  coords0, minted }` answers, for vertex `i`, with the overlay's rational
+  coordinate while the vertex still sits at its sweep resolution
+  (**resident**), else with the rational of the rounded frame projection
+  of its resolved 3D point (**moved**). Residency, in order: (1)
+  `coords[i] == frame.lift(verts[i])` — the raw-lift branch, an
+  amendment-2 / settle REVERTED mint, an amendment-14 split-inserted
+  vertex; (2) an N2-3a mint is otherwise moved; (3) `coords[i] ==
+  coords0[i]` — a corner / rim / rim-snap vertex no arm has touched.
+  `coords0` is the resolve-step snapshot taken BEFORE the sub-floor
+  mint collapse, so a collapsed mint or an absorbed sub-band lift
+  (amendments 17/19) reads as moved. A vertex outside every table
+  (`ExactPos::NONE`, the synthetic unit fixtures) is moved — the
+  historical predicate, bit for bit.
+- `gate_tri_valid_ex(t) = gate_tri_degenerate(t) || (gate_tri_valid(t)
+  && ExactPos::orient(t) == +1)`: a created triangle must be material-CCW
+  in the emitted f64 mesh AND positively oriented on the exact positions.
+  Three exactly collinear residents are never valid, whatever their
+  rounded projections say.
+- `segments_cross_exact` (proper crossing, or an endpoint strictly interior
+  to the other segment; bare collinearity outside the segment is NOT an
+  intersection — the F0087 cut-10 rule) on exact positions replaces the
+  f64-pair predicate in `earclip_cavity_polygon`'s simplicity guard and
+  in `first_ring_crossing`.
+
+Sites converted (the "fix all gates sharing a metric" sweep): the
+amendment-4 flip products (1×1 ladder AND the n-ary ladder's reduced
+gate), `carve_star_cavity`'s fan validity, `relocate_minted_vertex`'s
+wedge-fan validity, the ear-clip's convexity / emptiness / final ear /
+ring CCW / ring simplicity, `first_ring_crossing`, the amendment-14 split's
+bulge validity + its three remnant ear-clips (the oracle is built over
+the EXTENDED tables — q_a/q_b are residents: exact UVs on C, coords =
+their lift), and the amendment-15 splice's side ear-clip + `push_checked`
+fans (whose separate rounded-orientation term the `_ex` validity now
+subsumes).
+
+Deliberately NOT converted (they measure the emitted f64 mesh, and must):
+the fold DETECTOR (`gate_tri_area ≤ 0` on a triangle with a mint — an
+f64-inverted sliver is a defect of the mesh cherchi will see, whatever its
+exact area), the Fig-11 backtrack `overshoot` / chord-length measurement,
+the splice's per-class signed-area conservation (old vs new sums on the
+same rounded positions), and the ring deduplication / pinch / collapsed-
+twin tests (position identity is an f64 identity — twins share one
+resolved point). The `NotSimple { crossing }` payload stays the f64
+projection (the caller identifies ring mints by it).
+
+No tolerance was added anywhere. Exact collinearity is decided in the
+domain the sweep computed it in.
+
+### 18d. Tests
+
+- `stage0::reloc::exact_pos_tests::residency_rules` — moved mint →
+  rounded; every chain point resident (bit-equal to `exact_verts`);
+  reverted mint resident; merge target moved; corner with a non-lift 3D
+  coordinate resident under the `coords0` rule; `NONE` resident-free.
+- `collinear_chain_needle_is_rejected_only_by_the_oracle` — the R0025 pair
+  frame and the eleven measured split parameters on the exact flank line:
+  the round trip scatters the chain (asserted non-inert), the historical
+  acceptance (f64 gate + exact orientation of rounded projections) blesses
+  at least one collinear triple, `gate_tri_valid_ex` rejects every one
+  (`orient == 0`).
+- `earclip_consumes_the_collinear_chain_only_as_ear_bases` — the wedge in
+  miniature (moved apex, corner 309, the chain, a far vertex): the ear-clip
+  emits n − 2 ears, none three chain vertices, each exact-CCW and f64-gate
+  valid, exact signed areas summing to the polygon's.
+- Smoke pin `R0025` (`assay_kv2.rs`).
+
+### 18e. Results
+
+R0025: `SUPPORTED_CORRECT`, 23.8 s release, all in-line oracles (the old
+parser's 22.9 s CORRECT restored on the exact parse). Corpus (release, 8
+jobs, 600 s; wall 702.9 s, F0085 314.7 s honest): **281C / 0W / 25E /
+4EE / 0T — NEW CANONICAL**, exactly one category move (R0025), ZERO detail
+moves on the other 311 rows — the oracle changes no other case's ladder
+decisions. Ledger: `docs/yang_tail_triage.md` §"2026-09-11 (late) — R0025
+CONVERTED".

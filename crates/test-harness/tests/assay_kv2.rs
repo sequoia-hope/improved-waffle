@@ -1240,6 +1240,20 @@ fn smoke_corpus_boundary_categories() {
         // `yang_453_line_overtake`) collapses the overtaken points onto the
         // junction, certified by its own displacement. 2.8 s release.
         ("R0059", Category::SupportedCorrect),
+        // R0025 FLIPPED (2026-09-11, Stage-0 amendment 20): op 2's circle is
+        // sketched on the gear's end cap (a flush-cap Stage-0 overlay); the
+        // sweep splits one radial gear flank at eleven event columns, and
+        // the fold ladder's cavity re-triangulation around a relocated rim
+        // mint (its wedge polygon carried the whole flank chain) decided
+        // ear convexity on the f64 lift/project round trip of those exactly
+        // collinear points — noise of ~1e-13 blessed nine zero-area needles,
+        // which cherchi welded into coincident opposite-winding triangles
+        // (the I6 `NonManifoldInput` backstop). The ladder's predicates now
+        // read the overlay's exact rational position for every vertex still
+        // at its sweep resolution (`ExactPos`, spec
+        // `m8_stage0_multiclass_cavity_arm` §18). CORRECT under the old
+        // float parse only by the sign of the noise. 23.8 s release.
+        ("R0025", Category::SupportedCorrect),
         // R0044 FLIPPED (2026-09-05, thin-band chart guard) is deliberately
         // NOT pinned here: it costs ≈ 270 s CPU in release — ≈ 1200 s in the
         // debug build this gate runs under on CI and in `test.sh` — against

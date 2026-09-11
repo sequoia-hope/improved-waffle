@@ -9,6 +9,22 @@
 
 ## 0. Honest status (refreshed 2026-06-26; addendum 2026-09-04 below)
 
+> **2026-09-11 (late) refresh.** Canonical corpus **281C / 0W / 25E / 4EE / 0T** (release, 8 jobs, 600 s; wall 702.9 s, F0085 314.7 s honest, R0044 274.6 s, R0025 24.7 s).
+> **R0025 FLIPPED CORRECT** — the last ULP-parse latent: the Stage-0 fold
+> ladder's cavity re-triangulation around a relocated rim mint decided ear
+> convexity / emptiness / ring simplicity on the f64 lift→project round
+> trip of the overlay's vertices, so an exactly collinear sweep chain (the
+> eleven event-column splits of one radial gear flank, on the relocated
+> mint's 28-gon wedge boundary) was ear-clipped into nine zero-area
+> needles whenever the ~1e-13 noise came out positive — cherchi welded them
+> into coincident opposite-winding triangles (the I6 `NonManifoldInput`
+> backstop). Amendment 20 (`ExactPos`, spec
+> `m8_stage0_multiclass_cavity_arm.md` §18): every predicate that creates
+> a triangle or decides ring simplicity in the 1×1 and n-ary ladders now
+> reads the overlay's exact rational position for a vertex still at its
+> sweep resolution and the rounded projection only for a moved one; the
+> f64 fold detector and the emitted-mesh gates are unchanged. No band.
+>
 > **2026-09-11 refresh.** Canonical corpus **280C / 0W / 26E / 4EE / 0T**
 > (release, 8 jobs, 600 s; wall 719.7 s; 278C → 279C → 280C over the day). Three flips. **R0059 FLIPPED CORRECT (night):** Yang §4.5.3's collinear reversal on a coplanar overlay seam — the box edge's rim-exit junction relocated 20.6 along the edge over two unmoved Stage-0 subdivision vertices; the seam has no `n_A × n_B` tangent so the sweep could not diagnose it — closed by the straight-run OVERTAKE arm (spec `yang_453_line_overtake.md`: the overtaken points collapse onto the junction, certified by its own displacement). **R0017 FLIPPED CORRECT (later that day):** the increment-4 rim-junction insertion mints the cone-rim × plane junction on the owner's rim polyline only, the arrangement mints its own crossing an ULP-twin away, and the §4.3 moved×minted weld never saw the mint because the rim-junction path did not register it in `minted_junction_keys` — it does now (spec `yang_rim_junction_insertion` "Mint registration"; one mint contract for every Stage-1 junction mint). **R0077 FLIPPED CORRECT:** the torus
 > block's 3-surface arm gated a box-edge × torus pierce at the surface-pair

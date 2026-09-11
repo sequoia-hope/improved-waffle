@@ -43,6 +43,68 @@ after the reconciliation run (release, 8 jobs, 360 s; wall 577 s, F0085
 regression since 2026-08-01 is outstanding (checked over every commit of
 `results.json`).
 
+## 2026-09-11 (late) — R0025 CONVERTED: the Stage-0 fold ladder ear-clipped an exactly collinear sweep chain into zero-area needles because its predicates ran on the f64 round trip of exact positions (amendment 20, `ExactPos`); NEW CANONICAL 281C / 0W / 25E / 4EE / 0T
+
+R0025 (3.7 s; op 2 union, extrude(gear) × extrude(circle) sketched on the
+gear's end cap ⇒ flush caps ⇒ Stage-0 overlay; scale 2.2e3) was the last
+ACTIVE ULP-parse latent (section below). Anatomy (`NONMANIFOLD_SITE_PROBE`,
+`YANG_STAGE0_DUMP_DIR` operand + pair dumps, `YANG_SPLIT_PROBE`, offline
+exact-arithmetic census):
+
+- The I6 backstop's coincident pair lives on the gear cap (face 1): nine
+  face-1 triangles of |area| 1.5e-14 … 3.6e-12 (edges 0.08 … 70) over
+  ELEVEN Stage-0 vertices on ONE line — gear flank (309, 310), 105.5 long,
+  exact distance to the line ≤ 1.2e-13 — every needle exact-POSITIVE on
+  the frame projections of the emitted f64 coordinates (+4e-15 …
+  +3.8e-12), i.e. valid to every emission gate. cherchi's arrangement then
+  split the overlapping needles against each other and welded two of the
+  products onto one vertex triple with opposite windings.
+- None of the eleven is in mesh B: B's circle (r 253.7) is centred EXACTLY
+  on the flank's line (radial flank through the shared sketch origin;
+  centre→line 1.2e-12) and lies inside the root radius (417). The eleven
+  are the overlay's sweep-column splits of the flank (`[split-probe] f=1
+  edge (309,310) … t = 0.022 … 0.687`, overlay verts 531 … 455, all `lift`)
+  — legitimate conforming points.
+- The needles occupy overlay slots 481/482, 491/492, 501/502, 511/512,
+  521, interleaved with the sweep's emission order: an IN-PLACE cavity
+  commit. The new `[reloc-poly]` probe named the owner: rim-column mint
+  546's amendment-5 relocation, AOnly wedge polygon `[546, 540, 539(=309),
+  531, 523, 515, 507, 499, 491, 483, 475, 466, 460, 455, 459, 465, …,
+  552]` (29-triangle cavity — the tall sweep cells of the gear's left side
+  connect rim-column points straight to flank-column points). The
+  constrained ear-clip decided convexity by `orient_sign_exact` on
+  `frame.project(coords)` — rational → f64 → 3D lift → f64 → 2D, ~1e-13
+  of noise at |coord| 1e3 — and clipped the noise-positive collinear
+  triples (531, 523, 515), (515, 507, 499), … first. Which sign the noise
+  takes is what the input's last ULP decides: CORRECT under the old parse
+  (22.9 s), ERROR under the exact one.
+
+**Fix (always-on; spec `specs/m8_stage0_multiclass_cavity_arm.md` §18,
+amendment 20):** `stage0::frame::ExactPos`, the ladder's exact position
+oracle — the overlay's own rational coordinate for every vertex still at
+its sweep resolution (`coords == lift(verts)`; a non-mint whose position
+equals the resolve-step snapshot `coords0`, taken before the sub-floor
+mint collapse), the rational of the rounded projection only for a MOVED
+vertex (on-circle mint, Fig-11 merge target, absorbed sub-band lift, rim
+snap). `gate_tri_valid_ex` = the f64 gate AND exact orientation +1;
+`segments_cross_exact` on exact positions. Converted (the shared-metric
+sweep): the amendment-4 flip products in both ladders, the carve's and
+the wedge fans' validity, the ear-clip's convexity / emptiness / final
+ear / ring CCW / ring simplicity, `first_ring_crossing`, the
+amendment-14 split's bulge + remnant ear-clips (oracle over the extended
+tables), the amendment-15 splice's side ear-clip + station fans. Kept on
+the f64 mesh by design: the fold DETECTOR, the Fig-11 overshoot
+measurement, the splice's area conservation, the twin / pinch identity
+tests. No tolerance anywhere. Pins `stage0::reloc::exact_pos_tests` (3:
+residency rules; the R0025 chain at predicate level — the historical
+acceptance blesses ≥ 1 collinear triple, the oracle none; the wedge
+end-to-end — n − 2 ears, none three chain vertices, exact areas
+conserved). R0025 **SUPPORTED_CORRECT, 23.8 s**, all in-line oracles.
+Smoke pin `R0025`. yang-rs 75 test binaries green, clippy `--all-targets`
+clean.
+
+**Corpus (release, 8 jobs, 600 s; release, 8 jobs, 600 s; wall 702.9 s, F0085 314.7 s honest, R0044 274.6 s, R0025 24.7 s): 281C / 0W / 25E / 4EE / 0T — NEW CANONICAL.** Exactly one category move (R0025 ERROR → SUPPORTED_CORRECT), ZERO detail moves on the other 311 rows (per-id category + detail diff against the committed results.json): the exact positions change no other case's ladder decisions. The ULP-parse latent set is now EMPTY.
+
 ## 2026-09-11 (night) — R0059 CONVERTED: Yang §4.5.3's collinear reversal on a coplanar overlay seam, after a junction relocated ALONG its line over unmoved run points (the straight-run OVERTAKE arm); NEW CANONICAL 280C / 0W / 26E / 4EE / 0T (the pre-regression score restored)
 
 R0059 (0.7 s) was the last of the three ULP-parse latents (section above)
@@ -228,7 +290,7 @@ HEAD's un-run corpus was 277C; this increment makes it 278C.
 | Case | Loud error | Root cause | Confidence | Vehicle |
 |---|---|---|---|---|
 | ~~R0017~~ | ~~Stage-4 `LocalRefinementRequired` u32::MAX at `degenerate_no_longedge ndeg=2`~~ **FLIPPED CORRECT 2026-09-11 (later): the rim-junction insertion's mints are now registered in `minted_junction_keys`, so the §4.3 moved×minted weld collapses the arrangement's ULP-twin into the mint — see the section above** (0.1 s; op 2 union, revolve(rectangle) × extrude(rectangle), scale 4.0e3) | The §4.4.1 unzip finds B face 2 (a plane) triangles `[49, 117, 50]` / `[50, 117, 49]` degenerate: vertex 50 — relocated by the conic triple arm (Cone A × plane B × plane B, a prism-edge pierce; ρ 0.5, gate 257, `metric=curve` and `=line` alike) — lands 4e-11 from the UNMOVED vertex 49 (a zero-length edge, `height_b 1e-12` over the 688-unit edge (48, 49)); the unzip's model is a vertex in an edge's INTERIOR, so no long edge qualifies. Two arrangement vertices for one junction — the "mint once, share by identity" contract. **MEASURED (later the same day): v50 is the increment-4 rim-junction mint (certified exact), v49 the arrangement's own crossing 2.4e-13 away; the moved×minted weld never saw the mint because the rim-junction path did not register it** | CONFIRMED (site + toggle + mint provenance) | ~~junction merge (I8 Fig-11 family)~~ mint registration — DONE |
-| R0025 | `yang-rs: input B-Rep is not 2-manifold` = the I6 `NonManifoldInput` backstop (3.7 s; op 2 union, extrude(gear) × extrude(circle) whose sketch plane is the gear's end cap ⇒ flush caps ⇒ Stage-0 overlay) | `NONMANIFOLD_SITE_PROBE`: `i6-coincident-tris` compact `[765, 766, 768]` carried by input 0 (the gear) face 1 (a Plane) raw triangles 760 `[765, 768, 766]` and 799 `[765, 766, 808]`, OPPOSITE windings (`i6-wedge-dedup REJECT(winding)`), 768 ≡ 808 welded (`i6-cluster 768: [768, 808]`); 766–768 are 0.07 apart, 765 is 2.5 away — a MACROSCOPIC same-face fold, not the I6.6 sub-resolution pleat (band 1e-12·scale). A single input's plane face emitted two overlapping triangles: the Stage-0 overlay emission on the gear cap (R0053 / R0081 family) or the cap CDT — UNMEASURED which (next: `YANG_STAGE0_DUMP_DIR` on op 2). Old parser: CORRECT (22.9 s) | CONFIRMED (site + toggle); emitter UNMEASURED | Stage-0 overlay emission (M8) — PROBE first |
+| ~~R0025~~ | ~~`yang-rs: input B-Rep is not 2-manifold` = the I6 `NonManifoldInput` backstop~~ **FLIPPED CORRECT 2026-09-11 (late): the two overlapping gear-cap triangles were two of nine zero-area needles the Stage-0 fold ladder's cavity ear-clip made of an exactly collinear sweep chain (the flank's eleven event-column splits) by deciding convexity on the f64 round trip of exact positions — amendment 20 `ExactPos`, see the section above** (3.7 s; op 2 union, extrude(gear) × extrude(circle) whose sketch plane is the gear's end cap ⇒ flush caps ⇒ Stage-0 overlay) | `NONMANIFOLD_SITE_PROBE`: `i6-coincident-tris` compact `[765, 766, 768]` carried by input 0 (the gear) face 1 (a Plane) raw triangles 760 `[765, 768, 766]` and 799 `[765, 766, 808]`, OPPOSITE windings (`i6-wedge-dedup REJECT(winding)`), 768 ≡ 808 welded (`i6-cluster 768: [768, 808]`); 766–768 are 0.07 apart, 765 is 2.5 away — a MACROSCOPIC same-face fold, not the I6.6 sub-resolution pleat (band 1e-12·scale). A single input's plane face emitted two overlapping triangles: the Stage-0 overlay emission on the gear cap (R0053 / R0081 family) or the cap CDT — UNMEASURED which (next: `YANG_STAGE0_DUMP_DIR` on op 2). Old parser: CORRECT (22.9 s). **MEASURED 2026-09-11 (late): neither — the fold ladder's amendment-5 cavity ear-clip around rim mint 546 (`[reloc-poly]`), nine noise-positive collinear ears** | CONFIRMED (site + toggle + owner) | ~~Stage-0 overlay emission (M8) — PROBE first~~ amendment 20 `ExactPos` — DONE |
 | ~~R0059~~ | ~~kernel-v2 `TessellationFailed { face: FaceId(29), reason: "ring rejected by CDT" }`~~ **FLIPPED CORRECT 2026-09-11 (night): a §4.5.3 collinear reversal on a coplanar overlay seam — the rim-exit junction relocated 20.6 along the box edge over two unmoved overlay vertices; the straight-run OVERTAKE arm collapses them onto the junction (spec `yang_453_line_overtake`) — see the section above** (0.5 s; op 3 union, extrude(rectangle) × (extrude(circle) ∪ revolve(circle) torus), scale 3.8e2) | PROBED + CONVERTED | DONE |
 
 ## 2026-09-06 — R0003 flipped back (the §I13(f) NEEDLE corner); canonical 276C / 0W / 30E / 4EE / 0T

@@ -605,28 +605,172 @@ pub(crate) fn gate_tri_area(t: &[u32; 3], coords: &[Point3], frame: &Frame) -> f
     (p1.0 - p0.0) * (p2.1 - p0.1) - (p1.1 - p0.1) * (p2.0 - p0.0)
 }
 
-/// A triangle is valid under the current resolved coordinates if it winds
-/// material-CCW (positive area) or its 3D image is bit-degenerate (the M-B
-/// emission-drop class). The single validity contract shared by the
-/// amendment-4 flips and the amendment-5 cavity relocation.
+/// The f64 term of the ladder's validity contract: a triangle winds
+/// material-CCW in the emitted f64 mesh (positive projected area) or its 3D
+/// image is bit-degenerate (the M-B emission-drop class). Every triangle the
+/// ladder CREATES is validated through [`gate_tri_valid_ex`], which adds the
+/// amendment-20 exact-orientation term; this f64 term alone is the
+/// amendment-2 fold detector's complement and the unit fixtures' oracle.
 pub(crate) fn gate_tri_valid(t: &[u32; 3], coords: &[Point3], frame: &Frame) -> bool {
     gate_tri_degenerate(t, coords) || gate_tri_area(t, coords, frame) > 0.0
 }
 
-/// Exact orientation sign of the 2D triple (a, b, c) — rational arithmetic
-/// over the raw f64 frame projections (P9: no tolerance). `None` on
-/// non-finite input.
-pub(crate) fn orient_sign_exact(a: (f64, f64), b: (f64, f64), c: (f64, f64)) -> Option<i8> {
-    use crate::coplanar_overlay::rat;
-    let (ax, ay) = (rat(a.0).ok()?, rat(a.1).ok()?);
-    let (bx, by) = (rat(b.0).ok()?, rat(b.1).ok()?);
-    let (cx, cy) = (rat(c.0).ok()?, rat(c.1).ok()?);
-    let det = (&bx - &ax) * (&cy - &ay) - (&by - &ay) * (&cx - &ax);
-    Some(match det.cmp(&RBig::ZERO) {
+// ════════════════════════════════════════════════════════════════════════
+// exact position oracle (amendment 20)
+// ════════════════════════════════════════════════════════════════════════
+
+/// Amendment 20 (spec `m8_stage0_multiclass_cavity_arm` §18; the R0025
+/// anchor): the fold ladder's EXACT 2D position oracle.
+///
+/// The overlay is an exact rational arrangement whose sweep puts many
+/// vertices EXACTLY on one line — every event column splits every spanning
+/// sub-segment, so a long input edge carries a whole collinear chain of
+/// `lift` vertices. The ladder's predicates, however, ran on
+/// `frame.project(coords[i])`: the rational → f64 → 3D lift → f64 → 2D
+/// round trip, which scatters an exactly collinear chain by ~1e-13 at
+/// coordinate magnitude 1e3. Exact arithmetic on those rounded inputs is
+/// exact arithmetic on NOISE: the constrained ear-clip saw three collinear
+/// sweep vertices as a positively oriented ear and emitted zero-area
+/// needles (R0025 — nine over one gear flank, welded by cherchi into
+/// coincident opposite-winding triangles ⇒ the I6 `NonManifoldInput`
+/// backstop; CORRECT or ERROR depending on the sign of the noise, i.e. on
+/// the input's last ULP).
+///
+/// The oracle answers with the overlay's own rational coordinate for every
+/// vertex that still sits at its sweep resolution, and with the rational of
+/// the rounded frame projection only for a vertex the pipeline MOVED (an
+/// on-circle mint, a Fig-11 merge target, a sub-band lift absorbed into a
+/// mint group, a rim snap). No tolerance anywhere: exact collinearity is
+/// decided in the domain the sweep computed it in (P9), and the f64 gates
+/// (`gate_tri_area`, the fold detector) keep their emitted-mesh meaning.
+///
+/// Residency, tested in order: (1) `coords[i] == frame.lift(verts[i])` —
+/// the raw-lift resolution branch, an amendment-2 / settle REVERTED mint,
+/// or an amendment-14 split-inserted vertex; (2) an N2-3a mint is otherwise
+/// MOVED; (3) `coords[i] == coords0[i]` — a corner / rim / rim-snap vertex
+/// no ladder arm has touched (`coords0` is the resolve-step snapshot,
+/// taken BEFORE the sub-floor mint collapse, so an absorbed lift reads as
+/// moved). Anything else is moved. A vertex outside every table (the
+/// synthetic unit fixtures, [`ExactPos::NONE`]) is moved — the historical
+/// predicate, bit for bit.
+pub(crate) struct ExactPos<'a> {
+    /// `ClassifiedOverlay::exact_verts` — the sweep's rational coordinates.
+    pub(crate) exact: &'a [ExactPoint2],
+    /// `ClassifiedOverlay::verts` — their f64 roundings (the lift's input).
+    pub(crate) verts: &'a [Point2],
+    /// Resolved 3D coordinates as the resolve step produced them.
+    pub(crate) coords0: &'a [Point3],
+    /// N2-3a mint marks (`minted_mark`).
+    pub(crate) minted: &'a [bool],
+}
+
+impl ExactPos<'_> {
+    /// No overlay knowledge: every vertex resolves to the rational of its
+    /// rounded frame projection — the pre-amendment-20 predicate. For the
+    /// synthetic-triangulation unit fixtures.
+    #[cfg(test)]
+    pub(crate) const NONE: ExactPos<'static> = ExactPos {
+        exact: &[],
+        verts: &[],
+        coords0: &[],
+        minted: &[],
+    };
+
+    /// Does vertex `i` still sit at its sweep resolution (type docs)?
+    pub(crate) fn is_resident(&self, i: u32, coords: &[Point3], frame: &Frame) -> bool {
+        let i = i as usize;
+        let (Some(_), Some(q), Some(&c)) = (self.exact.get(i), self.verts.get(i), coords.get(i))
+        else {
+            return false;
+        };
+        if c == frame.lift(q.x(), q.y()) {
+            return true;
+        }
+        if self.minted.get(i).copied().unwrap_or(false) {
+            return false;
+        }
+        self.coords0.get(i) == Some(&c)
+    }
+
+    /// The exact 2D position of vertex `i`; `None` on a non-finite
+    /// resolved coordinate.
+    pub(crate) fn at(&self, i: u32, coords: &[Point3], frame: &Frame) -> Option<ExactPoint2> {
+        if self.is_resident(i, coords, frame) {
+            return Some(self.exact[i as usize].clone());
+        }
+        let (u, v) = frame.project(coords[i as usize]);
+        ExactPoint2::from_f64(u, v)
+    }
+
+    /// Exact orientation sign of the vertex triple `(a, b, c)`.
+    pub(crate) fn orient(
+        &self,
+        a: u32,
+        b: u32,
+        c: u32,
+        coords: &[Point3],
+        frame: &Frame,
+    ) -> Option<i8> {
+        let (pa, pb, pc) = (
+            self.at(a, coords, frame)?,
+            self.at(b, coords, frame)?,
+            self.at(c, coords, frame)?,
+        );
+        Some(sign_r(&cross_r(&pa, &pb, &pc)))
+    }
+}
+
+/// Sign of an exact rational as `-1 / 0 / 1`.
+pub(crate) fn sign_r(x: &RBig) -> i8 {
+    match x.cmp(&RBig::ZERO) {
         std::cmp::Ordering::Greater => 1,
         std::cmp::Ordering::Less => -1,
         std::cmp::Ordering::Equal => 0,
-    })
+    }
+}
+
+/// Exact segment intersection for the ladder's simplicity guards: a proper
+/// crossing, or an endpoint of one segment strictly interior to the other
+/// (which also covers collinear overlap). Endpoint COINCIDENCE must be
+/// excluded by the caller (adjacent ring edges; the pinch class). Bare
+/// collinearity with the point outside the segment is NOT an intersection —
+/// sweep-event columns legitimately put many ring vertices on one exact
+/// line (measured: F0087 cut 10, vert 186).
+pub(crate) fn segments_cross_exact(
+    p1: &ExactPoint2,
+    p2: &ExactPoint2,
+    q1: &ExactPoint2,
+    q2: &ExactPoint2,
+) -> bool {
+    use crate::coplanar_overlay::between_box;
+    let o1 = sign_r(&cross_r(p1, p2, q1));
+    let o2 = sign_r(&cross_r(p1, p2, q2));
+    let o3 = sign_r(&cross_r(q1, q2, p1));
+    let o4 = sign_r(&cross_r(q1, q2, p2));
+    (o1 * o2 < 0 && o3 * o4 < 0)
+        || (o1 == 0 && between_box(p1, p2, q1))
+        || (o2 == 0 && between_box(p1, p2, q2))
+        || (o3 == 0 && between_box(q1, q2, p1))
+        || (o4 == 0 && between_box(q1, q2, p2))
+}
+
+/// Validity of a triangle the ladder CREATES (flip products, fan triangles,
+/// ears, splice fans): bit-degenerate in 3D (clips freely — the M-B
+/// emission drop), or BOTH material-CCW in the emitted f64 mesh
+/// ([`gate_tri_valid`]) AND positively oriented on the exact positions
+/// (amendment 20 — three exactly collinear sweep vertices are a zero-area
+/// needle whatever their rounded projections say). Under
+/// [`ExactPos::NONE`] the exact term is the rational orientation of the
+/// same rounded projections the f64 term uses.
+pub(crate) fn gate_tri_valid_ex(
+    t: &[u32; 3],
+    coords: &[Point3],
+    frame: &Frame,
+    ex: &ExactPos,
+) -> bool {
+    gate_tri_degenerate(t, coords)
+        || (gate_tri_valid(t, coords, frame)
+            && ex.orient(t[0], t[1], t[2], coords, frame) == Some(1))
 }
 
 /// Like [`face_polygon_2d`], but a flat circular DISC face is tessellated to its
