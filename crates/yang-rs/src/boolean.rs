@@ -736,6 +736,17 @@ fn boolean_once(
     // Rim re-tessellation changes neither surfaces nor topology, so the
     // Stage-0 detectors' verdicts (computed above) remain valid for the
     // rebuilt operands.
+    // P3b inc-4a: bit-keys of every Stage-1 minted junction point actually
+    // inserted by EITHER Stage-1 mint mechanism below — the increment-2/4
+    // rim-junction insertion and the P3a conformal junction sampling —
+    // mapped (inc-4b) to the mint's owner-edge trim provenance (default,
+    // i.e. no trim verdict, for rim-junction mints). Threaded into Stage 4
+    // so the §4.3 coincident weld can recognize a relocated vertex
+    // converging onto a minted junction (the moved×minted arm; survivor =
+    // the mint) and the beyond-corner trim can test the owner planes. Empty
+    // when no mint happened.
+    let mut minted_junction_keys: std::collections::BTreeMap<[u64; 3], MintProvenance> =
+        std::collections::BTreeMap::new();
     if std::env::var_os("YANG_RIM_JUNCTION_PROBE").is_some() {
         eprintln!(
             "[rim-junction] gate: stage0_none={} cyl_pairs_empty={}",
@@ -756,6 +767,31 @@ fn boolean_once(
         } else {
             if std::env::var_os("YANG_RIM_JUNCTION_PROBE").is_some() {
                 eprintln!("[rim-junction] overrides a={map_a:?} b={map_b:?}");
+            }
+            // One mint contract for every Stage-1 junction mint (2026-09-11,
+            // R0017; spec `yang_rim_junction_insertion` "Mint registration"):
+            // a rim-junction point is inserted on the OWNER's rim/edge
+            // polyline only — the partner face is not split there — so the
+            // exact arrangement legitimately mints its OWN crossing of that
+            // polyline with the partner facet an ULP-twin away (the §4a
+            // record: "the inserted rim vertex ULP-twins the arrangement's
+            // own crossing vertex"; R0017: 2.4e-13 at magnitude 2.3e3).
+            // Stage 4 relocates the twin onto the curve and the §4.3
+            // moved×minted weld collapses it INTO the mint (survivor = the
+            // mint, N54) — but only for mints it knows by bit-key. The P3a
+            // path registers its mints here; the rim-junction path did not,
+            // so its twin survived as a zero-length mesh edge into the
+            // §4.4.1(a) unzip (`degenerate_no_longedge`). Register every
+            // inserted point (junctions and their §4b coaxial propagations
+            // alike — all exact ring samples, the P3a rim-mirror precedent)
+            // with default provenance: no trim verdict, the beyond-corner
+            // trim fails closed on them.
+            for p in map_a.values().chain(map_b.values()).flatten() {
+                minted_junction_keys
+                    .entry([p.x().to_bits(), p.y().to_bits(), p.z().to_bits()])
+                    .or_insert(MintProvenance {
+                        owner_planes: [MintTrimPlane::default(); 2],
+                    });
             }
             Some((
                 {
@@ -807,14 +843,6 @@ fn boolean_once(
         std::env::var("YANG_JUNCTION_SAMPLING_ENABLE").as_deref(),
         Ok("off") | Ok("0")
     );
-    // P3b inc-4a: bit-keys of every Stage-1 minted junction point actually
-    // inserted below, mapped (inc-4b) to the mint's owner-edge trim
-    // provenance. Threaded into Stage 4 so the §4.3 coincident weld can
-    // recognize a relocated vertex converging onto a minted junction (the
-    // moved×minted arm; survivor = the mint) and the beyond-corner trim can
-    // test the owner planes. Empty when no mint happened.
-    let mut minted_junction_keys: std::collections::BTreeMap<[u64; 3], MintProvenance> =
-        std::collections::BTreeMap::new();
     let p3a_sampled: Option<(BRep, BRep)> = if !p3a_disabled
         && stage0.is_none()
         && cyl_pairs.is_empty()

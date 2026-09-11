@@ -1208,6 +1208,27 @@ fn smoke_corpus_boundary_categories() {
         // unwrapped azimuth range (spec `yang_stage1_curved_holed_patch`
         // "θ branch-cut") and the 3-op chain passes every check.
         ("R0040", Category::SupportedCorrect),
+        // R0077 FLIPPED (2026-09-11): a lateral edge of the extrude box
+        // pierces the 267° revolve torus at a 17° graze; the Stage-4 torus
+        // triple arm gated the exact junction (259 / 371 along the edge) at
+        // the surface-pair corridor 2·d_ε/sin θ (251 / 243) although a
+        // plane-pair junction moves ALONG the planes' line — it now takes
+        // the KV11 line corridor 2·d_ε/|L̂·n₃| (688 / 650;
+        // `junction_line_divergence`, spec `yang_stage4_conic_triple_junction`
+        // "Junction-line amendment"). 1 s release.
+        ("R0077", Category::SupportedCorrect),
+        // R0017 FLIPPED (2026-09-11): the increment-4 rim-junction insertion
+        // mints the cone-rim × plane junction on the revolve's rim polyline
+        // only, so the arrangement mints its own crossing an ULP-twin away
+        // (2.4e-13 at magnitude 2.3e3); the twin, relocated onto the
+        // hyperbola, must collapse INTO the mint at the §4.3 moved×minted
+        // weld — which knows mints by bit-key, and the rim-junction path
+        // never registered its points (`minted_junction_keys`; spec
+        // `yang_rim_junction_insertion` "Mint registration"). The case was
+        // CORRECT only while the best-effort float parse left the twin
+        // where the #194 collapse caught it (the 2026-09-07 `float_roundtrip`
+        // unmask). 1.5 s release.
+        ("R0017", Category::SupportedCorrect),
         // R0044 FLIPPED (2026-09-05, thin-band chart guard) is deliberately
         // NOT pinned here: it costs ≈ 270 s CPU in release — ≈ 1200 s in the
         // debug build this gate runs under on CI and in `test.sh` — against

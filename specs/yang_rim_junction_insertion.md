@@ -351,3 +351,46 @@ inexactness sits ≥10 orders above the band (Stage-1 d_ε = 1e-2·diag).
   of a signed surface distance at magnitude L carries O(ε·L) rounding —
   the band certifies "exact to evaluation precision", the strongest
   property float arithmetic can witness.
+
+## Mint registration (2026-09-11, R0017) — one mint contract for every Stage-1 junction mint
+
+**Measured (R0017, 0.1 s; `YANG_V_PROBE_NEAR`, `YANG_RIM_JUNCTION_PROBE`,
+`YANG_JUNCTION_MINT_PROBE`, `YANG_LRR_PROBE`, the debug kill-switch
+`YANG_RIM_JUNCTION_DISABLE`):** the §4a arm inserts the exact cone-rim ×
+plane junction `[409.575…, 1446.176…, 2287.530…]` on A's rim polyline
+(edge 10) and the P3a face-side insertion is skipped (`[p3a-wire] SKIP
+rim_junction=true` — overrides do not compose across rebuilds), so B's
+plane facet is never split there and the exact arrangement legitimately
+mints its OWN crossing of the rim polyline with that facet 2.4e-13 away
+(two ULPs at magnitude 2.3e3) — the very hazard the §4a record names
+("the inserted rim vertex ULP-twins the arrangement's own crossing
+vertex"). Stage 4 certifies the mint exact (three surfaces, no map),
+relocates the twin onto its hyperbola (5e-11 from the mint), and the
+§4.4.1(a) unzip then finds the fan around the zero-length edge with no
+long edge to split (`degenerate_no_longedge`, `LocalRefinementRequired`
+u32::MAX). The #194 sub-TAU_WORK collapse (band 2.3e-9 here) would have
+eaten the twin but runs AFTER the unzip. With the arm disabled the case
+is SUPPORTED_CORRECT with NO Stage-1 insertion at all (P3a enumerates no
+pierce here; the arrangement's single crossing relocates through the
+conic triple arm) — so the arm's one-sided mint is what manufactures the
+twin. The case had been CORRECT since 2026-08-27 only while the loader's
+best-effort float parse left the twin where #194 caught it; the
+2026-09-07 `float_roundtrip` exact parse unmasked it (ledger "Unmasked
+2026-09-07 by exact float parsing").
+
+**Fix (always-on):** the rim-junction block registers every inserted
+point (junctions and their §4b coaxial propagations alike — all exact
+ring samples, the P3a rim-mirror precedent) in `minted_junction_keys`
+with default provenance (no trim verdict: the P3b beyond-corner trim
+fails closed on them). The shipped §4.3 pre-sweep moved×minted weld
+(P3b inc-4a, R0061; band `TAU_MODEL·(1+scale)`, pairs need a moved
+member, survivor = the mint, N54) then collapses the arrangement's twin
+INTO the mint before any pass walks patch boundaries — the same
+reconciliation P3a mints already receive. This is the §4a record's
+"merge eligibility for the junction populations" realized through the
+existing mint contract rather than a new band: nothing moves, no new
+tolerance, the mint's bits stay the cross-operand identity. R0017:
+`[moved-weld] victim=49 survivor=50` at the mint ⇒ SUPPORTED_CORRECT
+(1.5 s). Pinned in the `assay_kv2` smoke table; the full corpus is the
+regression oracle (the arm fires on every cone-flanked lathe × plane
+pair).
