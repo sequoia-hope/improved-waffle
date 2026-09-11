@@ -1,6 +1,6 @@
 # M8 slice h: mixed-orientation faces in n-ary plane groups
 
-Status: IMPLEMENTED (task #147)
+Status: IMPLEMENTED (task #147); §6 per-pair `opposite` + face-keyed sheet rule LANDED 2026-09-11 (R0015 CORRECT)
 Driver: assay case R0015 — a chained auto-union (`Revolve 3`) whose coplanar
 plane group carries side-A faces of BOTH orientations vs the group frame
 (`A-dots=[(0,+1),(1,+1),(7,-1),(8,-1)]`), so `overlay_nary_group` walled at
@@ -88,3 +88,35 @@ segmentation is a partition **of the plane**, independent of per-face
 orientation; orientation enters only when lifting each region back to an
 oriented output face. Winding-independent 2D set classification is standard
 exact-arrangement practice.
+
+
+## 6. The per-pair `opposite` flag and the face-keyed sheet rule (2026-09-11, R0015 CORRECT)
+
+Slice h admitted the group and wound each A face by its own sense
+(`face_swap_a`), but two consumers still read the ORIENTATION as a property of
+the group:
+
+1. **`PairPlane.opposite`** was computed once — side B against the group frame
+   — and stamped on every pair of the group. A pair's `opposite` is the
+   relation between ITS two faces: `face_swap_a(face_a) != opposite_b`. In a
+   mixed group the same B face is FLUSH with the A faces that agree with the
+   frame and STACKED against those that oppose it. For R0015's op 3
+   (`A-dots=[(0,+1),(1,+1),(7,-1),(8,-1)]`, B's cap +1) the pairs are
+   (0,0) flush, (1,0) flush, (7,0) stacked, (8,0) stacked; the emission said
+   `opposite=false` four times.
+2. **`boolean()`'s §4.5.5 sheet rule** matched a multi-label sheet triangle to
+   the FIRST pair whose plane contains its centroid — every pair of a group
+   shares the plane — so every sheet read pair (0,0)'s flag. The (7,0)
+   membrane (interior for a union) was kept as flush, wound −n̂ as A#7's copy,
+   and double-covered the rim edge with B's own cap triangle
+   (`i6-edge-overuse`, 21 edges ⇒ `reassembled output would be
+   non-2-manifold`).
+
+Fix: the n-ary emission writes the per-pair flag; the sheet rule resolves a
+membrane by its OWN `(face_a, face_b)` — its `la.source` triangles through the
+Stage-0 `tri_face_a/b` maps — and trusts a plane-only match only when every
+pair on that plane agrees (the 1×1 path and uniform groups: byte-identical).
+Test `nary_mixed_orientation_union_keeps_flush_drops_stacked_membranes`: the
+§2 fixture unioned end to end — the pairs carry both flags, the output is
+watertight with the exact volume 4 + 0.5 − 0.375 = 4.125; RED under the group
+flag (mutation-checked). Corpus 283C / 0W / 23E / 4EE / 0T, one move.

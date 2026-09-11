@@ -43,6 +43,50 @@ after the reconciliation run (release, 8 jobs, 360 s; wall 577 s, F0085
 regression since 2026-08-01 is outstanding (checked over every commit of
 `results.json`).
 
+## 2026-09-11 (night, third) — R0015 CONVERTED: an n-ary Stage-0 plane group stamped ONE `opposite` flag on every pair while A's sketch-plane fragments have MIXED orientation, and the §4.5.5 sheet rule matched a membrane to the FIRST pair on its plane — a STACKED membrane was kept as flush; NEW CANONICAL 283C / 0W / 23E / 4EE / 0T
+
+R0015 (0.6 s; 3 ops at scale 1.1e-4: revolve(rectangle, 60°) + extrude(circle)
++ revolve(circle, 306°); the last op's auto-union) reached Stage-6
+`reassembled output would be non-2-manifold` once R0026's false containment
+STOP was cleared. Anatomy (`NONMANIFOLD_SITE_PROBE`, `YANG_STAGE0_DUMP_DIR`
+metas + an offline winding census of `001_union_a/b.obj`):
+
+- 21 `i6-edge-overuse` edges (fwd=2 rev=1 / fwd=1 rev=2), each pairing a
+  multi-label sheet triangle sourced from BOTH inputs (`[(A,73),(B,26)]`)
+  with a B-only cap triangle on the SAME side of a rim edge.
+- Op 3's Stage 0 is an n-ary group: the torus's end cap (B#0, +n̂) overlays
+  FOUR of A's faces on the sketch plane — A#0/A#1 wound +n̂ (10 tris, area
+  1.36e-10 each) and A#7/A#8 wound −n̂ (9 tris, 4.14e-10 each), the mixed-
+  orientation group `m8_mixed_orientation_nary.md` (task #147 slice h) was
+  built to admit — with `A-dots=[(0,+1),(1,+1),(7,-1),(8,-1)]` in that spec's
+  own words. B's cap is FLUSH with A#0/A#1 (union: keep the membrane once)
+  and STACKED against A#7/A#8 (union: the membrane is interior — drop both
+  copies). The meta printed `opposite=false` for all four pairs.
+- `overlay_nary_group` computed `opposite` ONCE (side B vs the group frame)
+  and stamped it on every `PairPlane`; `face_swap_a` handled the A faces'
+  winding only. And `boolean()`'s (3b) sheet rule matched a sheet to the
+  FIRST pair whose plane contains its centroid — all four share the plane —
+  so every sheet read pair (0,0)'s flag: the (7,0) membrane was kept "flush",
+  wound −n̂ as A#7's copy, and double-covered the rim edge with B's own cap
+  triangle (edge (0,57): A tri 73 = B tri 26, opposite windings — the
+  identical overlap copies; B tri 25 the B-only neighbour).
+
+Fix (spec `m8_mixed_orientation_nary.md` §6): per-PAIR `opposite =
+face_swap_a(face_a) != opposite_b` in the n-ary emission (uniform groups
+byte-identical), and the sheet rule resolves a membrane by its OWN
+(face_a, face_b) — `la.source` through the Stage-0 `tri_face_a/b` maps —
+falling back to the plane match only when every pair on the plane agrees
+(the 1×1 and uniform cases, unchanged). Test
+`nary_mixed_orientation_union_keeps_flush_drops_stacked_membranes` (the
+slice-h fixture unioned end to end: pairs carry both flags, watertight,
+exact volume 4.125; RED with the group flag — mutation-checked).
+
+Corpus (release, 8 jobs, 600 s; F0085 331.0 s, R0044 290.8 s): **283C / 0W /
+23E / 4EE / 0T** — exactly one category move (R0015 ERROR →
+SUPPORTED_CORRECT, 2.8 s, all in-line checks), zero detail moves. Smoke pin
+R0015 added. C0044 (the M8 flush annular stack, `i6-edge-overuse` 0.2 s)
+unchanged — its overuse is a 1×1 pair, not this class.
+
 ## 2026-09-11 (night, later) — R0026 CONVERTED: the partner-hull containment reading identified faces by bit-exact plane equality while the PR-YR27 patch merge (whose result the incidence names) identifies them within TAU_WORK on the unit (n̂, d̂) — one face, two identities; R0015 advances the same false STOP to Stage 6; NEW CANONICAL 282C / 0W / 24E / 4EE / 0T
 
 After Slice G (section below) R0026 STOPped at `stage4_correct.rs:12483`,
@@ -758,7 +802,7 @@ moved. The 30 ERROR rows are the ACTIVE rows below.
 | C0065 | Stage-4 OffCurve v8 | torus∩plane grazing loop reaches \|y\|=0.384 outside the box face; needs exact triple-junction corner insert + stitch (primitive proven, N-137.1) | CONFIRMED (#137 spec) | P3b-#137 |
 | ~~R0074~~ | ~~Stage-4 OffCurve v89~~ ring rejected by CDT (FaceId 593) | **FLIPPED CORRECT 2026-09-03 (eaf6aa51); reconciled 2026-09-04 from the committed results.json history** ~~torus∩plane grazing — same class as C0065~~ **DRIFTED + RE-DIAGNOSED 2026-07-29 (`KV2_RING_PROVENANCE`, 70ccf32c): this is no longer a #137 grazing case.** The OffCurve layer is gone; R0074 now fails as a ring-reject and is the **cleanest witness of the planar seam-overlap class**. PLANAR builder, 541 half-edges, **all LineSegment, ZERO interior samples** (sampler exonerated). 7 adjacency runs; all three crossings (111×113/114/115) sit on the run-B→run-C seam at idx 114, with folds of 179.90° / 156.70° / 177.15° against a ring median of 2.86°. The four fold points project onto the v111→v116 chord at t = 0.588, 0.590, 0.471, 0.263 — monotone **DESCENDING** where traversal demands ascending — and v112/v113 are **9.1e-6 apart (near-dup pair)** at the seam. **Control: the ring's OTHER seam (idx 58) turns a genuine 86.6°/80.9° corner and is clean** ⇒ seam does not imply fold; overlapping chain RANGES do. This is the "mint once exactly, share by identity" contract (`docs/yang_junction_research_findings.md`) violated in Stage-5/6 **OUTPUT** assembly, not the Stage-1 input sampling #146 chases | CONFIRMED (2026-07-29; mechanism settled by the positional oracle — 67/78 folds straddle the moved/still boundary, 329 of 2731 verts moved) | **Stage-4 partial relocation of a boundary chain** (with R0011, F0045). NOTE: the conic `relocations` oracle is BLIND here (torus arm records no `t` retag) — an earlier pass wrongly read `n_relocations=0` as "nothing moved" and re-vehicled this row to #146; RETRACTED |
 | ~~R0003~~ | Stage-4 OffCurve v4233 | **FLIPPED CORRECT 2026-08-29 (e8127391); reconciled 2026-09-04 from the committed results.json history** multi-map over-band chain (v4233→v8508); needs ellipse×hyperbola junction handling, band-fixing exhausted (N45/N46). **§4-I12 2026-08-22: v4233 AND v10583 measured as §4.5.1's first confirmed customers** — interior, bounded 1 hop each side by converged vertices sharing cone+plane; the paper's first-strategy repair (midpoint + truncated cross-boundary re-optimize) is the owner, not more junction vocabulary | CONFIRMED (N51/N52; I12) | **§4.5.1 increment 1 (pin case)** — was P3-junction. **inc-2b 2026-08-22: repair landed gated; under `YANG_451=1` the Stage-4 wall clears (11/11 regions) and the case advances to the KV9-F2 developable fold (FaceId 435, cone tan 2.3961 — not a repaired cone ⇒ developable-ring family latent). Post-flip owner: that family** **2026-08-24b: the fold ANCHORED (extended `KV2_PATCH_FOLD_PROBE`): KV9-F2a deep-chord strip fold — a boundary Chord-split node keeps its ORIGINAL chord's sagitta as a permanent off-surface deviation (dev=0.242 vs facet band 0.188), the adjacent Interior splits are exactly on-surface, and a 0.044-thin sliver bridging the layers folds. The deep chords are yang-rs's pair-curve LineSegment polylines at MESH density = the §4.3.4 refine-after-repair debt (trigger fired). Owner: spec `yang_434_output_chord_refinement.md` (design checkpoint landed; R0100/R0020 same mechanism; R0017 is F2b — all-on-surface inversion, unanchored, NOT this fix's customer)** |
-| R0015 | ~~Stage-4 OffCurve v84~~ Stage-6 non-2-manifold (`i6-edge-overuse` edge (0,57) fwd=2 rev=1, scale 1e-4) | **2026-09-11 (night, later): the OffCurve layer was the FALSE partner-hull containment STOP (R0026's second layer, fixed) — advances to Stage 6, unprobed.** probe 2026-07-18: N51 "no-curve-type" REFUTED — v84 IS in the torus map (`torus=true`); `YANG_TORUS_PROBE` shows the pair Newton relocates it EXACTLY (rho=0, F_torus(proj)=0) and it passes the displacement gate, so the STOP is the **bounded-face containment** check below the gate (`stage4_correct.rs:4225`) — the C0065 grazing-loop-outside-face signature, at MICRO scale (torus R=5.97e-5/r=3.98e-5, coords ~1e-4) | CONFIRMED (#171 pass 2) | P3b-#137 (C0065 containment class, micro-scale) |
+| ~~R0015~~ | ~~Stage-4 OffCurve v84~~ ~~Stage-6 non-2-manifold (`i6-edge-overuse`)~~ | **CONVERTED 2026-09-11 (night, third): the false partner-hull STOP (R0026's layer), then the n-ary group's per-pair `opposite` + the face-keyed sheet rule (section above).** probe 2026-07-18: N51 "no-curve-type" REFUTED — v84 IS in the torus map (`torus=true`); `YANG_TORUS_PROBE` shows the pair Newton relocates it EXACTLY (rho=0, F_torus(proj)=0) and it passes the displacement gate, so the STOP is the **bounded-face containment** check below the gate (`stage4_correct.rs:4225`) — the C0065 grazing-loop-outside-face signature, at MICRO scale (torus R=5.97e-5/r=3.98e-5, coords ~1e-4) | CONFIRMED (#171 pass 2) | P3b-#137 (C0065 containment class, micro-scale) |
 | ~~R0026~~ | ~~Stage-4 OffCurve v218~~ ~~Stage-3 AmbiguousCurve{2,0} (218,220), 2026-08 → 2026-09-11~~ Stage-4 OffCurve v677 (partner-hull containment `:12483`) | **2026-09-11 (night): the Stage-3 layer was KV14 Slice G — the chart CDT's chord contract (section above), FIXED; back at the containment wall, partner AABB unprobed.** probe 2026-07-18: same as R0015 — v218 `torus=true`, pair Newton rho=9.65e-6 ≪ gate 3.0e-3, then bounded-face containment STOP; micro torus∩plane (R=0.0214/r=0.0143) | CONFIRMED (#171 pass 2) | P3b-#137 (C0065 containment class, micro-scale) **CONVERTED 2026-09-11 (night, later): Slice G + the shared plane identity (sections above).** |
 | R0070 | Stage-4 OffCurve v1028 (+op2 LRR v47) | probe 2026-07-18: v1028 sits on a micro Ellipse edge (1025,1028; major_r 0.028) AND a LineSegment edge (1028,1029) — an ellipse∩line conic junction endpoint whose ellipse relocation lands beyond band at micro scale. ~~**op2 v47** is the surface-pair endpoint-mix STOP, R0044 class~~ **op2's endpoint-mix layer RESOLVED 2026-07-28 (triple-block wiring)** — R0070 raises no LRR at all now; the surviving failure is the v1028 OffCurve half only | CONFIRMED (#171 pass 2; op2 half closed 2026-07-28) | P3-junction (v1028 OffCurve half only) |
 

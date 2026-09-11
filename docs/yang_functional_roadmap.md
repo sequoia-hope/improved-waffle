@@ -9,6 +9,17 @@
 
 ## 0. Honest status (refreshed 2026-06-26; addendum 2026-09-04 below)
 
+> **2026-09-11 (night, third) refresh.** Canonical corpus **283C / 0W / 23E / 4EE / 0T** (release, 8 jobs, 600 s; F0085 331.0 s, R0044 290.8 s).
+> **R0015 FLIPPED CORRECT** — M8 slice h closing (spec
+> `m8_mixed_orientation_nary.md` §6): an n-ary Stage-0 plane group stamped
+> ONE `opposite` flag (B vs the group frame) on every pair while A's
+> sketch-plane fragments have mixed orientation, and `boolean()`'s §4.5.5
+> sheet rule matched a membrane to the FIRST pair on its plane — so a
+> STACKED membrane (A's −n̂ fragment against the +n̂ torus cap) was kept as
+> flush and double-covered a rim edge. Per-pair flags
+> (`face_swap_a != opposite_b`) and a sheet lookup keyed by its own
+> (face_a, face_b) through `la.source` + the Stage-0 tri→face maps.
+>
 > **2026-09-11 (night, later) refresh.** Canonical corpus **282C / 0W / 24E / 4EE / 0T** (release, 8 jobs, 600 s; F0085 329.4 s, R0044 290.6 s).
 > **R0026 FLIPPED CORRECT** (second layer): the torus block's partner-hull
 > containment reading identified "faces on the partner plane" bit-exactly,

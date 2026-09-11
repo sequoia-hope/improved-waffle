@@ -1266,6 +1266,16 @@ fn smoke_corpus_boundary_categories() {
         // the bit-exact hull saw only the base cap and refused a junction on
         // the cap outside the cylinder's disk. 4.1 s release.
         ("R0026", Category::SupportedCorrect),
+        // R0015 FLIPPED (2026-09-11, M8 slice h closing): the torus cap's
+        // n-ary Stage-0 group carried ONE `opposite` flag (B vs the group
+        // frame) for all four pairs while A's sketch-plane fragments have
+        // MIXED orientation, and the §4.5.5 sheet rule matched a membrane to
+        // the FIRST pair on its plane — so a STACKED membrane (A's −n̂
+        // fragment against the +n̂ cap) was kept as flush and double-covered
+        // a rim edge. Per-PAIR flags (`face_swap_a != opposite`) and a sheet
+        // lookup keyed by its own (face_a, face_b) through `la.source` +
+        // the Stage-0 tri→face maps. 2.8 s release.
+        ("R0015", Category::SupportedCorrect),
         // R0044 FLIPPED (2026-09-05, thin-band chart guard) is deliberately
         // NOT pinned here: it costs ≈ 270 s CPU in release — ≈ 1200 s in the
         // debug build this gate runs under on CI and in `test.sh` — against

@@ -1730,10 +1730,47 @@ fn boolean_once(
             // cylinder pair iff `|dist(c, axis_line) − radius| <= band`). Only
             // if NEITHER matches is it an unhandled config — still loud (P9).
             let planar = stage0.as_ref().and_then(|s0| {
-                s0.pairs
+                let on_plane: Vec<&stage0::PairPlane> = s0
+                    .pairs
                     .iter()
-                    .find(|p| (p.n[0] * c[0] + p.n[1] * c[1] + p.n[2] * c[2] + p.d).abs() <= p.band)
-                    .map(|p| p.opposite)
+                    .filter(|p| {
+                        (p.n[0] * c[0] + p.n[1] * c[1] + p.n[2] * c[2] + p.d).abs() <= p.band
+                    })
+                    .collect();
+                let first = *on_plane.first()?;
+                // An n-ary group's pairs share ONE plane and differ only by
+                // face — and their `opposite` flags may differ (R0015,
+                // 2026-09-11: A's mixed-orientation sketch-plane fragments
+                // against one torus cap — flush with two, stacked on two).
+                // Resolve the sheet by its OWN (face_a, face_b): its
+                // `la.source` triangles through the Stage-0 tri→face maps. A
+                // plane-only match is trusted only when every pair on the
+                // plane agrees (the 1×1 and uniform-group cases, unchanged).
+                if !la.source.is_empty() {
+                    let (mut fa, mut fb): (Option<usize>, Option<usize>) = (None, None);
+                    for &(inp, raw_t) in &la.source[orig_t] {
+                        let (map, slot) = if inp == LaInputId(0) {
+                            (&s0.tri_face_a, &mut fa)
+                        } else {
+                            (&s0.tri_face_b, &mut fb)
+                        };
+                        if let Some(&f) = map.get(raw_t as usize) {
+                            if f != u32::MAX {
+                                *slot = Some(f as usize);
+                            }
+                        }
+                    }
+                    if let (Some(fa), Some(fb)) = (fa, fb) {
+                        if let Some(p) = on_plane.iter().find(|p| p.face_a == fa && p.face_b == fb)
+                        {
+                            return Some(p.opposite);
+                        }
+                    }
+                }
+                on_plane
+                    .iter()
+                    .all(|p| p.opposite == first.opposite)
+                    .then_some(first.opposite)
             });
             let opposite = match planar {
                 Some(o) => o,

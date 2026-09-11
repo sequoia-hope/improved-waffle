@@ -240,7 +240,16 @@ pub(crate) fn overlay_nary_group(
         return Err(pair_err());
     }
 
-    // ── PairPlane emission (one per scan pair, group frame + opposite) ──
+    // ── PairPlane emission (one per scan pair, group frame + PER-PAIR
+    // opposite) ── The pair's `opposite` is the relation between ITS two
+    // faces: a side-A face opposing the frame (`face_swap_a`) is stacked
+    // against a B face that agrees with it and flush with one that opposes
+    // it. In a mixed-orientation group the same B face is therefore FLUSH
+    // with some A faces and STACKED against others (R0015, 2026-09-11: a
+    // torus cap on A's sketch plane, flush with A's two +n̂ fragments and
+    // stacked on its two −n̂ ones); the §4.5.5 sheet rule in `boolean()`
+    // reads this per pair. Uniform groups: `face_swap_a` is false for every
+    // A face, so the flag is the group's — byte-identical.
     for &pi in &group.pair_idxs {
         let p = &cross[pi];
         pairs.push(PairPlane {
@@ -249,7 +258,7 @@ pub(crate) fn overlay_nary_group(
             band: p.band,
             face_a: p.face_a,
             face_b: p.face_b,
-            opposite,
+            opposite: face_swap_a(p.face_a) != opposite,
         });
     }
 
@@ -1201,6 +1210,71 @@ mod tests {
         assert!(
             neg_z_tris > 0,
             "the −z coplanar face must carry override triangles in mesh_a"
+        );
+    }
+
+    /// The per-PAIR `opposite` flag (R0015, 2026-09-11): in a mixed-orientation
+    /// group the same B face is FLUSH with A's like-oriented faces and STACKED
+    /// against its opposite-oriented ones, so the §4.5.5 sheet rule must keep
+    /// the flush membranes (once) and drop the stacked ones. Before the fix
+    /// every pair carried the group's B-side flag and `boolean()` matched a
+    /// sheet to the FIRST pair on its plane: the union either kept a stacked
+    /// membrane (a doubled edge — `reassembled output would be non-2-manifold`)
+    /// or dropped a flush one (a hole). Same fixture as above; oracles: the
+    /// two pairs carry different flags, the union succeeds, is watertight, and
+    /// has the exact volume 4 + 0.5 − 0.375.
+    #[test]
+    fn nary_mixed_orientation_union_keeps_flush_drops_stacked_membranes() {
+        let nb = crate::native_backend().expect("native backend");
+        let lower = rj_box([0.0, 0.0, 0.0], [2.0, 1.0, 1.0]);
+        let upper = rj_box([1.0, 0.0, 1.0], [3.0, 1.0, 2.0]);
+        let a = crate::boolean(&lower, &upper, BoolOp::Union, &nb).expect("A = lower ∪ upper");
+        let b = rj_box([0.5, 0.25, 1.0], [2.5, 0.75, 1.5]);
+        let s0 = stage0_preprocess(&a, &b)
+            .expect("mixed-orientation group is admitted")
+            .expect("near-coplanar pairs detected");
+        let flags: Vec<(usize, usize, bool)> = s0
+            .pairs
+            .iter()
+            .map(|p| (p.face_a, p.face_b, p.opposite))
+            .collect();
+        assert!(
+            flags.iter().any(|f| f.2) && flags.iter().any(|f| !f.2),
+            "one flush pair and one stacked pair: {flags:?}"
+        );
+
+        let out = crate::boolean(&a, &b, BoolOp::Union, &nb)
+            .expect("union over the mixed-orientation group");
+        let m = out.as_mesh();
+        let key = |v: u32| {
+            let p = m.verts[v as usize];
+            [p.x().to_bits(), p.y().to_bits(), p.z().to_bits()]
+        };
+        let mut edges: BTreeMap<([u64; 3], [u64; 3]), (usize, i64)> = BTreeMap::new();
+        let mut vol = 0.0f64;
+        for t in &m.tris {
+            for k in 0..3 {
+                let (u, v) = (key(t[k]), key(t[(k + 1) % 3]));
+                let (lo, hi, dir) = if u <= v { (u, v, 1) } else { (v, u, -1) };
+                let e = edges.entry((lo, hi)).or_insert((0, 0));
+                e.0 += 1;
+                e.1 += dir;
+            }
+            let p = |v: u32| m.verts[v as usize].as_array();
+            let (p0, p1, p2) = (p(t[0]), p(t[1]), p(t[2]));
+            vol += (p0[0] * (p1[1] * p2[2] - p1[2] * p2[1])
+                - p0[1] * (p1[0] * p2[2] - p1[2] * p2[0])
+                + p0[2] * (p1[0] * p2[1] - p1[1] * p2[0]))
+                / 6.0;
+        }
+        let bad = edges
+            .values()
+            .filter(|&&(c, bal)| c != 2 || bal != 0)
+            .count();
+        assert_eq!(bad, 0, "the union must be watertight");
+        assert!(
+            (vol - 4.125).abs() < 1e-9,
+            "union volume {vol} must be 4 + 0.5 − 0.375 = 4.125"
         );
     }
 }
