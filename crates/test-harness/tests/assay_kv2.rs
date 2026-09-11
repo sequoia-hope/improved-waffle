@@ -1229,6 +1229,17 @@ fn smoke_corpus_boundary_categories() {
         // where the #194 collapse caught it (the 2026-09-07 `float_roundtrip`
         // unmask). 1.5 s release.
         ("R0017", Category::SupportedCorrect),
+        // R0059 FLIPPED (2026-09-11): the extrude box's base edge runs in the
+        // coplanar revolve cap (a Stage-0 overlay seam); its rim-exit
+        // junction relocated 20.6 ALONG the edge to the exact circle, over
+        // two unmoved overlay subdivision vertices, and the emitted loop
+        // walked forward-back-forward (kernel-v2 `ring rejected by CDT`).
+        // Yang §4.5.3's collinear reversal; the coincident-plane seam has
+        // no `n_A × n_B` tangent, so the sweep could not see it. The
+        // straight-run OVERTAKE arm (`line_overtake_site`, spec
+        // `yang_453_line_overtake`) collapses the overtaken points onto the
+        // junction, certified by its own displacement. 2.8 s release.
+        ("R0059", Category::SupportedCorrect),
         // R0044 FLIPPED (2026-09-05, thin-band chart guard) is deliberately
         // NOT pinned here: it costs ≈ 270 s CPU in release — ≈ 1200 s in the
         // debug build this gate runs under on CI and in `test.sh` — against

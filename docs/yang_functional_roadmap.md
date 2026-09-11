@@ -9,8 +9,8 @@
 
 ## 0. Honest status (refreshed 2026-06-26; addendum 2026-09-04 below)
 
-> **2026-09-11 refresh.** Canonical corpus **279C / 0W / 27E / 4EE / 0T**
-> (release, 8 jobs, 600 s; wall 788.8 s; 278C after the first flip). Two flips. **R0017 FLIPPED CORRECT (later that day):** the increment-4 rim-junction insertion mints the cone-rim × plane junction on the owner's rim polyline only, the arrangement mints its own crossing an ULP-twin away, and the §4.3 moved×minted weld never saw the mint because the rim-junction path did not register it in `minted_junction_keys` — it does now (spec `yang_rim_junction_insertion` "Mint registration"; one mint contract for every Stage-1 junction mint). **R0077 FLIPPED CORRECT:** the torus
+> **2026-09-11 refresh.** Canonical corpus **280C / 0W / 26E / 4EE / 0T**
+> (release, 8 jobs, 600 s; wall 719.7 s; 278C → 279C → 280C over the day). Three flips. **R0059 FLIPPED CORRECT (night):** Yang §4.5.3's collinear reversal on a coplanar overlay seam — the box edge's rim-exit junction relocated 20.6 along the edge over two unmoved Stage-0 subdivision vertices; the seam has no `n_A × n_B` tangent so the sweep could not diagnose it — closed by the straight-run OVERTAKE arm (spec `yang_453_line_overtake.md`: the overtaken points collapse onto the junction, certified by its own displacement). **R0017 FLIPPED CORRECT (later that day):** the increment-4 rim-junction insertion mints the cone-rim × plane junction on the owner's rim polyline only, the arrangement mints its own crossing an ULP-twin away, and the §4.3 moved×minted weld never saw the mint because the rim-junction path did not register it in `minted_junction_keys` — it does now (spec `yang_rim_junction_insertion` "Mint registration"; one mint contract for every Stage-1 junction mint). **R0077 FLIPPED CORRECT:** the torus
 > block's 3-surface arm gated a box-edge × torus pierce at the surface-pair
 > corridor `2·d_ε/sin θ` (two SURFACE normals) although the vertex moves
 > ALONG the two planes' line; a plane-pair junction now takes the KV11 line
@@ -21,8 +21,8 @@
 > 277C on 2026-09-07 22:02: the `.waffle` v4 commit d6909ee7 enabled
 > serde_json `float_roundtrip` build-wide (every coordinate now parses
 > exactly, one ULP from the old best-effort parse) and was never
-> corpus-run, nor were the 24 app / file-format commits after it; R0017 (since
-> converted), R0025, R0059 are ULP-parse-sensitive latents (bisected + proven by the
+> corpus-run, nor were the 24 app / file-format commits after it; R0017 and R0059 (both since
+> converted) and R0025 are ULP-parse-sensitive latents (bisected + proven by the
 > feature toggle), ledgered ACTIVE in `docs/yang_tail_triage.md` "Unmasked
 > 2026-09-07 by exact float parsing". Rule restated: a corpus run belongs
 > to EVERY commit that can change what the kernel is handed — the loader

@@ -43,6 +43,65 @@ after the reconciliation run (release, 8 jobs, 360 s; wall 577 s, F0085
 regression since 2026-08-01 is outstanding (checked over every commit of
 `results.json`).
 
+## 2026-09-11 (night) — R0059 CONVERTED: Yang §4.5.3's collinear reversal on a coplanar overlay seam, after a junction relocated ALONG its line over unmoved run points (the straight-run OVERTAKE arm); NEW CANONICAL 280C / 0W / 26E / 4EE / 0T (the pre-regression score restored)
+
+R0059 (0.7 s) was the last of the three ULP-parse latents (section above)
+with a fast replay. Anatomy (`KV2_RING_REJECT_PROBE`, `KV2_RING_PROVENANCE`,
+`YANG_S6_LOOP_PROV`, `YANG_V_PROBE_NEAR`, offline geometry):
+
+- kernel-v2 rejects the op-3 output ring of face 29: a planar 5-gon
+  `P0 → P1 → P2 → P3 → P4 → P0` whose P3, P0, P4 are collinear on the box's
+  base edge (P0 at t = 0.831 of P3 → P4, off-line 8.9e-15). The face is the
+  parallelogram `P3 → P0 → P1 → P2` (sides 91.7 / 115.1, both pairs
+  parallel); P4 is an 18.6-unit spike past P0 on the same line.
+- The box's base is sketched on the previous body's cap ⇒ a Stage-0 coplanar
+  overlay of A's cap plane and B's base plane (`stage0=true`); the base edge
+  L1 lies in the cap and the overlay subdivides it at every cap-triangulation
+  crossing (417, 415, 413, 411, 409 — unmoved, exact on L1). Where L1 exits
+  the cap the overlay crossed the rim CHORD: v20 (`line=true pp_planes=true
+  endpoint=true`), the L1 × rim-circle junction, which Stage 4 relocates
+  20.6 units ALONG L1 to the exact circle (pre (−355.70, 100.93) → (−371.04,
+  114.67), z = 28.07 — a grazing rim crossing amplifies the chord sagitta
+  along the line). Vertices 417 (−357.15) and 415 (−369.42) lie between v20's
+  old and new positions, so the emitted loop walks 20 → 417 → 415 → 413
+  forward-back-forward and self-overlaps. Yang §4.5.3 verbatim ("a reverse
+  sequence of points after convergence … if the consecutive points that
+  exhibit reversal are collinear, t̃ is almost degenerate. In such a case, we
+  directly detect the reversal", `refs/text/yang2025_hybrid_boolean.txt:736-745`).
+- Why the sweep could not see it: the run's edges are overlay seams between
+  two COINCIDENT planes, so the exact tangent `n_A × n_B` vanishes and
+  `is_reversed`'s branch 5 returns healthy before its collinear U-turn test
+  (kept so Stage-0 crossing artifacts stay loud —
+  `annular_cap_hole_crossing_stays_loud`); and the paper's remove-next
+  cascade would need to collapse 417 → P3 (82 units) against the 2·d_ε
+  resolution gate (d_ε = 5.92 here). Old parser: CORRECT (3.5 s) — an ULP
+  changed how many overlay crossings landed inside the junction's corridor.
+
+**Fix (always-on; dev off-knob `YANG_453_OVERTAKE=0|off`):** the straight-run
+OVERTAKE arm (spec `specs/yang_453_line_overtake.md`,
+`reversal::line_overtake_site`), evaluated before `is_reversed` at every
+mixed-cycle site: on a straight run (both edges `LineSegment`, same unordered
+pair) with `p_r` unmoved and exactly ONE neighbour `J` moved from a Stage-4
+entry position (`s4_entry_pos`, the §4-I9 snapshot) by more than
+`TAU_WORK·(1+scale)`, the paper's degenerate collinear reversal at `p_r`
+(`|unit(p_r−p_b) + unit(p_n−p_r)| < TAU_WORK`) and `p_r` strictly inside
+`[J_old, J_new]` on J's displacement line ⇒ collapse `p_r` onto `J`. The
+collapse is bounded by `|J_new − J_old|`, a displacement Stage 4 already
+certified through J's own junction gate, so the 2·d_ε resolution gate is not
+the bound for this arm; the arm reads only the run's geometry (a coincident
+seam is diagnosable); every other configuration — no / both / self moved, a
+Stage-4 mint, J moved the other way, a corner, a pair change — falls through
+to `is_reversed` byte-identically. Pins `tests_unit/s453_line_overtake.rs`
+(the R0059-shaped run: both overtaken points collapse in sequence, the far
+run point beyond J does not; every fail-closed branch). R0059: exactly the
+two predicted collapses (`victim=420 survivor=20`, `victim=418 survivor=20`
+at the junction; with the arm off the four pre-existing sweep collapses
+still happen and the case still fails) ⇒ **SUPPORTED_CORRECT, 2.8 s**, all
+in-line oracles. Smoke pin `R0059`. yang-rs 901 green, clippy
+`--all-targets` clean (yang-rs, test-harness), rewrite tier green (174).
+
+**Corpus (release, 8 jobs, 600 s; wall 719.7 s): 280C / 0W / 26E / 4EE / 0T — NEW CANONICAL.** Exactly one category move (R0059 ERROR → CORRECT), ZERO detail moves on the other 311 rows (per-id category + detail diff against the committed results.json): the arm fires on no other case. Of the three ULP-parse latents only R0025 (the Stage-0 overlay's gear-cap needle fan, M8 family) remains ACTIVE.
+
 ## 2026-09-11 (later) — R0017 CONVERTED: the rim-junction insertion's ULP-twin now collapses into its mint (one mint contract for every Stage-1 junction mint); NEW CANONICAL 279C / 0W / 27E / 4EE / 0T
 
 R0017 (0.1 s) was the first of the three ULP-parse latents unmasked by the
@@ -170,7 +229,7 @@ HEAD's un-run corpus was 277C; this increment makes it 278C.
 |---|---|---|---|---|
 | ~~R0017~~ | ~~Stage-4 `LocalRefinementRequired` u32::MAX at `degenerate_no_longedge ndeg=2`~~ **FLIPPED CORRECT 2026-09-11 (later): the rim-junction insertion's mints are now registered in `minted_junction_keys`, so the §4.3 moved×minted weld collapses the arrangement's ULP-twin into the mint — see the section above** (0.1 s; op 2 union, revolve(rectangle) × extrude(rectangle), scale 4.0e3) | The §4.4.1 unzip finds B face 2 (a plane) triangles `[49, 117, 50]` / `[50, 117, 49]` degenerate: vertex 50 — relocated by the conic triple arm (Cone A × plane B × plane B, a prism-edge pierce; ρ 0.5, gate 257, `metric=curve` and `=line` alike) — lands 4e-11 from the UNMOVED vertex 49 (a zero-length edge, `height_b 1e-12` over the 688-unit edge (48, 49)); the unzip's model is a vertex in an edge's INTERIOR, so no long edge qualifies. Two arrangement vertices for one junction — the "mint once, share by identity" contract. **MEASURED (later the same day): v50 is the increment-4 rim-junction mint (certified exact), v49 the arrangement's own crossing 2.4e-13 away; the moved×minted weld never saw the mint because the rim-junction path did not register it** | CONFIRMED (site + toggle + mint provenance) | ~~junction merge (I8 Fig-11 family)~~ mint registration — DONE |
 | R0025 | `yang-rs: input B-Rep is not 2-manifold` = the I6 `NonManifoldInput` backstop (3.7 s; op 2 union, extrude(gear) × extrude(circle) whose sketch plane is the gear's end cap ⇒ flush caps ⇒ Stage-0 overlay) | `NONMANIFOLD_SITE_PROBE`: `i6-coincident-tris` compact `[765, 766, 768]` carried by input 0 (the gear) face 1 (a Plane) raw triangles 760 `[765, 768, 766]` and 799 `[765, 766, 808]`, OPPOSITE windings (`i6-wedge-dedup REJECT(winding)`), 768 ≡ 808 welded (`i6-cluster 768: [768, 808]`); 766–768 are 0.07 apart, 765 is 2.5 away — a MACROSCOPIC same-face fold, not the I6.6 sub-resolution pleat (band 1e-12·scale). A single input's plane face emitted two overlapping triangles: the Stage-0 overlay emission on the gear cap (R0053 / R0081 family) or the cap CDT — UNMEASURED which (next: `YANG_STAGE0_DUMP_DIR` on op 2). Old parser: CORRECT (22.9 s) | CONFIRMED (site + toggle); emitter UNMEASURED | Stage-0 overlay emission (M8) — PROBE first |
-| R0059 | kernel-v2 `TessellationFailed { face: FaceId(29), reason: "ring rejected by CDT" }` (0.5 s; op 3 union, extrude(rectangle) × (extrude(circle) ∪ revolve(circle) torus), scale 3.8e2) | The chained union completes and its OUTPUT ring for face 29 folds — UNPROBED (`KV2_RING_REJECT_PROBE` / `KV2_RING_PROVENANCE` next). Old parser: CORRECT (3.5 s) | PROBE | ring-reject family (R0100 kin) |
+| ~~R0059~~ | ~~kernel-v2 `TessellationFailed { face: FaceId(29), reason: "ring rejected by CDT" }`~~ **FLIPPED CORRECT 2026-09-11 (night): a §4.5.3 collinear reversal on a coplanar overlay seam — the rim-exit junction relocated 20.6 along the box edge over two unmoved overlay vertices; the straight-run OVERTAKE arm collapses them onto the junction (spec `yang_453_line_overtake`) — see the section above** (0.5 s; op 3 union, extrude(rectangle) × (extrude(circle) ∪ revolve(circle) torus), scale 3.8e2) | PROBED + CONVERTED | DONE |
 
 ## 2026-09-06 — R0003 flipped back (the §I13(f) NEEDLE corner); canonical 276C / 0W / 30E / 4EE / 0T
 

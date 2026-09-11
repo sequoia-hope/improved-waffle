@@ -47,6 +47,7 @@ mod s1_chart_crossing;
 mod s1_self_contact;
 mod s434_output_restore;
 mod s451_crease_domain;
+mod s453_line_overtake;
 mod s4_boundary_curve;
 mod stage0_rim_projection;
 mod stage1_cdt_flap;

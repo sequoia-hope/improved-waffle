@@ -16,8 +16,13 @@ pub(crate) fn sweep_reversed_intersections(
     a: &BRep,
     b: &BRep,
     d_eps: f64,
+    moved: &std::collections::HashSet<u32>,
+    entry_pos: &[[f64; 3]],
 ) -> Result<bool, YangError> {
     use std::collections::HashSet;
+    // Spec `yang_453_line_overtake` (2026-09-11, R0059): the straight-run
+    // OVERTAKE arm. Unset/`1` = act; `0`/`off` = the dev A/B off-knob.
+    let overtake_act = line_overtake_enabled();
     const ANG_TOL: f64 = 1e-6; // radians (Yang §5).
     let lo = std::f64::consts::FRAC_PI_4 - ANG_TOL; // 45° − tol
     let hi = 3.0 * std::f64::consts::FRAC_PI_4 + ANG_TOL; // 135° + tol
@@ -261,6 +266,23 @@ pub(crate) fn sweep_reversed_intersections(
                         conic_backtrack = Some((p_r, survivor));
                     }
                 }
+                // Spec `yang_453_line_overtake`: a relocated vertex that moved
+                // ALONG its straight run past unmoved run points (R0059: the
+                // box edge's rim junction relocated 20.6 along the edge over
+                // two Stage-0 subdivision vertices). Tested on the run's own
+                // geometry — never the surface-pair tangent, which a
+                // coplanar overlay seam does not have — and certified by the
+                // junction's own displacement, so the 2·d_ε resolution gate
+                // below is not the bound here.
+                let mut overtake = false;
+                if conic_backtrack.is_none() && overtake_act {
+                    if let Some(vs) = line_overtake_site(
+                        mesh, &curves, &incidence, moved, entry_pos, p_b, p_r, p_n,
+                    ) {
+                        conic_backtrack = Some(vs);
+                        overtake = true;
+                    }
+                }
                 if conic_backtrack.is_some()
                     || is_reversed(mesh, &curves, &incidence, p_b, p_r, p_n, lo, hi)
                 {
@@ -291,7 +313,7 @@ pub(crate) fn sweep_reversed_intersections(
                     // sweep must never repair unsupported configurations
                     // into silent geometry; pinned by
                     // `annular_cap_hole_crossing_stays_loud`).
-                    {
+                    if !overtake {
                         let pv = mesh.verts[victim as usize].as_array();
                         let ps = mesh.verts[survivor as usize].as_array();
                         let d = [pv[0] - ps[0], pv[1] - ps[1], pv[2] - ps[2]];
@@ -346,6 +368,115 @@ pub(crate) fn sweep_reversed_intersections(
 /// Spec `yang_453_pair_chain_reversal` §3 — are both incident edges typed
 /// `LineSegment` (a straight run in a mixed cycle)? Extracted so the pair
 /// arm's insertion keeps the original branch byte-identical.
+/// Is the §4.5.3 straight-run OVERTAKE arm on (spec
+/// `yang_453_line_overtake`)? Unset/other = act; `0`/`off` = the dev A/B
+/// off-knob (the pre-2026-09-11 sweep, byte-identical).
+pub(crate) fn line_overtake_enabled() -> bool {
+    !matches!(
+        std::env::var("YANG_453_OVERTAKE").as_deref(),
+        Ok("0") | Ok("off")
+    )
+}
+
+/// Spec `yang_453_line_overtake` (2026-09-11, R0059): the straight-run
+/// OVERTAKE site. Yang §4.5.3's subject is a point sequence that reverses
+/// AFTER convergence; on a straight run the generic shape is a relocated
+/// vertex `J` (a line × surface junction moved ALONG its plane-pair line by
+/// its own certified relocation — R0059: the extrude box's base edge exits
+/// the coplanar revolve cap at a grazing rim crossing, and the Stage-0
+/// overlay's chord crossing relocates 20.6 along the edge to the exact
+/// circle) that overtakes UNMOVED run vertices lying between its old and new
+/// positions (R0059: two Stage-0 subdivision vertices of that edge). Those
+/// points are phantoms of the resolution artifact the relocation corrected:
+/// the run walks forward-back-forward through them and the emitted face
+/// loop self-overlaps (kernel-v2 `ring rejected by CDT`).
+///
+/// The site is `p_r` unmoved, flanked on ONE side by a moved vertex `J`
+/// with an entry position, on a straight run (both edges `LineSegment`,
+/// same unordered surface pair — `same_line_run`), with the paper's
+/// degenerate collinear reversal at `p_r` (`|t̃| < TAU_WORK`, the polyline
+/// doubles back exactly), and `p_r` INSIDE `J`'s displacement segment
+/// `[J_old, J_new]` on that line (the OVERTAKE certificate: the parameter
+/// along `J_new − J_old` strictly between 0 and |J_new − J_old|, off-line
+/// distance ≤ `TAU_WORK·(1+scale)`). Returns `(victim = p_r, survivor = J)`:
+/// the phantom collapses onto the exact junction, bounded by
+/// `|J_new − J_old|` — a displacement Stage 4 already certified for `J`
+/// (its junction gate), which is why the caller's 2·d_ε resolution gate is
+/// not the bound for this arm. Tested on the run's own geometry only, so a
+/// coplanar overlay seam (no `n_A × n_B` tangent — `is_reversed`'s branch
+/// 5) is diagnosable here. `None` (the site falls through to `is_reversed`
+/// unchanged) for: a non-straight or pair-changing site, no moved
+/// neighbour, BOTH neighbours moved (ambiguous — fail closed), a moved
+/// neighbour minted during Stage 4 (no entry position), a moved `p_r`, a
+/// sub-band displacement, a non-collinear turn (a genuine corner), or `p_r`
+/// outside `[J_old, J_new]` (not overtaken — an unrelated U-turn, which
+/// stays loud downstream exactly as before, e.g. the annular hole-rim
+/// crossing artifact pinned by `annular_cap_hole_crossing_stays_loud`).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn line_overtake_site(
+    mesh: &Mesh,
+    curves: &std::collections::BTreeMap<(u32, u32), Curve>,
+    incidence: &std::collections::BTreeMap<(u32, u32), Vec<(InputId, Surface)>>,
+    moved: &std::collections::HashSet<u32>,
+    entry_pos: &[[f64; 3]],
+    p_b: u32,
+    p_r: u32,
+    p_n: u32,
+) -> Option<(u32, u32)> {
+    if same_line_run(curves, incidence, p_b, p_r, p_n) != Some(true) {
+        return None;
+    }
+    if moved.contains(&p_r) {
+        return None;
+    }
+    let j = match (moved.contains(&p_b), moved.contains(&p_n)) {
+        (true, false) => p_b,
+        (false, true) => p_n,
+        _ => return None,
+    };
+    let old = *entry_pos.get(j as usize)?;
+    let new = mesh.verts[j as usize].as_array();
+    let pr = mesh.verts[p_r as usize].as_array();
+    let scale = old
+        .iter()
+        .chain(new.iter())
+        .chain(pr.iter())
+        .fold(0.0f64, |m, &c| m.max(c.abs()));
+    let band = cad_primitives::TAU_WORK * (1.0 + scale);
+    let d = [new[0] - old[0], new[1] - old[1], new[2] - old[2]];
+    let len = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
+    if len <= band {
+        return None;
+    }
+    // The paper's degenerate collinear reversal at p_r: the polyline doubles
+    // back exactly (unit(p_r − p_b) + unit(p_n − p_r) ≈ 0).
+    let pb = mesh.verts[p_b as usize].as_array();
+    let pn = mesh.verts[p_n as usize].as_array();
+    let v1 = normalize3([pr[0] - pb[0], pr[1] - pb[1], pr[2] - pb[2]]);
+    let v2 = normalize3([pn[0] - pr[0], pn[1] - pr[1], pn[2] - pr[2]]);
+    let t = [v1[0] + v2[0], v1[1] + v2[1], v1[2] + v2[2]];
+    if (t[0] * t[0] + t[1] * t[1] + t[2] * t[2]).sqrt() >= cad_primitives::TAU_WORK {
+        return None;
+    }
+    // The OVERTAKE certificate: p_r strictly inside [J_old, J_new] on J's
+    // displacement line.
+    let u = [d[0] / len, d[1] / len, d[2] / len];
+    let w = [pr[0] - old[0], pr[1] - old[1], pr[2] - old[2]];
+    let s_par = w[0] * u[0] + w[1] * u[1] + w[2] * u[2];
+    if s_par <= 0.0 || s_par >= len {
+        return None;
+    }
+    let perp = [
+        w[0] - s_par * u[0],
+        w[1] - s_par * u[1],
+        w[2] - s_par * u[2],
+    ];
+    if (perp[0] * perp[0] + perp[1] * perp[1] + perp[2] * perp[2]).sqrt() > band {
+        return None;
+    }
+    Some((p_r, j))
+}
+
 fn both_line_edges(
     curves: &std::collections::BTreeMap<(u32, u32), Curve>,
     key_b: (u32, u32),
