@@ -210,8 +210,8 @@ pub(crate) fn tessellate_cone_face(
     apex: Point3,
     axis_dir: Vector3,
     half_angle: f64,
-    out_verts: &mut [Point3],
-    _sources: &mut [TessellationSource],
+    out_verts: &mut Vec<Point3>,
+    sources: &mut Vec<TessellationSource>,
     out_tris: &mut Vec<[u32; 3]>,
 ) -> Result<(), YangError> {
     // KV14 Slice E (spec `yang_stage1_curved_holed_patch`): a cone lateral
@@ -227,6 +227,8 @@ pub(crate) fn tessellate_cone_face(
             edges,
             rim_rings,
             out_verts,
+            sources,
+            ChartBudget::default(),
             apex,
             axis_dir,
             LateralKind::Cone { half_angle },
@@ -383,6 +385,8 @@ pub(crate) fn tessellate_cone_face(
             edges,
             rim_rings,
             out_verts,
+            sources,
+            ChartBudget::default(),
             apex,
             axis_dir,
             LateralKind::Cone { half_angle },

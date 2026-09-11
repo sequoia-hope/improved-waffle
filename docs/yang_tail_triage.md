@@ -43,6 +43,70 @@ after the reconciliation run (release, 8 jobs, 360 s; wall 577 s, F0085
 regression since 2026-08-01 is outstanding (checked over every commit of
 `results.json`).
 
+## 2026-09-11 (night) — KV14 Slice G: the Stage-1 chart chord contract (Yang §4.1's domain triangulation); R0026 advances Stage 3 → Stage 4 (the C0065 containment class); 29 cylinder chart faces in 7 CORRECT cases had silently exceeded d_ε; canonical 281C / 0W / 25E / 4EE / 0T (category-identical)
+
+R0026 (1.4 s; op 3 unions a box onto cylinder ∪ 357° torus, scale 0.13) had
+sat at `Stage-3 AmbiguousCurve{2,0}` on edge (218,220) for the last 26
+results commits (its row below still carried the 2026-07-18 OffCurve
+diagnosis). Anatomy (`YANG_S3_AMBIG_PROBE`, `YANG_STAGE0_DUMP_DIR`, offline
+exact census of `002_union_a.obj`):
+
+- The box's lateral plane is parallel to the cylinder axis (0.0307 from it,
+  r = 0.0358 — a secant); SSI correctly returns two generator lines. The
+  arrangement points sit 4.4e-3 from the nearer generator in the plane; the
+  N46 band `√(B_in² + tol²)` = 3.48e-3 (built for exactly this signature,
+  task #164) refused them. The band was right.
+- The body's cylinder lateral (face 2) is a KV14 Slice-B periodic strip: a
+  139-vertex bottom loop (the base rim rising along the torus∩cylinder M5
+  K11 chain to h = 0.033) and the 12-vertex top rim (N = 11, step 32.7°,
+  sag 1.448e-3 ≤ d_ε 1.498e-3). Its boundary-only chart CDT
+  (`cdt_polygon_with_holes_floodfill`, "no Steiner points") fanned a rim
+  vertex at 96.7° onto the chain's 135.7°/136.0° vertices: of 151 interior
+  edges ELEVEN span 39.0°–40.9°, sag up to 2.25e-3 = 1.50 × d_ε (zero
+  boundary chords violate). The two arrangement points lie in those
+  triangles, 2.05e-3 inside the true cylinder — beyond the budget every
+  downstream band reads back.
+- Yang §4.1 (`refs/text/yang2025_hybrid_boolean.txt:404-407`): "we first
+  triangulate the rectangular u-v domain until reaching the given distance
+  tolerance d_ε. Then, for each boundary curve, apply CDT". Slices A/B/D
+  skipped the domain triangulation — the deviation, and the bug
+  (`feedback_yang_only`; deviations ledger N61).
+
+Fix (spec `yang_stage1_curved_holed_patch.md` §"Slice G",
+`stage1_tessellate/chart_chord.rs`): the cylinder chart is seeded with the
+paper's domain grid (`cdt_polygon_with_holes_refined_seeded`, step `h =
+r·Δθ_seed`, `Δθ_seed = 2·acos(1 − sag_bound/r)` capped at the operand's rim
+step, `sag_bound = min(operand budget, self-contact demand)`), the Steiner
+points lift through the `eval_source` cylinder arm (`BRepFace{u=θ, v}`), and
+a P10 postcondition censuses every INTERIOR edge against the bound — a
+violating round halves the grid (≤ 3 halvings), then the typed
+`Stage1ChartChordBound` STOP. Gate `YANG_S1_CHART_SEED=0`; probes
+`YANG_S1_CHART_PROBE`, `YANG_S1_CHART_LOG=<file>` (per-case census; the
+`pre_` fields are the boundary-only CDT's). Tests
+`tests_unit/s1_chart_chord_seed.rs` (3). Cone chart faces (Slice E) stay
+boundary-only — their deficit is not a function of Δθ alone — the next
+sub-slice (2,275 cone faces in the corpus census vs 453 cylinder faces).
+
+Corpus (release, 8 jobs, 600 s; wall 726.9 s, F0085 332.2 s, R0044 292.8 s):
+**281C / 0W / 25E / 4EE / 0T, category-identical**; two detail moves —
+R0026 Stage-3 → Stage-4 `OffCurveBeyondChordBand` v677 (below), R0015 v82 →
+v107 (a renumbering: Steiner vertices precede it; same wall). Census over the
+28 cases that reach the chart path: 453 cylinder faces seeded (245 at the rim
+step, 208 after one halving, none STOPped), **29 faces in 7 CORRECT cases
+(R0046 6.86×, R0061 6.57×, R0051 4.11×, …) had been emitting interior edges
+beyond d_ε** — silent, absorbed by downstream bands on those geometries; they
+now meet the contract. R0044's operand (thin-band rims N = 272 by
+`face_rim_pair_phantom_n`) takes 13,083 grid points on face 6 (mean 202 per
+face; the isotropic grid follows the rim step) — +18 s, within budget.
+
+R0026's next wall is the OLD one: v677 — a triple junction where the box's
+bottom edge (A base plane × B lateral plane, `pp_planes`) crosses A's own
+base-plane∩torus edge — relocates 1.9e-4 along the planes' line onto the torus
+(`F_torus(proj)` 1.6e-15, gate 3.0e-3) and then fails the planar partner
+hull containment at `stage4_correct.rs:12483` (the C0065 / #137 class the
+2026-07-18 row named; micro torus R 0.0214 / r 0.0143). Which partner's AABB
+(+d_ε) it escapes is UNMEASURED — the containment reading has no probe yet.
+
 ## 2026-09-11 (late) — R0025 CONVERTED: the Stage-0 fold ladder ear-clipped an exactly collinear sweep chain into zero-area needles because its predicates ran on the f64 round trip of exact positions (amendment 20, `ExactPos`); NEW CANONICAL 281C / 0W / 25E / 4EE / 0T
 
 R0025 (3.7 s; op 2 union, extrude(gear) × extrude(circle) sketched on the
@@ -650,7 +714,7 @@ moved. The 30 ERROR rows are the ACTIVE rows below.
 | ~~R0074~~ | ~~Stage-4 OffCurve v89~~ ring rejected by CDT (FaceId 593) | **FLIPPED CORRECT 2026-09-03 (eaf6aa51); reconciled 2026-09-04 from the committed results.json history** ~~torus∩plane grazing — same class as C0065~~ **DRIFTED + RE-DIAGNOSED 2026-07-29 (`KV2_RING_PROVENANCE`, 70ccf32c): this is no longer a #137 grazing case.** The OffCurve layer is gone; R0074 now fails as a ring-reject and is the **cleanest witness of the planar seam-overlap class**. PLANAR builder, 541 half-edges, **all LineSegment, ZERO interior samples** (sampler exonerated). 7 adjacency runs; all three crossings (111×113/114/115) sit on the run-B→run-C seam at idx 114, with folds of 179.90° / 156.70° / 177.15° against a ring median of 2.86°. The four fold points project onto the v111→v116 chord at t = 0.588, 0.590, 0.471, 0.263 — monotone **DESCENDING** where traversal demands ascending — and v112/v113 are **9.1e-6 apart (near-dup pair)** at the seam. **Control: the ring's OTHER seam (idx 58) turns a genuine 86.6°/80.9° corner and is clean** ⇒ seam does not imply fold; overlapping chain RANGES do. This is the "mint once exactly, share by identity" contract (`docs/yang_junction_research_findings.md`) violated in Stage-5/6 **OUTPUT** assembly, not the Stage-1 input sampling #146 chases | CONFIRMED (2026-07-29; mechanism settled by the positional oracle — 67/78 folds straddle the moved/still boundary, 329 of 2731 verts moved) | **Stage-4 partial relocation of a boundary chain** (with R0011, F0045). NOTE: the conic `relocations` oracle is BLIND here (torus arm records no `t` retag) — an earlier pass wrongly read `n_relocations=0` as "nothing moved" and re-vehicled this row to #146; RETRACTED |
 | ~~R0003~~ | Stage-4 OffCurve v4233 | **FLIPPED CORRECT 2026-08-29 (e8127391); reconciled 2026-09-04 from the committed results.json history** multi-map over-band chain (v4233→v8508); needs ellipse×hyperbola junction handling, band-fixing exhausted (N45/N46). **§4-I12 2026-08-22: v4233 AND v10583 measured as §4.5.1's first confirmed customers** — interior, bounded 1 hop each side by converged vertices sharing cone+plane; the paper's first-strategy repair (midpoint + truncated cross-boundary re-optimize) is the owner, not more junction vocabulary | CONFIRMED (N51/N52; I12) | **§4.5.1 increment 1 (pin case)** — was P3-junction. **inc-2b 2026-08-22: repair landed gated; under `YANG_451=1` the Stage-4 wall clears (11/11 regions) and the case advances to the KV9-F2 developable fold (FaceId 435, cone tan 2.3961 — not a repaired cone ⇒ developable-ring family latent). Post-flip owner: that family** **2026-08-24b: the fold ANCHORED (extended `KV2_PATCH_FOLD_PROBE`): KV9-F2a deep-chord strip fold — a boundary Chord-split node keeps its ORIGINAL chord's sagitta as a permanent off-surface deviation (dev=0.242 vs facet band 0.188), the adjacent Interior splits are exactly on-surface, and a 0.044-thin sliver bridging the layers folds. The deep chords are yang-rs's pair-curve LineSegment polylines at MESH density = the §4.3.4 refine-after-repair debt (trigger fired). Owner: spec `yang_434_output_chord_refinement.md` (design checkpoint landed; R0100/R0020 same mechanism; R0017 is F2b — all-on-surface inversion, unanchored, NOT this fix's customer)** |
 | R0015 | Stage-4 OffCurve v84 | probe 2026-07-18: N51 "no-curve-type" REFUTED — v84 IS in the torus map (`torus=true`); `YANG_TORUS_PROBE` shows the pair Newton relocates it EXACTLY (rho=0, F_torus(proj)=0) and it passes the displacement gate, so the STOP is the **bounded-face containment** check below the gate (`stage4_correct.rs:4225`) — the C0065 grazing-loop-outside-face signature, at MICRO scale (torus R=5.97e-5/r=3.98e-5, coords ~1e-4) | CONFIRMED (#171 pass 2) | P3b-#137 (C0065 containment class, micro-scale) |
-| R0026 | Stage-4 OffCurve v218 | probe 2026-07-18: same as R0015 — v218 `torus=true`, pair Newton rho=9.65e-6 ≪ gate 3.0e-3, then bounded-face containment STOP; micro torus∩plane (R=0.0214/r=0.0143) | CONFIRMED (#171 pass 2) | P3b-#137 (C0065 containment class, micro-scale) |
+| R0026 | ~~Stage-4 OffCurve v218~~ ~~Stage-3 AmbiguousCurve{2,0} (218,220), 2026-08 → 2026-09-11~~ Stage-4 OffCurve v677 (partner-hull containment `:12483`) | **2026-09-11 (night): the Stage-3 layer was KV14 Slice G — the chart CDT's chord contract (section above), FIXED; back at the containment wall, partner AABB unprobed.** probe 2026-07-18: same as R0015 — v218 `torus=true`, pair Newton rho=9.65e-6 ≪ gate 3.0e-3, then bounded-face containment STOP; micro torus∩plane (R=0.0214/r=0.0143) | CONFIRMED (#171 pass 2) | P3b-#137 (C0065 containment class, micro-scale) |
 | R0070 | Stage-4 OffCurve v1028 (+op2 LRR v47) | probe 2026-07-18: v1028 sits on a micro Ellipse edge (1025,1028; major_r 0.028) AND a LineSegment edge (1028,1029) — an ellipse∩line conic junction endpoint whose ellipse relocation lands beyond band at micro scale. ~~**op2 v47** is the surface-pair endpoint-mix STOP, R0044 class~~ **op2's endpoint-mix layer RESOLVED 2026-07-28 (triple-block wiring)** — R0070 raises no LRR at all now; the surviving failure is the v1028 OffCurve half only | CONFIRMED (#171 pass 2; op2 half closed 2026-07-28) | P3-junction (v1028 OffCurve half only) |
 
 ### Reassembly non-2-manifold (8) — the #146 junction-mint bucket

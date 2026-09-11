@@ -9,6 +9,21 @@
 
 ## 0. Honest status (refreshed 2026-06-26; addendum 2026-09-04 below)
 
+> **2026-09-11 (night) refresh.** Canonical corpus **281C / 0W / 25E / 4EE / 0T** (release, 8 jobs, 600 s; wall 726.9 s, F0085 332.2 s, R0044 292.8 s) — category-identical; R0026 advances Stage 3 → Stage 4.
+> **KV14 Slice G LANDED — the Stage-1 chart chord contract** (spec
+> `yang_stage1_curved_holed_patch.md` §"Slice G"; deviations N61): Yang §4.1
+> triangulates the u-v domain to d_ε BEFORE CDT-ing the boundary in; the
+> holed / partial cylinder chart path CDT'd the boundary alone, so its
+> diagonals' azimuthal span was unbounded (R0026: 39°–41° against a 32.7°
+> rim step, 1.50 × d_ε — Stage 3's generator band, which reads d_ε back,
+> correctly refused the arrangement points; 29 cylinder faces in 7 CORRECT
+> cases were up to 6.9× over budget, silently). The cylinder chart now seeds
+> the paper's domain grid at the rim step, lifts Steiner points through the
+> `eval_source` arm, and enforces the bound on every interior edge (P10
+> postcondition, ≤ 3 halvings, typed `Stage1ChartChordBound`). Cone chart
+> faces (Slice E) are the next sub-slice. R0026's remaining wall is the
+> #137 / C0065 torus∩plane partner-hull containment (v677, unprobed).
+>
 > **2026-09-11 (late) refresh.** Canonical corpus **281C / 0W / 25E / 4EE / 0T** (release, 8 jobs, 600 s; wall 702.9 s, F0085 314.7 s honest, R0044 274.6 s, R0025 24.7 s).
 > **R0025 FLIPPED CORRECT** — the last ULP-parse latent: the Stage-0 fold
 > ladder's cavity re-triangulation around a relocated rim mint decided ear

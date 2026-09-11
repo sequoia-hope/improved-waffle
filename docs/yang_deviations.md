@@ -98,6 +98,7 @@ Presented 2026-07-16; the user's answer (2026-07-17) was **"i have no opinion on
 | N58 | RESOLVED by user directive 2026-07-21 (criterion swapped to the paper's own §4.3.4 h/l/α test, d_p=1e-7=TAU_MODEL) | #169 P3b inc-4c: Stage-4 post-merge fan re-CDT + seam-order canonicalization (§4.4.1/§4.3); chain-sample drop now uses Yang's published refinement acceptance test |
 | N59 | RESOLVED 2026-08-24 (same-session fix; P5 convention) | §4.5.3 reversal sweep covered TYPED chains only — pair-relocated (untyped) chains never swept; fixed by the pair-site arm (spec `yang_453_pair_chain_reversal.md`), R0028+R0025 convert, R0032 advances to a NotSupported boundary |
 | N60 | RESOLVED (flipped always-on 2026-08-26; blockers R0054/F0085 fixed structurally) | §4.4.2 output boundary-curve restoration — carried same-input circles re-typed onto their input rims; the KV9-F2a fold family's owner |
+| N61 | RESOLVED for cylinders (2026-09-11, KV14 Slice G); OPEN for cones | Stage-1 curved chart CDT (holed / partial laterals) was boundary-only — no §4.1 domain triangulation to d_ε; interior diagonals exceeded the chord budget downstream bands read back (R0026) |
 | #137 diag | HISTORICAL | #137 (2026-07-15): C0065/R0074 — the torus∩plane solver EXISTS and RUNS; the blocker is mesh RESOLUTION nea… |
 | #137 diag 2 | HISTORICAL | #137 (2026-07-15, follow-up): resolution ALONE is not the fix — it flips the loud STOP into a silent-wrong … |
 
@@ -4315,6 +4316,43 @@ new-crate coverage. Map (legacy → new-crate analog):
 ---
 
 ---
+
+### N61 — Stage-1 curved chart CDT skipped §4.1's domain triangulation (KV14 Slice G, 2026-09-11)
+
+**Paper:** §4.1 (`refs/text/yang2025_hybrid_boolean.txt:404-407`) — "we first
+triangulate the rectangular u-v domain until reaching the given distance
+tolerance d_ε. Then, for each boundary curve, apply constrained Delaunay
+triangulation (CDT) … to retriangulate the two adjacent surfaces around the
+boundaries."
+
+**Implementation (before):** `tessellate_lateral_holed_cdt` (KV14 Slices
+A/B/D/E) unrolled the face's boundary loops into the isometric chart and ran
+`cdt_polygon_with_holes_floodfill` — boundary vertices only, no Steiner
+points. A rim vertex adjacent to a densely sampled window / surface-pair
+chain gets fanned across several rim steps; the flat triangles' radial
+deficit `r(1 − cos(Δθ/2))` exceeds d_ε, which Stage 3's bands (the N46
+generator band, the KV9 pair bands) and Stage 4's 2·d_ε corridor all read
+back as the mesh's promise.
+
+**Measured:** R0026 face 2 — 11 of 151 interior edges at 39.0°–40.9° vs a
+32.7° rim step, 1.50 × d_ε ⇒ `AmbiguousCurve{2,0}` (the band was right).
+Corpus census (`YANG_S1_CHART_LOG`): 453 cylinder chart faces in 28 cases; 29
+faces in 7 CORRECT cases up to 6.86 × d_ε (R0046), silent.
+
+**Fix (cylinders):** seed the chart with the domain grid at `h = r·Δθ_seed`
+(`cdt_polygon_with_holes_refined_seeded`), lift Steiner points onto the
+cylinder (`BRepFace{u=θ, v}` sources), postcondition on every interior edge
+with a ≤ 3-halving ladder and the typed `Stage1ChartChordBound` STOP
+(`stage1_tessellate/chart_chord.rs`; spec `yang_stage1_curved_holed_patch.md`
+§"Slice G"). Category-identical corpus (281C / 0W / 25E / 4EE / 0T); R0026
+advances to Stage 4.
+
+**State:** RESOLVED for the cylinder kind (2026-09-11); **OPEN for the cone
+kind** (Slice E) — a cone chord's deficit depends on the local radius along
+the chart, not Δθ alone; 2,275 cone chart faces in the corpus census are still
+boundary-only (no case is known to STOP on it; R0044's thin-band cone faces
+are the likely first customer). Related: N9 (planar no-Steiner CDT — a plane
+has no chord error, so N9 stays PERMANENT).
 
 ## Remediation priority (OPEN set)
 

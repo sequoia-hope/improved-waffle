@@ -79,6 +79,19 @@ pub enum YangError {
         crossings: usize,
         demand_n: Option<usize>,
     },
+    /// Stage-1 chart chord contract (2026-09-11, spec
+    /// `yang_stage1_curved_holed_patch` "Slice G"; Yang §4.1 "triangulate the
+    /// u-v domain until reaching d_ε"): the seeded chart CDT of a cylinder
+    /// lateral could not bring every INTERIOR (CDT-chosen) edge within the
+    /// face's chord budget after `rounds` domain-grid rounds — the worst
+    /// interior edge's sagitta is `max_ratio` × the budget. Loud, typed: the
+    /// mesh would otherwise carry a chord error Stage 3/4 read back as d_ε
+    /// (R0026's `AmbiguousCurve{2,0}` was that error, one stage later).
+    Stage1ChartChordBound {
+        face: usize,
+        rounds: usize,
+        max_ratio: f64,
+    },
     /// Stage-1 operand SELF-CONTACT (2026-09-07, spec
     /// `yang_stage1_self_contact_guard`; Yang §4.1.1 / §4.2.1 Case IV inside
     /// one operand): the operand's own mesh has `pairs` improper triangle
@@ -329,6 +342,16 @@ impl fmt::Display for YangError {
                 "yang-rs: Stage-1 chart polygon of face {face} crosses itself {crossings} time(s) \
                  (rim segment demand {demand_n:?}): boundary sampling coarser than the face's \
                  feature size"
+            ),
+            Self::Stage1ChartChordBound {
+                face,
+                rounds,
+                max_ratio,
+            } => write!(
+                f,
+                "yang-rs: Stage-1 chart triangulation of face {face} cannot meet the face's \
+                 chord budget after {rounds} domain-grid round(s) (worst interior edge \
+                 {max_ratio:.3}× the budget)"
             ),
             Self::Stage1SelfContact {
                 face_a,

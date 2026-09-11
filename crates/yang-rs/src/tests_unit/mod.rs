@@ -43,6 +43,7 @@ mod p3b_tube_insertion;
 mod s188_envelope;
 mod s194_edge_collapse;
 mod s195_rim_plane_graze;
+mod s1_chart_chord_seed;
 mod s1_chart_crossing;
 mod s1_self_contact;
 mod s434_output_restore;

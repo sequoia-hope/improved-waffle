@@ -1761,6 +1761,12 @@ pub(crate) fn stage1_tessellate_once(
         }
 
         // ---- Per-face dispatch.
+        // KV14 Slice G: the operand's chord budget as Stage 3/4 read it back
+        // (`curved_chord_bound`, else the ellipse-rim bound) — the bound the
+        // cylinder chart CDT's interior edges must meet (spec
+        // `yang_stage1_curved_holed_patch` §"Slice G").
+        let operand_chord_budget: Option<f64> =
+            curved_chord_bound(edges).or_else(|| ellipse_rim_chord_bound(edges));
         let mut face_tri_ranges: Vec<std::ops::Range<usize>> = Vec::with_capacity(faces.len());
         for (f_idx, f) in faces.iter().enumerate() {
             let range_start = out_tris.len();
@@ -1933,7 +1939,13 @@ pub(crate) fn stage1_tessellate_once(
                         edges,
                         &rim_rings,
                         &inserted_rims,
-                        &out_verts,
+                        &mut out_verts,
+                        &mut sources,
+                        ChartBudget {
+                            budget: operand_chord_budget,
+                            demand: face_chord_demands.get(&(f_idx as u32)).copied(),
+                            rim_step: n_seg_out.map(|n| 2.0 * std::f64::consts::PI / n as f64),
+                        },
                         axis_point,
                         axis_dir,
                         radius,
@@ -2039,6 +2051,8 @@ mod chart_crossing;
 pub(crate) use chart_crossing::*;
 mod self_contact;
 pub(crate) use self_contact::*;
+mod chart_chord;
+pub(crate) use chart_chord::*;
 
 /// PR-KV6b-1: CDT tessellation of a planar face whose loops mix straight and
 /// `Curve::Circle` edges (annular sectors, holed circle caps, …). The
@@ -2474,7 +2488,9 @@ pub(crate) fn tessellate_lateral_holed_cdt(
     f: &BRepFace,
     edges: &[BRepEdge],
     chains: &std::collections::BTreeMap<u32, Vec<u32>>,
-    out_verts: &[Point3],
+    out_verts: &mut Vec<Point3>,
+    sources: &mut Vec<TessellationSource>,
+    chart_budget: ChartBudget,
     axis_point: Point3,
     axis_dir: Vector3,
     kind: LateralKind,
@@ -2900,36 +2916,283 @@ pub(crate) fn tessellate_lateral_holed_cdt(
         }
     }
 
-    let local_tris = cherchi_rs::triangulation::cdt_polygon_with_holes_floodfill(
-        &local_verts,
-        &outer_local,
-        &holes_local,
-    )
-    .map_err(|e| {
-        YangError::MalformedTopology(format!("face {f_idx}: holed lateral CDT failed: {e}"))
-    })?;
-
-    // Map back to global 3D and orient by the analytic radial-outward normal
-    // (inward if `reversed` — a cavity wall), matching `tessellate_lateral_face`.
-    for t in &local_tris {
-        let mut tri = [
-            global_of_local[t[0] as usize],
-            global_of_local[t[1] as usize],
-            global_of_local[t[2] as usize],
-        ];
-        let mut n = match kind {
-            LateralKind::Cylinder { .. } => radial_outward_normal(out_verts, &tri, ap, au),
-            LateralKind::Cone { half_angle } => {
-                cone_outward_normal(out_verts, &tri, axis_point, axis_dir, half_angle)
+    // ---- KV14 Slice G: the domain triangulation (spec §"Slice G"). ------
+    // Yang §4.1 triangulates the u-v domain to d_ε FIRST and CDTs the
+    // boundary into it; a boundary-only CDT leaves the azimuthal span of the
+    // diagonals it chooses unbounded (R0026 face 2: 39°–41° against a 32.7°
+    // rim step, 1.50 × d_ε — Stage 3's generator band then correctly refused
+    // the arrangement points). The CYLINDER kind seeds the isometric chart
+    // with a grid at the face's own rim step, lifts the Steiner points onto
+    // the cylinder (the `eval_source` arm, bijective), and enforces the
+    // contract on every INTERIOR edge — a P10 postcondition with ≤ 3 grid
+    // halvings, then a typed STOP. Boundary chords are governed by their own
+    // sampling contracts and are censused only. The cone kind stays
+    // boundary-only (its deficit is not a function of Δθ alone — the next
+    // sub-slice).
+    let boundary_chords: std::collections::HashSet<(u32, u32)> = {
+        let mut set = std::collections::HashSet::new();
+        for lp in std::iter::once(&outer_poly).chain(inner_polys.iter()) {
+            let n = lp.len();
+            for i in 0..n {
+                let (a, b) = (lp[i], lp[(i + 1) % n]);
+                set.insert((a.min(b), a.max(b)));
             }
-        };
-        if f.reversed {
-            n = [-n[0], -n[1], -n[2]];
         }
-        orient_tri(out_verts, &mut tri, n);
-        out_tris.push(tri);
+        set
+    };
+    let seed: Option<(f64, f64)> = match kind {
+        LateralKind::Cylinder { radius } => cylinder_seed_step(radius, chart_budget),
+        LateralKind::Cone { .. } => None,
+    };
+    // Measurement gate (never production): `YANG_S1_CHART_SEED=0` restores
+    // the boundary-only CDT byte-for-byte.
+    let seed_enabled = seed.is_some()
+        && CHART_SEED_OVERRIDE
+            .with(|c| c.get())
+            .unwrap_or_else(|| std::env::var("YANG_S1_CHART_SEED").as_deref() != Ok("0"));
+    let probe_on = std::env::var_os("YANG_S1_CHART_PROBE").is_some();
+    let log_path = std::env::var_os("YANG_S1_CHART_LOG");
+    let theta_of = |verts: &[Point3], g: u32| -> f64 {
+        let p = verts[g as usize].as_array();
+        let w = [p[0] - ap[0], p[1] - ap[1], p[2] - ap[2]];
+        let x = w[0] * e1a[0] + w[1] * e1a[1] + w[2] * e1a[2];
+        let y = w[0] * e2a[0] + w[1] * e2a[1] + w[2] * e2a[2];
+        y.atan2(x)
+    };
+    let is_boundary = |a: u32, b: u32| boundary_chords.contains(&(a.min(b), a.max(b)));
+    let orient_and_push = |tris_g: &[[u32; 3]], verts: &[Point3], out_tris: &mut Vec<[u32; 3]>| {
+        for t in tris_g {
+            let mut tri = *t;
+            let mut n = match kind {
+                LateralKind::Cylinder { .. } => radial_outward_normal(verts, &tri, ap, au),
+                LateralKind::Cone { half_angle } => {
+                    cone_outward_normal(verts, &tri, axis_point, axis_dir, half_angle)
+                }
+            };
+            if f.reversed {
+                n = [-n[0], -n[1], -n[2]];
+            }
+            orient_tri(verts, &mut tri, n);
+            out_tris.push(tri);
+        }
+    };
+    let emit_probe = |line: &str| {
+        if probe_on {
+            eprintln!("[stage1-chart-sag] {line}");
+        }
+        if let Some(path) = log_path.as_ref() {
+            use std::io::Write as _;
+            if let Ok(mut fh) = std::fs::OpenOptions::new()
+                .append(true)
+                .create(true)
+                .open(path)
+            {
+                let case = std::env::var("ASSAY_CASE").unwrap_or_default();
+                let _ = writeln!(fh, "case={case} {line}");
+            }
+        }
+    };
+    let kind_tag = match kind {
+        LateralKind::Cylinder { .. } => "cyl",
+        LateralKind::Cone { .. } => "cone",
+    };
+    // The boundary-only CDT: the path every kind took before Slice G; still
+    // the cone's path, and the cylinder's under the gate. Under the probe /
+    // log it is also the seeded path's `pre_` census (what the contract
+    // would have been broken by).
+    let boundary_only = || -> Result<Vec<[u32; 3]>, YangError> {
+        let local_tris = cherchi_rs::triangulation::cdt_polygon_with_holes_floodfill(
+            &local_verts,
+            &outer_local,
+            &holes_local,
+        )
+        .map_err(|e| {
+            YangError::MalformedTopology(format!("face {f_idx}: holed lateral CDT failed: {e}"))
+        })?;
+        Ok(local_tris
+            .iter()
+            .map(|t| {
+                [
+                    global_of_local[t[0] as usize],
+                    global_of_local[t[1] as usize],
+                    global_of_local[t[2] as usize],
+                ]
+            })
+            .collect())
+    };
+    if !seed_enabled {
+        let tris_g = boundary_only()?;
+        if probe_on || log_path.is_some() {
+            let line = match (kind, seed) {
+                (LateralKind::Cylinder { radius }, Some((step, bound))) => {
+                    let c = chart_sag_census(
+                        &tris_g,
+                        radius,
+                        bound,
+                        |g| theta_of(out_verts, g),
+                        is_boundary,
+                    );
+                    format!(
+                        "face {f_idx} kind={kind_tag} mode=boundary-only(gated) budget={chart_budget:?} \
+                         sag_bound={bound:.3e} step_deg={:.2} tris={} interior_max={:.3} \
+                         interior_violations={} boundary_max={:.3}",
+                        step.to_degrees(),
+                        tris_g.len(),
+                        c.interior_max_ratio,
+                        c.interior_violations,
+                        c.boundary_max_ratio
+                    )
+                }
+                _ => format!(
+                    "face {f_idx} kind={kind_tag} mode=boundary-only budget={chart_budget:?} \
+                     seed=None tris={}",
+                    tris_g.len()
+                ),
+            };
+            emit_probe(&line);
+        }
+        orient_and_push(&tris_g, out_verts, out_tris);
+        return Ok(());
     }
-    Ok(())
+    let (dtheta_seed, sag_bound) = seed.unwrap_or((0.0, 0.0));
+    let radius = match kind {
+        LateralKind::Cylinder { radius } => radius,
+        LateralKind::Cone { .. } => {
+            return Err(YangError::MalformedTopology(format!(
+                "face {f_idx}: chart seeding reached a cone face (internal dispatch error)"
+            )));
+        }
+    };
+    let pre: Option<ChartSagCensus> = if probe_on || log_path.is_some() {
+        let tris_g = boundary_only()?;
+        Some(chart_sag_census(
+            &tris_g,
+            radius,
+            sag_bound,
+            |g| theta_of(out_verts, g),
+            is_boundary,
+        ))
+    } else {
+        None
+    };
+    // Boundary vertices map back by BIT-EXACT chart position (spade stores
+    // the f64s it was given; the seam duplicates are distinct chart points
+    // sharing one global); anything else in the fresh pool is a Steiner
+    // point of the domain grid / refinement, lifted onto the cylinder.
+    let local_of_pos: std::collections::HashMap<(u64, u64), u32> = local_verts
+        .iter()
+        .enumerate()
+        .map(|(l, p)| ((p.x().to_bits(), p.y().to_bits()), l as u32))
+        .collect();
+    let base_len = out_verts.len();
+    const MAX_HALVINGS: usize = 3;
+    let mut worst = 0.0f64;
+    for round in 0..=MAX_HALVINGS {
+        let h = radius * dtheta_seed / f64::from(1u32 << round);
+        let (pool, tris_l) = cherchi_rs::triangulation::cdt_polygon_with_holes_refined_seeded(
+            &local_verts,
+            &outer_local,
+            &holes_local,
+            h * h,
+            [h, h],
+        )
+        .map_err(|e| {
+            YangError::MalformedTopology(format!("face {f_idx}: holed lateral CDT failed: {e}"))
+        })?;
+        // Only pool vertices a KEPT triangle references are lifted: spade
+        // refines the whole convex hull (the exterior strip and the hole
+        // interiors are dropped at emit), and an orphan vertex is not part
+        // of the face.
+        let mut referenced = vec![false; pool.len()];
+        for t in &tris_l {
+            for &k in t {
+                referenced[k as usize] = true;
+            }
+        }
+        let mut global_of_pool: Vec<u32> = Vec::with_capacity(pool.len());
+        let mut n_steiner = 0usize;
+        for (k, p) in pool.iter().enumerate() {
+            if let Some(&l) = local_of_pos.get(&(p.x().to_bits(), p.y().to_bits())) {
+                global_of_pool.push(global_of_local[l as usize]);
+                continue;
+            }
+            if !referenced[k] {
+                global_of_pool.push(u32::MAX);
+                continue;
+            }
+            let theta = {
+                let t = (cut + p.x() / radius).rem_euclid(two_pi);
+                if t > std::f64::consts::PI {
+                    t - two_pi
+                } else {
+                    t
+                }
+            };
+            let v = p.y();
+            let (ct, st) = (theta.cos(), theta.sin());
+            let pt = Point3::new(
+                ap[0] + v * au[0] + radius * (ct * e1a[0] + st * e2a[0]),
+                ap[1] + v * au[1] + radius * (ct * e1a[1] + st * e2a[1]),
+                ap[2] + v * au[2] + radius * (ct * e1a[2] + st * e2a[2]),
+            );
+            let g = out_verts.len() as u32;
+            out_verts.push(pt);
+            sources.push(TessellationSource::BRepFace {
+                face: f_idx as u32,
+                u: theta,
+                v,
+            });
+            global_of_pool.push(g);
+            n_steiner += 1;
+        }
+        let tris_g: Vec<[u32; 3]> = tris_l
+            .iter()
+            .map(|t| {
+                [
+                    global_of_pool[t[0] as usize],
+                    global_of_pool[t[1] as usize],
+                    global_of_pool[t[2] as usize],
+                ]
+            })
+            .collect();
+        let census = {
+            let ov: &[Point3] = out_verts;
+            chart_sag_census(&tris_g, radius, sag_bound, |g| theta_of(ov, g), is_boundary)
+        };
+        if census.interior_violations == 0 {
+            if probe_on || log_path.is_some() {
+                let (pre_max, pre_viol) = pre.map_or((f64::NAN, 0), |c| {
+                    (c.interior_max_ratio, c.interior_violations)
+                });
+                emit_probe(&format!(
+                    "face {f_idx} kind={kind_tag} mode=seeded budget={chart_budget:?} \
+                     sag_bound={sag_bound:.3e} step_deg={:.2} rounds={round} \
+                     steiner={n_steiner} tris={} interior_max={:.3} boundary_max={:.3} \
+                     pre_interior_max={pre_max:.3} pre_violations={pre_viol}",
+                    dtheta_seed.to_degrees(),
+                    tris_g.len(),
+                    census.interior_max_ratio,
+                    census.boundary_max_ratio
+                ));
+            }
+            orient_and_push(&tris_g, out_verts, out_tris);
+            return Ok(());
+        }
+        worst = worst.max(census.interior_max_ratio);
+        out_verts.truncate(base_len);
+        sources.truncate(base_len);
+    }
+    emit_probe(&format!(
+        "face {f_idx} kind={kind_tag} mode=STOP budget={chart_budget:?} sag_bound={sag_bound:.3e} \
+         step_deg={:.2} rounds={} worst={worst:.3}",
+        dtheta_seed.to_degrees(),
+        MAX_HALVINGS + 1
+    ));
+    Err(YangError::Stage1ChartChordBound {
+        face: f_idx,
+        rounds: MAX_HALVINGS + 1,
+        max_ratio: worst,
+    })
 }
 
 /// P3b inc-2 (spec `yang_169_p3b_curved_partner_pierce.md` §3.3): splice
@@ -3169,7 +3432,9 @@ pub(crate) fn tessellate_lateral_face(
     edges: &[BRepEdge],
     rim_rings: &std::collections::BTreeMap<u32, Vec<u32>>,
     inserted_rims: &std::collections::BTreeSet<u32>,
-    out_verts: &[Point3],
+    out_verts: &mut Vec<Point3>,
+    sources: &mut Vec<TessellationSource>,
+    chart_budget: ChartBudget,
     axis_point: Point3,
     axis_dir: Vector3,
     _radius: f64,
@@ -3189,6 +3454,8 @@ pub(crate) fn tessellate_lateral_face(
             edges,
             rim_rings,
             out_verts,
+            sources,
+            chart_budget,
             axis_point,
             axis_dir,
             LateralKind::Cylinder { radius: _radius },
@@ -3404,6 +3671,8 @@ pub(crate) fn tessellate_lateral_face(
             edges,
             rim_rings,
             out_verts,
+            sources,
+            chart_budget,
             axis_point,
             axis_dir,
             LateralKind::Cylinder { radius: _radius },

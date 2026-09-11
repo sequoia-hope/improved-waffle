@@ -627,3 +627,94 @@ be judged by the bounded-patch rule); the apex position-dedup in `to_yang`
 scans only vertices converted so far (order-dependent, but a second vertex
 within `TAU_MODEL` of the apex needs a non-manifold pinch).
 
+
+## Slice G — the domain triangulation (the chart chord contract; 2026-09-11, R0026)
+
+**Yang §4.1 (`refs/text/yang2025_hybrid_boolean.txt:404-407`):** "For each
+surface, we first triangulate the rectangular u-v domain until reaching the
+given distance tolerance d_ε. Then, for each boundary curve, apply constrained
+Delaunay triangulation (CDT) … to retriangulate the two adjacent surfaces
+around the boundaries." The DOMAIN triangulation comes first; the boundary is
+CDT'd into it. Slices A/B/D CDT'd the boundary ALONE (`cdt_polygon_with_holes_floodfill`,
+"boundary-only, no Steiner points"), so nothing bounded the azimuthal span of
+the diagonals the CDT chose. That was the deviation, and it is the bug.
+
+**The contract.** Stage 3 and Stage 4 read the operand's chord budget back —
+`curved_chord_bound` (= `chord_rel()·diag`, the `d_ε` of `[stage1-nseg]`) —
+as an upper bound on how far a mesh point sits from its analytic surface
+(the N46 generator band, the KV9 pair bands, the 2·d_ε relocation gate). For a
+flat triangle on a cylinder of radius r the worst radial deficit is at the
+midpoint of its widest-azimuth edge, `r·(1 − cos(Δθ/2))`. The canonical tube
+meets the budget by construction (every edge spans exactly one rim step; the
+rim's N is the smallest with `max_r·(1 − cos(π/N)) ≤ d_ε`). The chart CDT did
+not.
+
+**R0026 (measured, `YANG_STAGE0_DUMP_DIR` operand `002_union_a.obj`, offline
+exact census):** op 3 unions a box onto cylinder ∪ 357° torus (scale 0.13).
+The body's cylinder lateral (face 2) is a Slice-B periodic strip: a 139-vertex
+bottom loop (the base rim, rising along the torus∩cylinder chain to h = 0.033)
+and the 12-vertex top rim (N = 11, step 32.7°, sag 1.448e-3 ≤ d_ε 1.498e-3).
+Of its 151 interior CDT edges, ELEVEN span 39.0°–40.9° of azimuth (a rim vertex
+at 96.7° fanned onto the chain's 135.7°/136.0° vertices), sag up to 2.25e-3 =
+1.50 × d_ε; zero boundary chords violate. The box plane (parallel to the axis,
+0.0307 from it, a secant of the r = 0.0358 cylinder) cuts triangles 234/235 —
+39° spans — and the arrangement points sit 4.4e-3 from the nearer generator
+in the plane: outside the N46 band `√(B_in² + tol²)` = 3.48e-3 that was built
+for exactly this signature ⇒ `AmbiguousCurve{2, 0}`. The band was right; the
+mesh broke its promise.
+
+**Fix (`tessellate_lateral_holed_cdt`, CYLINDER kind only):**
+
+1. **Seed step.** `chart_chord::cylinder_seed_step(r, budget, rim_step)`:
+   `sag_bound = min(budget, sag(rim_step))` — `budget` = the operand's
+   `curved_chord_bound` (or `ellipse_rim_chord_bound`), `rim_step` = the
+   densest of the face's OWN rim chains (max consecutive azimuth step per rim,
+   min over rims — a self-contact-densified rim tightens the interior with it);
+   `Δθ_seed = 2·acos(1 − sag_bound/r)`, capped at the tube's N = 3 floor
+   (2π/3). Rim-dominated faces get `Δθ_seed == rim_step` (phase-matched grid).
+   No budget and no rim ⇒ boundary-only as before (no invented constant).
+2. **Domain grid + CDT.** `cdt_polygon_with_holes_refined_seeded(chart, outer,
+   holes, max_area = h², seed_spacing = [h, h])`, `h = r·Δθ_seed` in the
+   isometric chart. Steiner points lift onto the cylinder through the
+   `eval_source` cylinder arm (`BRepFace { face, u = θ, v }`, bijective).
+   Boundary vertices map back by bit-exact chart position (seam duplicates
+   keep their shared global).
+3. **Postcondition (P10) + ladder.** Every INTERIOR (CDT-chosen) edge must
+   satisfy `sag(Δθ_e) ≤ sag_bound`; boundary chords are governed by their own
+   contracts (rim N, chain bisection, ellipse band) and are only censused. A
+   violating round is discarded (Steiner vertices truncated) and the grid
+   halved — at most 3 halvings — then the typed `Stage1ChartChordBound
+   { face, rounds, max_ratio }` STOP. The seeded grid leaves a clearance of
+   `h/2` around constraints, so a dense window's first ring of neighbours can
+   sit up to ~1.5·h away in u; one halving covers it.
+4. **Kill-switch / probes.** `YANG_S1_CHART_SEED=0` restores the boundary-only
+   path (measurement gate, never production). `YANG_S1_CHART_PROBE` prints
+   `[stage1-chart-sag] face … pre_interior_max=… rounds=… steiner=…
+   interior_max=… boundary_max=…` (`pre_` = the boundary-only CDT's census,
+   computed only under the probe); `YANG_S1_CHART_LOG=<file>` appends the same
+   line prefixed by `case=$ASSAY_CASE` (the corpus census).
+
+**Cone kind (Slice E) stays boundary-only in this increment** — its chord
+deficit is not a function of Δθ alone (`ρ` varies along the chart) and needs
+its own derivation; ledgered as the next sub-slice. Byte-identical.
+
+Tests: `tests_unit/s1_chart_chord_seed.rs` — the step derivation, the census
+flagging the R0026 fan (RED half), and an end-to-end periodic strip with a
+dense tongue excursion meeting the budget with on-surface, source-faithful
+Steiner vertices and a watertight ribbon.
+
+**Measured (2026-09-11 night, release corpus, 8 jobs, 600 s):** 281C / 0W /
+25E / 4EE / 0T, category-identical; R0026 Stage 3 → Stage 4 (v677 partner-hull
+containment, the #137 class); R0015 v82 → v107 (renumbering). Census: 28 cases
+reach the chart path — 453 cylinder faces seeded (245 at the rim step, 208
+after ONE halving, 0 STOPs; the clearance rule's ~1.5·h neighbour gap is the
+halving's customer), 2,275 cone faces boundary-only. 29 cylinder faces in 7
+CORRECT cases had interior edges beyond d_ε (R0046 6.86×, R0061 6.57×, R0051
+4.11×) — silent, absorbed by downstream bands there. Grid cost: mean 202
+Steiner points per seeded face, max 13,083 (R0044 face 6: the thin-band guard
+had set the operand's rims to N = 272 and the isotropic grid follows the rim
+step); R0044 292.8 s (274.6 s before), F0085 332.2 s (314.7 s) — within the
+600 s budget. Unit tests `tests_unit/s1_chart_chord_seed.rs` (3): the step
+derivation, the census flagging the R0026 fan, and the tongue strip
+(boundary-only violates; seeded meets the budget with on-surface,
+source-faithful Steiner vertices and a watertight ribbon).
