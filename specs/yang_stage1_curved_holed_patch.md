@@ -493,8 +493,54 @@ rule kept. Total corpus case CPU 3070 → 3833 s (the sum-of-sags cut was
 
 **Still recorded, not built.** A crossing with NO rim chord (hyperbola ×
 surface-pair chains) has no density channel — it stays the typed loud stop.
-The planar-CDT path (`tessellate_planar_curved_cdt_face`) has no scan yet
-(no corpus case fails there; census first).
+~~The planar-CDT path (`tessellate_planar_curved_cdt_face`) has no scan yet
+(no corpus case fails there; census first).~~ Built 2026-09-12 (next section).
+
+### The planar path's scan (2026-09-12) — F0082 face 372, the re-entering cap
+
+The first corpus case to fail on the planar-CDT path named the class the
+2026-09-05 section left "census first". F0082 is a 15-op off-axis chained
+extrude stack (each op's sketch plane at the previous op's top centre, tilted
+0–5°); op 12's input is op 11's output, and `face 372` is the base cap of
+op 11's cylinder (r 0.212325) as the union with the rectangle below it left
+it: the cap plane and the rectangle's top meet in a line L through the disc
+centre (the planes differ by ~2°), so the cap survives on ONE side of L
+(above the rectangle top) plus the four wall overhangs. The face's loop
+(`YANG_CDT_PROBE=372`, 11 vertices): L itself (`792 → 780`, a diameter
+chord), the −x wall's 3e-3 stub (`780 → 781`), the 238° rim arc
+(`781 → 823 → 822 → 788 → 821 → 820 → 787 → 819 → 786`, three `Circle`
+edges, chains of 3–4 at the pass's N = 9), and the +x wall (`786 → 792`).
+The two L∩wall corners `792` / `780` are exactly on the cap plane and
+**1.457e-3 inside the rim circle** (fitted r 0.212325; every rim chain vertex
+on it to 1e-16); `792` sits at azimuth 27.6° under the 34.5° rim chord
+`787 → 819` (sag at N = 9: 1.3e-2), 7.7e-3 outside it. Both corner chords
+(`786 → 792` and `792 → 780`) cross that rim chord — the 2-D scan reports
+exactly those two crossings — and `cdt_polygon_with_holes_floodfill` refused
+the ring: `face 372: CDT triangulation failed: CDT backend failed to
+triangulate` — a loud STOP one op AFTER the op that minted the corners, on a
+face that is geometrically valid (a 1.457e-3 sliver between the corner and
+the rim is a real feature at 1.5e3 × MIN_FEATURE_SIZE, not a defect).
+
+| | |
+|---|---|
+| detect | the same `chart_polygon_crossings` scan, run on the projected boundary polygons (outer + holes) of every face that reaches `tessellate_planar_curved_cdt_face`, BEFORE either CDT variant (plain / keep-interior). The all-line planar path (`tessellate_planar_cdt_face`) carries no rim chords and gets no scan; the full-rim cap (`tessellate_cap_face`) has no other vertices |
+| derive | `chart_rim_demand` (`chart_crossing.rs`), the chart-generic form of the cone rule: a rim chord's circle is described by a `RimChart { center, ell, radius }` — on a cone `center = 0, ell = ‖first‖` (the development; `cone_chart_rim_demand` is now that wrapper, byte-identical), on a plane the circle IS its chart image (`center` = the `Curve::Circle` centre projected by the face's own `ortho_basis` frame, `ell = radius`), so the crossed corner's distance is its exact in-plane radial gap. Owner attribution as at the cone site (`loop_polyline_attributed`: a chord belongs to the edge its first vertex was sampled from) |
+| endpoint rule (CHANGED, both charts) | `d` = the smaller of the crossed chord's endpoint distances **among the endpoints off the rim** (band `1e-9·(1 + ell)`, the rim sampler's own on-circle band). The 2026-09-05 rule took the plain min, so a chord LEAVING a rim vertex for a point just inside the rim (F0082's `786 → 792`) measured 0 and derived nothing; the crossing exists because of the inside point — the rim chords must pass outside IT — and near the rim vertex the chord departs the circle more steeply than any rim chord of a shorter span, so no rim chord can cross it there. A chord with both endpoints on the rim still derives nothing. On F0082 the diameter chord derives the same N either way; the rule matters when the leaving chord is the only crossed one. R0044's cone demand is unchanged by construction (the max over crossings can only grow, and its governing crossing's inside vertex already governed) |
+| F0082 face 372 | `sag(0.212325, N) ≤ 1.457e-3 / 2` ⇒ N = 38 (sag 7.25e-4; N = 37 gives 7.65e-4); the driver re-runs op 12's input pass at N = 38 (from 9), the corners fall inside every rim chord, the ring is simple |
+
+Pins (`tests_unit/s1_planar_chart_crossing.rs`): the measured face-372 shape
+as one planar face (r 0.212325, corners 1.457e-3 inside at 27.6° / 207.6°,
+walls at −28° / 210°, the 238° arc, normal −z) — one pass reports ≥ 2
+crossings with demand N = 38 exactly (RED without the wiring: the fixture
+reproduces `face 0: CDT triangulation failed: CDT backend failed to
+triangulate` verbatim — mutation-checked), and the driver tessellates it
+fold-free, every triangle facing −z, area = the 238° segment minus the
+below-L quadrilateral within 1 % (measured deficit 3.9e-4 ≈ ⅔·sag·arc), both
+corners kept as output vertices, ≥ 26 rim vertices; the planar demand
+measures from the circle's centre, not the chart origin. The cone pin
+`rim_demand_halves_the_crossed_vertex_distance` now asserts the endpoint
+rule (a chord leaving the rim derives the inside point's N; both-on-rim ⇒
+`None`).
 
 ## The strip arm's dispatch (2026-09-07) — R0032 face 3, the chord-sided band
 

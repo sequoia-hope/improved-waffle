@@ -9,6 +9,8 @@
 
 ## 0. Honest status (refreshed 2026-06-26; addendum 2026-09-04 below)
 
+> **2026-09-12 (night) refresh.** Canonical corpus **285C / 0W / 20E / 4EE / 0T + 3 UNSUPPORTED(coplanar-boolean)** (release, 8 jobs, 600 s; wall 845 s at host load ≈ 8; F0085 376.2 s, R0044 355.5 s). F0082 CONVERTED — the planar curved-CDT path now runs the §4.5.4 chart-crossing scan the cone charts had since 2026-09-05 (spec `yang_stage1_curved_holed_patch.md` "The planar path's scan"; `chart_rim_demand` is the chart-generic rim rule, the crossed-endpoint rule reads the endpoint OFF the rim): a re-entering cap whose plane∩plane∩wall corners sit 1.457e-3 inside the rim under a 34.5° rim chord derives N = 38 and the driver's retry lands it. Zero detail moves elsewhere. Remaining actionable ERROR tail: 11 (ledger 2026-09-12 (night) section).
+>
 > **2026-09-12 (later) refresh.** Canonical corpus **284C / 0W / 21E / 4EE / 0T + 3 UNSUPPORTED(coplanar-boolean)** (release, 8 jobs, 600 s; wall 730 s; F0085 331.2 s, R0044 295.9 s) — category-identical.
 > **R0050 advances op 2 → op 3** (spec `yang_stage4_conic_triple_junction.md`,
 > "Torus-edge candidates"): a torus∩cylinder pair-chain endpoint that is

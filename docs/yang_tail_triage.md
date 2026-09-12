@@ -43,6 +43,72 @@ after the reconciliation run (release, 8 jobs, 360 s; wall 577 s, F0085
 regression since 2026-08-01 is outstanding (checked over every commit of
 `results.json`).
 
+## 2026-09-12 (night) — F0082 CONVERTED: the planar CDT path ran no §4.5.4 chart scan, so a re-entering cap whose plane∩plane∩wall corners sit 1.457e-3 inside its rim (under a 34.5° rim chord at N = 9) STOPped at the CDT's "failed to triangulate" one op after the corners were minted; the scan now runs on every planar curved-CDT face and derives the rim density that clears the corner (N = 38); NEW CANONICAL 285C / 0W / 20E / 4EE / 0T (+3 U)
+
+F0082 (15 ops, off-axis chained extrudes, tilt 0–5°; each sketch plane at
+the previous op's top centre). The ledger row (`near-duplicate junction
+verts v588≈v601`, #169 Phase B) was STALE: the live STOP was op 12's INPUT
+gate — `yang-rs rejected the converted input B-Rep: malformed B-Rep
+topology: face 372: CDT triangulation failed: CDT backend failed to
+triangulate` at 13.8 s.
+
+**Anatomy (measured, `YANG_CDT_PROBE=372` + a fitted-circle script over the
+dumped 3-D loop).** Face 372 is the base cap of op 11's cylinder
+(r 0.212325, centre = op 10's top centre) as op 11's union left it: the cap
+plane and the rectangle's top plane pass through the same point and differ
+by ~2°, so they meet in a line L through the disc centre (azimuth 27.6°);
+the cap survives above the rectangle top on one side of L plus the wall
+overhangs. The loop (11 vertices, 6 edges): L as a diameter chord
+`792 → 780`, the −x wall's 3e-3 stub `780 → 781`, three `Circle` edges
+sampled 3–4 deep covering the 238° rim arc `781 … 786`, and the +x wall
+`786 → 792`. Every rim chain vertex is on the fitted circle to 1e-16; the
+two L∩wall corners `792` (27.6°) and `780` (207.6°) are exactly on the cap
+plane and **1.457e-3 inside the rim** — a real feature (the 0.0019-wide
+overhang sliver between the wall and the rim at the corner's height), not a
+defect. The pass's shared N was 9 (`[stage1-nseg] n_seg=9 d_eps=1.38e-2`,
+19 circles), so the rim chord `787 → 819` spans 34.5° with sagitta 1.3e-2
+and passes 7.7e-3 INSIDE corner 792; both corner chords cross it (the 2-D
+scan reports exactly `(792→780) × (787→819)` and `(787→819) × (786→792)`),
+the ring is not simple, and the flood-fill CDT refused it. The 2026-09-05
+thin-band section had recorded this exact gap: "The planar-CDT path has no
+scan yet (no corpus case fails there; census first)."
+
+**Fix (spec `yang_stage1_curved_holed_patch.md` "The planar path's scan").**
+`tessellate_planar_curved_cdt_face` runs `chart_polygon_crossings` on its
+projected boundary polygons before either CDT variant and, on a crossing,
+returns the typed `Stage1ChartCrossing` with the rim demand from
+`chart_rim_demand` — the cone rule made chart-generic (`RimChart {center,
+ell, radius}`; the cone wrapper is byte-identical; in the plane the circle
+IS its chart image, so the crossed corner's distance is its exact in-plane
+radial gap). The driver's existing §4.5.4 retry re-runs the pass at that N.
+Endpoint rule CHANGED on both charts: `d` is the smaller crossed-endpoint
+distance among the endpoints OFF the rim (band `1e-9·(1 + ell)`) — the old
+plain min measured a chord leaving a rim vertex as 0 and derived nothing,
+although the crossing exists because of the chord's inside endpoint (the
+rim chords must pass outside IT; near the rim vertex the chord departs the
+circle more steeply than any shorter rim chord). Both-on-rim still derives
+nothing. Measured: demand N = 38 (`sag(0.212325, 38) = 7.25e-4 ≤ 7.29e-4`;
+N = 37 gives 7.65e-4); `[stage1-chart-refine] round 0: face 372
+crossings=2 N 9 -> 38` on every re-tessellation of op 12's input; op 12
+completes and so do ops 13–15: F0082 SUPPORTED_CORRECT 53.8 s, all in-line
+oracles (genus 0, watertight, 15 monotone volume steps).
+
+Pins: `tests_unit/s1_planar_chart_crossing.rs` (the measured face-372 shape
+as one planar face — one pass reports 2 crossings with demand exactly 38,
+RED without the wiring with F0082's verbatim failure text, mutation-checked;
+the driver tessellates it fold-free within 1 % of the exact area with both
+corners as output vertices; the planar demand measures from the circle's
+centre) and the updated cone pin `rim_demand_halves_the_crossed_vertex_distance`
+(a chord leaving the rim derives the inside point's N; both-on-rim ⇒ None).
+
+Corpus (release, 8 jobs, 600 s; wall 845 s on a host at load ≈ 8 — F0085
+376.2 s, R0044 355.5 s, F0082 61.7 s): **285C / 0W / 20E / 4EE / 0T,
+3 UNSUPPORTED(coplanar-boolean)** — exactly one category move (F0082
+ERROR → SUPPORTED_CORRECT), ZERO detail moves (a simple polygon costs one
+scan; no other face crossed). NOT smoke-pinned: under the debug gate F0082 measured `TIMEOUT — timeout after 720s CPU` (the R0044 rule: a > 11× debug ratio; the snapshot + the yang-rs unit pins carry the conversion). Remaining actionable ERROR
+tail: 11 (R0038, R0050, R0100, F0058, F0060, C0044, C0058, C0065, R0019,
+R0085, R0081); loud by design: 9.
+
 ## 2026-09-12 (later) — R0050 advances a wall: a TORUS-edge endpoint that is also a conic endpoint with exactly three incident surfaces was the torus block's unconditional endpoint-mix STOP; the triple block now admits it (op 2 completes; op 3 STOPs at §4-I9 `RelocationCrossedCarrierVertex` v413, the §4.5.1 corner-transit class); canonical 284C / 0W / 21E / 4EE / 0T (+3 U) category-identical
 
 R0050 (0.8 s; revolve(rectangle, boss) 345° + revolve(circle, cut) 115° +
@@ -950,7 +1016,7 @@ moved. The 30 ERROR rows are the ACTIVE rows below.
 
 | Case | Loud error | Root cause | Confidence | Vehicle |
 |---|---|---|---|---|
-| F0082 | non-2-manifold | near-duplicate junction verts v588≈v601 (0.012 apart 3D, ~4e-4 in-plane = off-plane); spurious in-patch overlap triangle; re-CDT REFUTED as tool | CONFIRMED (#169 Phase B, 0b655da2) | P3a-#146 |
+| ~~F0082~~ | ~~non-2-manifold~~ ~~input `face 372: CDT triangulation failed`~~ **FLIPPED CORRECT 2026-09-12 (the planar chart scan, section above)** | ~~near-duplicate junction verts v588≈v601 (0.012 apart 3D, ~4e-4 in-plane = off-plane); spurious in-patch overlap triangle; re-CDT REFUTED as tool~~ the live wall (STALE row until 2026-09-12) was op 12's INPUT tessellation: op 11's base cap re-entered with its two plane∩plane∩wall corners 1.457e-3 inside the rim under a 34.5° rim chord at N = 9; the planar CDT path had no §4.5.4 scan. The scan derives N = 38, the driver retries, all 15 ops complete (53.8 s release) | CONFIRMED (2026-09-12 probe, `YANG_CDT_PROBE=372`) | ~~P3a-#146~~ DONE (Stage-1 planar chart scan) |
 | ~~R0095~~ | ~~non-2-manifold~~ | ~~EVERY face has a ~1e-24-area boundary triple — upstream degenerate junction geometry~~ **FLIPPED CORRECT 2026-07-28 (#195 inc-5):** the always-on rim boost + rim-snap remove the degenerate boundary triples at the source | — | ~~P3a-#146~~ DONE |
 | C0044 | non-2-manifold | 3-patch junction fires the Stage-4 gate. **P3a increment-0 probe (2026-07-18): ZERO transversal pierce candidates — the junction is coplanar contact (flush annular stack), NOT the pierce-mint class** | CONFIRMED (#169 Phase 0 + #146 inc-0) | ~~P3a-#146~~ Stage-0/M8 coplanar-seam family |
 | F0064 | non-2-manifold | wall vert 0.083 off floor plane; minted in Stage-4 mutation window OR inherited via lineage-less chained B (4 hypotheses eliminated, N51 session) | PARTIAL (#146) | P3a-#146 |

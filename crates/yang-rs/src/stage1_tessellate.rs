@@ -2128,6 +2128,77 @@ pub(crate) fn tessellate_planar_curved_cdt_face(
         );
     }
 
+    // §4.5.4 at the PLANAR chart (2026-09-12, F0082 face 372; spec
+    // `yang_stage1_curved_holed_patch` "The planar path's scan"): the face's
+    // boundary polygon must be SIMPLE before the CDT sees it — the same
+    // detect-then-refine the cone charts run. A cap re-entering the next
+    // boolean carries the previous output's corner vertices, and a corner
+    // that sits inside a rim chord's sagitta band (the near-coplanar stack's
+    // plane∩plane line meeting a wall 1.457e-3 inside the r 0.2123 rim, under
+    // a 40° chord at N = 9) puts the loop's two corner chords across that rim
+    // chord; the flood-fill CDT then either refuses loud (F0082: "CDT backend
+    // failed to triangulate") or paves the crossing silently (the R0040 pin).
+    // In the plane a rim circle IS its chart image (`ell = radius`, centre
+    // projected like every loop vertex), so the demand reads the exact
+    // in-plane radial distance of the crossed corner; the driver re-runs the
+    // pass at that N (`CHART_REFINE_ROUNDS`). A simple polygon costs one scan
+    // and is byte-identical.
+    {
+        let chart_polys: Vec<Vec<cad_primitives::Point2>> = std::iter::once(&outer_local)
+            .chain(holes_local.iter())
+            .map(|lp| lp.iter().map(|&l| local_verts[l as usize]).collect())
+            .collect();
+        let crossings = chart_polygon_crossings(&chart_polys);
+        if !crossings.is_empty() {
+            // Owner edge of every chart chord: the edge its FIRST vertex was
+            // sampled from (the cone site's convention — an arc's start
+            // vertex attributes to the arc, its end vertex to the next edge,
+            // so an arc's last chord is the arc's and a line leaving a rim
+            // vertex is the line's).
+            let mut owner_of: std::collections::HashMap<u32, u32> =
+                std::collections::HashMap::new();
+            for lp in std::iter::once(&f.outer_loop).chain(f.inner_loops.iter()) {
+                if let Ok(attr) = loop_polyline_attributed(f_idx, lp, edges, chains) {
+                    for (g, e) in attr {
+                        owner_of.entry(g).or_insert(e);
+                    }
+                }
+            }
+            let local_polys: Vec<&Vec<u32>> = std::iter::once(&outer_local)
+                .chain(holes_local.iter())
+                .collect();
+            let rim = |(pi, k): ChartSeg| -> Option<RimChart> {
+                let g = global_of_local[local_polys[pi][k] as usize];
+                match owner_of.get(&g).map(|&e| edges[e as usize].curve) {
+                    Some(Curve::Circle { center, radius, .. }) => {
+                        let c = center.as_array();
+                        Some(RimChart {
+                            center: (
+                                c[0] * e1a[0] + c[1] * e1a[1] + c[2] * e1a[2],
+                                c[0] * e2a[0] + c[1] * e2a[1] + c[2] * e2a[2],
+                            ),
+                            ell: radius,
+                            radius,
+                        })
+                    }
+                    _ => None,
+                }
+            };
+            let demand_n = chart_rim_demand(&chart_polys, &crossings, rim);
+            if std::env::var_os("YANG_SPLIT_PROBE").is_some() {
+                eprintln!(
+                    "[stage1-chart-crossing] planar face {f_idx} crossings={} demand={demand_n:?}",
+                    crossings.len()
+                );
+            }
+            return Err(YangError::Stage1ChartCrossing {
+                face: f_idx,
+                crossings: crossings.len(),
+                demand_n,
+            });
+        }
+    }
+
     // Diagnostic probe (env-gated, zero-cost off): dump the exact CDT inputs
     // (bit-precise) + outputs for one face, to extract minimal repros of
     // boundary-conformality failures.

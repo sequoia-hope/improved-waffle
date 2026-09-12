@@ -1286,6 +1286,23 @@ fn smoke_corpus_boundary_categories() {
         // corner and relocates it along the box edge (the PR-KV11 line
         // metric: ρ 7.7e-3 / 8.7e-3 against a 3.27e-2 gate). 1.0 s release.
         ("C0067", Category::SupportedCorrect),
+        // F0082 FLIPPED (2026-09-12, the planar chart scan): op 12's input
+        // carried op 11's base cap with the two corners where the
+        // near-coplanar stack's plane∩plane line meets the rectangle walls
+        // 1.457e-3 INSIDE the rim (r 0.2123) under a 34.5° rim chord at the
+        // pass's N = 9 — both corner chords crossed it and the planar CDT
+        // refused the ring loud ("face 372: CDT triangulation failed"). The
+        // planar curved-CDT path now runs the §4.5.4 crossing scan the cone
+        // charts had since 2026-09-05; `chart_rim_demand` derives N = 38
+        // from the corner's exact in-plane gap and the driver's retry lands
+        // the cap. All 15 ops complete. 61.7 s release — and, like R0044
+        // below, deliberately NOT pinned here: under this gate's debug build
+        // it measured `F0082: expected SUPPORTED_CORRECT, got TIMEOUT —
+        // timeout after 720s CPU` (2026-09-12, a > 11× debug ratio on a
+        // 15-op exact-arithmetic chain). Its conversion is pinned by the
+        // committed corpus snapshot (`app/tests/cases/assay/results.json`)
+        // and by the yang-rs unit pins in `tests_unit/s1_planar_chart_crossing.rs`
+        // (the face-372 shape as one planar face, RED without the scan).
         // R0044 FLIPPED (2026-09-05, thin-band chart guard) is deliberately
         // NOT pinned here: it costs ≈ 270 s CPU in release — ≈ 1200 s in the
         // debug build this gate runs under on CI and in `test.sh` — against

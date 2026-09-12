@@ -39,9 +39,12 @@ fn a_bowtie_crosses_once_and_a_rim_chord_over_a_notch_crosses_twice() {
 
 /// The demand: a rim chord (3-D radius 10) at chart radius 14.142 crossed by
 /// a notch chord whose nearest endpoint sits 0.02 inside the rim — the rim
-/// must keep `sag ≤ 0.01`, i.e. N ≥ 71. (A chord that SHARES a vertex with
-/// the rim sits at distance 0 and derives nothing; a crossing with no rim
-/// chord derives nothing.)
+/// must keep `sag ≤ 0.01`, i.e. N ≥ 71. A crossing with no rim chord derives
+/// nothing. A chord that LEAVES a rim vertex for that 0.02-inside point
+/// derives the same N from the inside point (2026-09-12: the on-rim endpoint
+/// is not a distance, it is the rim — F0082's wall chord leaves the rim for
+/// the corner 1.457e-3 inside it); a chord with BOTH endpoints on the rim
+/// derives nothing.
 #[test]
 fn rim_demand_halves_the_crossed_vertex_distance() {
     let ell = 14.142_f64;
@@ -63,11 +66,27 @@ fn rim_demand_halves_the_crossed_vertex_distance() {
         None,
         "no rim chord, nothing to refine"
     );
-    // Chord 1→2 shares vertex 1 with the rim: distance 0, nothing derived.
-    let touching = vec![((0usize, 0usize), (0usize, 1usize))];
+    // Chord 1→2 leaves rim vertex 1 for the vertex 0.02 inside: the inside
+    // endpoint governs — the same N ≥ 71.
+    let leaving = vec![((0usize, 0usize), (0usize, 1usize))];
     assert_eq!(
-        cone_chart_rim_demand(&polys, &touching, |(_, k)| (k == 0).then_some(10.0)),
-        None
+        cone_chart_rim_demand(&polys, &leaving, |(_, k)| (k == 0).then_some(10.0)),
+        Some(n),
+        "the inside endpoint of a chord leaving the rim governs"
+    );
+    // A chord with both endpoints ON the rim (a line between two rim
+    // points) derives nothing: there is no inside point to clear.
+    let on_rim = vec![vec![
+        p2(ell, 0.0),
+        p2(ell * 0.1_f64.cos(), ell * 0.1_f64.sin()),
+        p2(ell * 0.3_f64.cos(), ell * 0.3_f64.sin()),
+        p2(ell * 0.2_f64.cos(), ell * 0.2_f64.sin()),
+    ]];
+    let synthetic = vec![((0usize, 0usize), (0usize, 2usize))];
+    assert_eq!(
+        cone_chart_rim_demand(&on_rim, &synthetic, |(_, k)| (k == 0).then_some(10.0)),
+        None,
+        "both crossed endpoints on the rim: nothing to clear"
     );
 }
 
