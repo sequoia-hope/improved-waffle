@@ -9,6 +9,23 @@
 
 ## 0. Honest status (refreshed 2026-06-26; addendum 2026-09-04 below)
 
+> **2026-09-12 refresh.** Canonical corpus **284C / 0W / 21E / 4EE / 0T + 3 UNSUPPORTED(coplanar-boolean)** (release, 8 jobs, 600 s; wall 712 s; F0085 317.6 s, R0044 293.2 s).
+> **C0067 FLIPPED CORRECT** — junction-map triple candidates (spec
+> `yang_stage4_conic_triple_junction.md`, 2026-09-12 amendment): the polar
+> notch's four {sphere, wall, wall} corners are junctions of two
+> NON-coplanar sphere-section circles; `insert_circle_or_junction` demoted
+> each out of `vert_circle` into `vert_circle_junction`, a map the Stage-4
+> triple block never scanned (`n_maps = 0` — the fourth junction map found
+> counting zero, after KV16 same-type, the R0044 pair bucket and M5 K11's
+> line×circle), and the M8 disc∩disc closed form (coplanar lens corners
+> only) returned `None` → `LocalRefinementRequired`. The block now admits a
+> non-coplanar pair (`stage4_relocate::circles_coplanar`, the closed form's
+> own eligibility test, shared) as a three-surface corner and relocates it
+> along the box edge under the PR-KV11 line metric (ρ 7.7e-3 / 8.7e-3 vs
+> gate 3.27e-2). Exactly one category move, zero detail moves. 12 of the
+> 21 remaining ERROR rows are actionable (9 are loud by design); the
+> ledger's 2026-09-12 section lists them with their live walls.
+>
 > **2026-09-11 (night, fourth) refresh.** Canonical corpus **283C / 0W / 22E / 4EE / 0T + 3 UNSUPPORTED(coplanar-boolean)** (release, 8 jobs, 600 s; F0085 335.0 s, R0044 290.7 s).
 > **R0070 ERROR → UNSUPPORTED(coplanar-boolean)**: Stage-6's curved branch
 > labelled a bounded cylinder patch's outer loop as the MOST-EDGES cycle

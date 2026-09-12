@@ -326,3 +326,99 @@ fn closed_sphere_boolean_equatorial_half_cut() {
         "hemisphere mesh volume {vol} vs analytic {exact} (5% facet band)"
     );
 }
+
+// =========================================================================
+// 6. Boolean re-entry — the C0067 polar notch (2026-09-12)
+// =========================================================================
+
+/// C0067's shape: a square pocket cut down through the north pole. Its four
+/// vertical box edges pierce the sphere at `{sphere, wall, wall}` corners
+/// where two NON-coplanar sphere-section circles meet. yang's Stage 4 used
+/// to demote each corner into the M8 disc∩disc (coplanar lens) junction
+/// map, whose closed form returned `None` → `LocalRefinementRequired`; the
+/// triple block now admits the pair as a three-surface corner (spec
+/// `yang_stage4_conic_triple_junction`, "Junction-map candidates").
+#[test]
+fn closed_sphere_boolean_polar_notch() {
+    let mut arena = BrepArena::new();
+    let r = revolve_closed_sphere(&mut arena);
+    let ball = tessellate(&arena, r.solid).expect("ball tessellates");
+    let ball_vol = mesh_signed_volume(&ball);
+
+    // Pocket x∈[CX−H, CX+H], y∈[−H, H], z∈[FLOOR, 2]: the floor lies inside
+    // the ball (corner distance² 2H² + FLOOR² = 0.43 < 1) and the four
+    // vertical edges pierce the sphere at z = √(1 − 2H²) ≈ 0.906.
+    const H: f64 = 0.3;
+    const FLOOR: f64 = 0.5;
+    let cutter_profile = Profile::new(
+        Point3::new(0.0, 0.0, FLOOR),
+        Vector3::new(1.0, 0.0, 0.0),
+        Vector3::new(0.0, 1.0, 0.0),
+        vec![
+            Point2::new(CX - H, -H),
+            Point2::new(CX + H, -H),
+            Point2::new(CX + H, H),
+            Point2::new(CX - H, H),
+        ],
+        vec![],
+    )
+    .expect("notch profile");
+    let cutter = extrude(
+        &mut arena,
+        &cutter_profile,
+        Vector3::new(0.0, 0.0, 1.0),
+        2.0 - FLOOR,
+    )
+    .expect("notch box");
+
+    let out = boolean_op(&mut arena, r.solid, cutter.solid, BoolOp::Subtract)
+        .unwrap_or_else(|e| panic!("sphere − polar notch subtract failed: {e:?}"));
+
+    // Topology: one shell, genus 0; sphere (now holed at the pole) + floor +
+    // four walls.
+    let report = validate_solid(&arena, out).expect("notched sphere validates");
+    assert_eq!(report.shells, 1, "one connected shell");
+    assert_eq!(report.genus, 0, "a pocket is genus 0");
+    assert_eq!(report.euler_lhs, report.euler_rhs);
+    assert_eq!(report.faces, 6, "sphere + floor + 4 walls");
+
+    let mesh = tessellate(&arena, out).expect("notched sphere tessellates");
+    assert_mesh_sane(&mesh, "notched sphere");
+    assert_watertight(&mesh, "notched sphere");
+
+    // The four exact corners are output vertices: (CX ± H, ±H, √(1 − 2H²)).
+    let zc = (R * R - 2.0 * H * H).sqrt();
+    for (sx, sy) in [(1.0, 1.0), (-1.0, 1.0), (-1.0, -1.0), (1.0, -1.0)] {
+        let c = [CX + sx * H, sy * H, zc];
+        let hit = mesh.positions.chunks_exact(3).any(|p| {
+            ((p[0] - c[0]).powi(2) + (p[1] - c[1]).powi(2) + (p[2] - c[2]).powi(2)).sqrt() <= 1e-9
+        });
+        assert!(hit, "exact corner {c:?} is not an output vertex");
+    }
+
+    // Volume: the pocket removes ∫∫_{|x|,|y|≤H} (√(1 − x² − y²) − FLOOR) dx dy
+    // (midpoint rule, 400²: error ≪ 1e-6).
+    let n = 400;
+    let h = 2.0 * H / n as f64;
+    let mut pocket = 0.0;
+    for i in 0..n {
+        for j in 0..n {
+            let x = -H + (i as f64 + 0.5) * h;
+            let y = -H + (j as f64 + 0.5) * h;
+            pocket += ((R * R - x * x - y * y).sqrt() - FLOOR) * h * h;
+        }
+    }
+    let exact = 4.0 / 3.0 * PI * R * R * R - pocket;
+    let vol = mesh_signed_volume(&mesh);
+    assert!(
+        (vol - exact).abs() <= 0.05 * exact,
+        "notched mesh volume {vol} vs analytic {exact} (5% facet band)"
+    );
+    // The pocket itself is attested against the SAME tessellation policy's
+    // ball: the cut removes at least half the analytic pocket.
+    assert!(
+        ball_vol - vol >= 0.5 * pocket,
+        "ball {ball_vol} − notched {vol} = {} vs pocket {pocket}",
+        ball_vol - vol
+    );
+}

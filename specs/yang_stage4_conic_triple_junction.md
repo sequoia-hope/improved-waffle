@@ -1,5 +1,52 @@
 # Spec: Stage-4 general conic triple-surface junction relocation
 
+> **Junction-map candidates amendment (2026-09-12, C0067): the triple
+> block's candidate scan includes the circle∩circle JUNCTION map, and a
+> non-coplanar circle pair counts as the two curves its demotion already
+> proved.** The block's trigger was "present in ≥ 2 of the single-curve
+> maps"; `insert_circle_or_junction` DEMOTES a vertex carrying two distinct
+> circles out of `vert_circle` into `vert_circle_junction`, so the vertex
+> then sat in ZERO scanned maps and the M8 disc∩disc arm — whose closed
+> form `coplanar_circle_circle_intersection` is for COPLANAR lens corners
+> only — returned `None` → `LocalRefinementRequired`. That is the fourth
+> junction map found counting zero toward `n_maps` (KV16 same-type, the
+> R0044 surface-pair bucket, M5 K11's line×circle — `specs/
+> m5_surface_pair_curve.md` "The triple block never saw it either"), each
+> closed per map. Measured on C0067 (sphere r 0.4 at (0, 0, 0.5) via an
+> on-axis circle revolve, cut by the polar notch |x|, |y| ≤ 0.15;
+> `YANG_V_PROBE=128`, `YANG_LRR_PROBE`, 2026-09-12): v128 = (0.15, 0.15,
+> 0.8315) is the endpoint of two `Curve::Circle` edges — sphere ∩ {x =
+> 0.15} and sphere ∩ {y = 0.15}, both r 0.3708, normals x̂ / ŷ — with
+> `circle_junction=true` and every other flag false; its `inc0` surfaces
+> dedup to exactly three {Sphere, Plane x, Plane y}: the box EDGE piercing
+> the sphere, the "two planes among the three" case the 2026-09-11 line
+> metric below was written for. Wired: the candidate chain adds
+> `vert_circle_junction.keys()`; the `n_maps < 2` skip is bypassed when the
+> pair is NOT coplanar (`stage4_relocate::circles_coplanar`, the closed
+> form's own eligibility test, factored out so both sites share one
+> identity band — MIN_FEATURE_SIZE on the normals' cross product and the
+> centre offset); the bookkeeping tail removes the vertex from
+> `vert_circle_junction` so neither the disc∩disc arm nor its no-skip audit
+> sees it. A COPLANAR pair is untouched (its closed form stays the owner;
+> byte-identical), as is every ≠ 3-surface junction (the block's own
+> bails). Result: all four notch corners relocate along the box edge —
+> ρ 7.6544e-3 / 8.7163e-3 against the line-corridor gate 3.2688e-2
+> (d_ε 1.3856e-2, |L̂·n| 0.8478) — and C0067 is SUPPORTED_CORRECT with the
+> exact-volume oracle green (1.0 s release). Pins:
+> `tests_unit/s4_circle_pair_corner.rs` (the pair is not coplanar and the
+> lens arm declines it; the coplanar lens keeps its closed form; the
+> identity band; the Newton lands on the exact corner (H, H, 0.5 +
+> √(r² − 2H²)) within the line corridor) and kernel-v2
+> `kv6d_sphere_revolve::closed_sphere_boolean_polar_notch` (RED at
+> `LocalRefinementRequired` v156 without the candidate wiring — mutation
+> checked — GREEN with it: 6 faces, genus 0, watertight, the four exact
+> corners are output vertices, the pocket volume is removed). The other
+> junction maps (`vert_junction` line×circle, `vert_ell_junction`,
+> `vert_pp_circle_junction`) still count zero; no corpus case STOPs on
+> them today, and routing a vertex their closed forms already resolve
+> through the Newton would change gates without a customer — left as the
+> documented class, to be closed per map when a STOP names one.
+
 > **Junction-line amendment (2026-09-11, R0077): the displacement gate of a
 > 3-surface junction with TWO PLANES is the line corridor
 > `2·d_ε / |L̂·n₃|`, not the surface-pair corridor `2·d_ε / sin θ`.** Both
@@ -178,7 +225,10 @@ per §0.1 "general over piecemeal".
 ## Branch table
 
 For each vertex present in **≥ 2** of the six single-curve conic maps (the
-existing line+circle extraction at `lib.rs:9774` runs first and removes those):
+existing line+circle extraction at `lib.rs:9774` runs first and removes those)
+— **or (2026-09-12) in `vert_circle_junction` with a NON-coplanar pair**, which
+is two curves by construction (the KV16 same-type junction is the other
+one-slot two-curve admission):
 
 | # distinct incident surfaces (deduped from `inc0`) | Action |
 |---|---|

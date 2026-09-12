@@ -1276,6 +1276,16 @@ fn smoke_corpus_boundary_categories() {
         // lookup keyed by its own (face_a, face_b) through `la.source` +
         // the Stage-0 tri→face maps. 2.8 s release.
         ("R0015", Category::SupportedCorrect),
+        // C0067 FLIPPED (2026-09-12, junction-map triple candidates): the
+        // sphere + polar-notch {sphere, wall, wall} corners are junctions of
+        // two NON-coplanar sphere-section circles; Stage 4 demoted each into
+        // the M8 disc∩disc (coplanar lens) map, whose closed form returned
+        // `None` → `LocalRefinementRequired`, and the triple block never
+        // scanned that map (a junction map counted zero toward `n_maps`).
+        // The block now admits a non-coplanar circle pair as a three-surface
+        // corner and relocates it along the box edge (the PR-KV11 line
+        // metric: ρ 7.7e-3 / 8.7e-3 against a 3.27e-2 gate). 1.0 s release.
+        ("C0067", Category::SupportedCorrect),
         // R0044 FLIPPED (2026-09-05, thin-band chart guard) is deliberately
         // NOT pinned here: it costs ≈ 270 s CPU in release — ≈ 1200 s in the
         // debug build this gate runs under on CI and in `test.sh` — against

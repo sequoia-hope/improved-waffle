@@ -10429,6 +10429,7 @@ fn stage4_relocate_and_correct_inner(
             .chain(vert_cone_hyperbola.keys())
             .chain(vert_line.keys())
             .chain(vert_surface_pair.keys())
+            .chain(vert_circle_junction.keys())
         {
             cand.insert(*v);
         }
@@ -10475,7 +10476,22 @@ fn stage4_relocate_and_correct_inner(
             // KV16: a same-type conic junction (two hyperbolas in the ONE
             // `vert_cone_hyperbola` slot) counts as multi-curve even though
             // only one map sees the vertex.
-            if n_maps < 2 && !same_type_junction.contains(&v) {
+            //
+            // C0067 (spec `yang_stage4_conic_triple_junction`, "Junction-map
+            // candidates"): a circle∩circle junction whose two circles are
+            // NOT coplanar is two curves by construction — two section
+            // circles of one quadric meeting where their planes' line
+            // pierces it, the {sphere, wall, wall} notch corner — and the
+            // M8 disc∩disc closed form (coplanar lens corners only) can
+            // never serve it. It is the fourth junction map found counting
+            // ZERO toward `n_maps` (after the KV16 same-type, R0044 pair and
+            // M5 K11 line×circle exclusions, `specs/m5_surface_pair_curve.md`
+            // "The triple block never saw it either"). The COPLANAR pair
+            // keeps its exact closed form below, byte-identically.
+            let circle_pair_corner = vert_circle_junction.get(&v).is_some_and(|(ca, cb)| {
+                !crate::stage4_relocate::circles_coplanar(ca.0, ca.1, cb.0, cb.1)
+            });
+            if n_maps < 2 && !same_type_junction.contains(&v) && !circle_pair_corner {
                 continue;
             }
             let probe_v = std::env::var_os("YANG_SAMETYPE_PROBE").is_some();
@@ -11129,6 +11145,10 @@ fn stage4_relocate_and_correct_inner(
             // procedural curve has no `t` — so the retain above is a no-op
             // for a pair-only vertex, which by `n_maps < 2` never gets here.)
             vert_surface_pair.remove(&v);
+            // C0067: a non-coplanar circle∩circle corner resolved here must
+            // not reach the M8 disc∩disc arm (whose closed form would STOP
+            // on the non-coplanarity) nor its no-skip audit.
+            vert_circle_junction.remove(&v);
             endpoints.retain(|&u| u != v);
             if rho > cad_primitives::TAU_WORK {
                 mesh.verts[v as usize] = proj;

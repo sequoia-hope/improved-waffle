@@ -43,6 +43,60 @@ after the reconciliation run (release, 8 jobs, 360 s; wall 577 s, F0085
 regression since 2026-08-01 is outstanding (checked over every commit of
 `results.json`).
 
+## 2026-09-12 — C0067 CONVERTED: the polar notch's {sphere, wall, wall} corners are junctions of two NON-coplanar sphere-section circles; Stage 4 demoted each into the M8 disc∩disc (coplanar lens) junction map, whose closed form returned `None` → `LocalRefinementRequired`, and the triple block never scanned a junction map (the fourth "junction map counts zero toward `n_maps`" exclusion); NEW CANONICAL 284C / 0W / 21E / 4EE / 0T (+3 U)
+
+C0067 (0.2 s; revolve(circle, boss) + extrude(rectangle, cut) — the sphere
+r 0.4 at (0, 0, 0.5) via an on-axis circle revolve, cut by the polar notch
+|x|, |y| ≤ 0.15 from z = 0.7 up through the pole). Picked as the fastest
+actionable Stage-4 relocation wall. Anatomy (`YANG_V_PROBE=128`,
+`YANG_LRR_PROBE`, 2026-09-12): v128 = (0.15, 0.15, 0.8315) is the endpoint of
+two `Curve::Circle` edges — sphere ∩ {x = 0.15} and sphere ∩ {y = 0.15}, both
+r 0.3708, normals x̂ / ŷ — with `circle_junction=true` and every other conic
+flag false; its `inc0` surfaces dedup to exactly three {Sphere, Plane x,
+Plane y}: the box EDGE piercing the sphere, i.e. the "two planes among the
+three" corner the 2026-09-11 junction-line metric was written for.
+`insert_circle_or_junction` had DEMOTED the vertex out of `vert_circle` into
+`vert_circle_junction` (two distinct circles), so it sat in ZERO of the maps
+the triple block scans (`n_maps = 0`), and the M8 disc∩disc arm's
+`coplanar_circle_circle_intersection` — coplanar lens corners only —
+returned `None` for the perpendicular pair → the LRR STOP. Same accidental
+exclusion class as KV16 same-type, the R0044 surface-pair bucket and M5 K11's
+line×circle (`specs/m5_surface_pair_curve.md` "The triple block never saw it
+either"), each closed per map; this is the fourth.
+
+Fix (spec `yang_stage4_conic_triple_junction.md`, "Junction-map candidates
+amendment"): the triple block's candidate chain adds
+`vert_circle_junction.keys()`; the `n_maps < 2` skip is bypassed when the
+pair is NOT coplanar (`stage4_relocate::circles_coplanar`, factored out of
+the closed form so both sites share one identity band); the bookkeeping tail
+removes a resolved vertex from `vert_circle_junction`. A coplanar pair keeps
+its closed form byte-identically; ≠ 3-surface junctions keep the block's
+bails. Measured: all four corners relocate along the box edge — ρ 7.6544e-3 /
+8.7163e-3 against the line-corridor gate 3.2688e-2 (d_ε 1.3856e-2, |L̂·n|
+0.8478) — and every in-line oracle (exact volume, composition) passes.
+Tests: `tests_unit/s4_circle_pair_corner.rs` (4) and kernel-v2
+`kv6d_sphere_revolve::closed_sphere_boolean_polar_notch` (RED at LRR v156
+without the wiring — mutation checked — GREEN with it: 6 faces, genus 0,
+watertight, the four exact corners are output vertices, the pocket volume is
+removed). Smoke pin C0067.
+
+Corpus (release, 8 jobs, 600 s; wall 712 s; F0085 317.6 s, R0044 293.2 s):
+**284C / 0W / 21E / 4EE / 0T, 3 UNSUPPORTED(coplanar-boolean)** — exactly one
+category move (C0067 ERROR → SUPPORTED_CORRECT), zero detail moves.
+
+The remaining 21 ERROR rows: 9 are loud BY DESIGN (C0043/C0056 internal
+tangency, C0046/C0107/C0108 0-D contact, C0109 point-tangent cavity,
+C0111/C0113 sub-resolution gap, C0118 micro-graze — scope sign-off
+candidates) and 12 are actionable: C0044 (M8 flush annular stack), C0058
+(s6-curved-degenerate-loop), C0065 (#137 genuine escape), F0058/F0060
+(s4-shell-euler χ=3), F0082 (input `face 372: CDT triangulation failed`,
+Extrude 12 — its ledger row still says non-2-manifold), R0019 (`input B-Rep
+is not 2-manifold`, 156 s — the row says ring-reject FaceId 649), R0038
+(tangent-generator LRR), R0050 (LRR v122 — the row says v58 / v125), R0081
+(Stage-0 emission of the fresh gear revolve), R0085 (op 1
+`RelocationCrossedCarrierVertex` v386 + op 2 `input B-Rep is not
+2-manifold`, 93 s), R0100 (§4.3.3 Case-IV corner phantom).
+
 ## 2026-09-11 (night, fourth) — R0070 advances ERROR → UNSUPPORTED(coplanar-boolean): Stage-6 labelled a bounded cylinder patch inside-out (outer = the MOST-EDGES cycle; its 226-edge ellipse-chain hole outnumbered the 14-edge outer rim), the next op's holed chart CDT emptied the face; outer loop now chosen by EXTENT on bounded cylinder/cone patches; canonical 283C / 0W / 22E / 4EE / 0T (+3 U)
 
 R0070 (6 s; revolve(rectangle) + extrude(gear, cut) + extrude(circle, cut),
@@ -819,7 +873,7 @@ moved. The 30 ERROR rows are the ACTIVE rows below.
 | R0038 | Stage-4 LRR (u32::MAX) | plane tangent to cylinder along one generator; degree-2 gate self-validates (`bad_degree=[(18,4),(19,4)]`) — near-tangency pinch, NOT a CDT ring | CONFIRMED (#168 WIP4, 9f4cb604) | P3b-#137 |
 | ~~R0072~~ | ~~Stage-4 LRR (u32::MAX)~~ | ~~real ~1e-7 micro-scale edge (0.4% span); force-merge is the R0091 silent-wrong trap — needs curved re-CDT~~ **FLIPPED CORRECT 2026-07-28 (#195 inc-5):** the §4.5.4 detect-then-refine rim boost + §4.4.1 rim-snap, both now always-on, resolve it WITHOUT a curved re-CDT — the micro-scale edge was an under-sampled rim, not an irreducible feature | — | ~~P3c~~ DONE |
 | C0058 | non-2-manifold (reassembly) | probe 2026-07-17: `NONMANIFOLD_SITE s6-curved-degenerate-loop` — Stage-6 curved face 2 emits a 64-vertex loop with \|Newell N\| = 2.3e-16 (degenerate junction loop) | CONFIRMED (#171 sweep) | P3a-#146 |
-| C0067 | Stage-4 LRR v128 | probe 2026-07-18 (#171 pass 2): v128 is a **circle×circle junction** (`circle_junction=true`, endpoint) — two sphere-section Circles (both r=0.371, centers [0.15,0,0.5]/[0,0.15,0.5], normals x̂/ŷ) meet at [0.15,0.15,0.83]; junction relocation region invalid. Needs two-curve junction relocation (mint-once contract) | CONFIRMED (#171 pass 2) | P3-junction |
+| ~~C0067~~ | ~~Stage-4 LRR v128~~ | **CONVERTED 2026-09-12: the two circles are NOT coplanar — a {sphere, wall, wall} three-surface corner the triple block now admits from the junction map (section above).** probe 2026-07-18 (#171 pass 2): v128 is a **circle×circle junction** (`circle_junction=true`, endpoint) — two sphere-section Circles (both r=0.371, centers [0.15,0,0.5]/[0,0.15,0.5], normals x̂/ŷ) meet at [0.15,0.15,0.83]; junction relocation region invalid. Needs two-curve junction relocation (mint-once contract) | CONFIRMED (#171 pass 2) | P3-junction |
 | ~~R0008~~ | ~~Stage-4 LRR v42~~ | ~~probe 2026-07-18: `YANG_LRR_SITE site=lineseg_combo` edge (42,43) — LineSegment edge whose incidence is **Cone(A, half-angle 1.5525 rad ≈ 88.9°, near-flat) × Plane(B)**; the Stage-4 LineSegment arm has closed forms only for cyl×plane / cyl∥cyl / plane×plane — the **cone-generator line closed form is missing**~~ **FLIPPED CORRECT 2026-07-28 (cone-generator arm):** the closed form was never missing — `ssi_rs::plane_cone` has emitted `SsiCurve::Line` for through-apex cuts all along and Stage 3 already banded them via `cone_chord_tol_for_owner`. TWO wiring gaps, both in Stage 4: (a) the LineSegment pair match classified `Cone` as `other_curved` → STOP before selection; (b) once admitted, the tie-break called the R0072-only `select_disjoint_parallel_line`, whose parallelism precheck rejects the two CROSSING apex generators (`AmbiguousCurve{2,2}`). **#163/N45 was not a "residual theory" — it was CORRECT and already shipped, at Stage 3 only**; the two stages had been running different tie-breaks since 9fca8393 | — | ~~Stage-4 cone-generator LineSegment arm~~ DONE |
 | ~~R0009~~ | ~~Stage-4 LRR (u32::MAX)~~ kernel-v2 `CurvedGeometryMismatch` FaceId(10) (op 2) + Stage-4 shell gate double-cover (op 3) | **FLIPPED CORRECT 2026-08-25 (863df468); reconciled 2026-09-04 from the committed results.json history** ~~probe 2026-07-17: `site=split_max_passes` — the chord-split loop exhausts its pass budget (§4.5.2 refinement demand, non-convergent)~~ **RE-DIAGNOSED + LAYER PEELED 2026-08-19 (spec `yang_n2_stage4_cdt_mesh_updating.md` §5c.13):** NOT a §4.5.2 demand — the §4.4.1(a) unzip loop's degeneracy test was the ABSOLUTE `MIN_FEATURE_SIZE²` area floor, which at this 1.05e-4 model scale flagged HEALTHY triangles (h/l 0.007–0.40) and ping-ponged a 4-action flip cycle to the pass cap. Fixed (scale-free collinearity identity + cycle certificate). Now advances to `s4-shell-euler double-cover edge (32,33) fwd=2 rev=2` — A cyl-2 ×2 + B plane-1/plane-5 ×2 on one intersection edge (the #146 double-cover family), pre-existing (zero unzip actions post-fix; connectivity untouched by Stage 4) | CONFIRMED (2026-08-19 `YANG_LRR_SITE` + shape census) | P3a-#146 double-cover (was P3-§4.5.2) |
 | ~~R0020~~ | ~~Stage-4 LRR v44~~ TessellationFailed FaceId(21) | **FLIPPED CORRECT 2026-08-25 (c02aeb33); reconciled 2026-09-04 from the committed results.json history** ~~probe 2026-07-18: v44 is the surface-pair endpoint-mix STOP — the R0044 class exactly~~ **ENDPOINT-MIX LAYER RESOLVED 2026-07-28:** v44's incidence is exactly 3 (`{plane_A, cone_A, cyl_B}`) and relocates through the triple block. Two deeper layers now: a pure surface-pair Newton divergence at `:5646` (R0044's new class), and the fatal one — kernel-v2 **`surface-pair refinement needs a positive finite chord tolerance`**, i.e. the OUTPUT B-Rep now carries a `Curve::SurfacePair` edge that kernel-v2's render tessellation cannot band | CONFIRMED (2026-07-28) | kernel-v2 surface-pair render band + M5 pair-Newton **2026-08-19: the "needs a positive finite chord tolerance" wall was `pair_surface_scale(Cone)=0` feeding the K9 sag radius → FIXED (`pair_surface_local_scale`). NOW: KV9-F2 `patch triangulation folded (inverted triangle)` FaceId(21) — the unrolled patch CDT **2026-08-24b: probed — F2a deep-chord class: boundary-split node dev=0.250 off-surface, 0.031-thin sliver (dot=−0.13). Customer of `yang_434_output_chord_refinement.md`** |

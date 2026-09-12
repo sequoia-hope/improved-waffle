@@ -517,27 +517,19 @@ pub(crate) fn circle_residual_split(
     (axial, (radial - radius).abs())
 }
 
-/// M8 disc∩disc CROSSING: the exact intersection of two COPLANAR circles
-/// `(c_a, n_a, r_a)` and `(c_b, n_b, r_b)`, picking the root nearest `near`.
-/// Two coplanar circles meet in ≤ 2 points (the lens corners); closed-form 2D
-/// in their shared plane. Returns `None` (→ a loud Stage-4 STOP) when the
-/// circles are NOT coplanar (parallel normals + co-planar centers), are
-/// concentric, or do not actually cross — none of which is a disc∩disc lens
-/// corner, so we never guess.
-pub(crate) fn coplanar_circle_circle_intersection(
-    c_a: Point3,
-    n_a: Vector3,
-    r_a: f64,
-    c_b: Point3,
-    n_b: Vector3,
-    r_b: f64,
-    near: Point3,
-) -> Option<Point3> {
+/// Whether two circles `(c_a, n_a)` and `(c_b, n_b)` lie in ONE plane:
+/// parallel normals AND `c_b` in `c_a`'s plane, both within
+/// `MIN_FEATURE_SIZE` (the M8 disc∩disc identity band). This is the
+/// eligibility test of [`coplanar_circle_circle_intersection`]'s closed form
+/// — and, negated, the Stage-4 triple block's admission of a circle∩circle
+/// junction as a THREE-surface corner (two non-coplanar section circles meet
+/// where their two planes' line pierces the shared quadric; spec
+/// `yang_stage4_conic_triple_junction` "Junction-map candidates", C0067).
+pub(crate) fn circles_coplanar(c_a: Point3, n_a: Vector3, c_b: Point3, n_b: Vector3) -> bool {
     let n = normalize3(n_a.as_array());
     let nb = normalize3(n_b.as_array());
     let ca = c_a.as_array();
     let cb = c_b.as_array();
-    // Coplanarity: normals parallel AND c_b in c_a's plane.
     let cross_n = [
         n[1] * nb[2] - n[2] * nb[1],
         n[2] * nb[0] - n[0] * nb[2],
@@ -547,10 +539,35 @@ pub(crate) fn coplanar_circle_circle_intersection(
         (cross_n[0] * cross_n[0] + cross_n[1] * cross_n[1] + cross_n[2] * cross_n[2]).sqrt();
     let u = [cb[0] - ca[0], cb[1] - ca[1], cb[2] - ca[2]];
     let off_plane = (u[0] * n[0] + u[1] * n[1] + u[2] * n[2]).abs();
-    if cross_mag > cad_primitives::MIN_FEATURE_SIZE || off_plane > cad_primitives::MIN_FEATURE_SIZE
-    {
+    !(cross_mag > cad_primitives::MIN_FEATURE_SIZE || off_plane > cad_primitives::MIN_FEATURE_SIZE)
+}
+
+/// M8 disc∩disc CROSSING: the exact intersection of two COPLANAR circles
+/// `(c_a, n_a, r_a)` and `(c_b, n_b, r_b)`, picking the root nearest `near`.
+/// Two coplanar circles meet in ≤ 2 points (the lens corners); closed-form 2D
+/// in their shared plane. Returns `None` (→ a loud Stage-4 STOP) when the
+/// circles are NOT coplanar ([`circles_coplanar`]), are concentric, or do
+/// not actually cross — none of which is a disc∩disc lens corner, so we
+/// never guess. (A NON-coplanar pair is not this arm's customer at all: it
+/// is a three-surface corner the triple block resolves BEFORE this arm
+/// runs; reaching `None` here for non-coplanarity means that block declined
+/// it — ≠ 3 distinct surfaces, or Newton diverged — and the STOP is loud.)
+pub(crate) fn coplanar_circle_circle_intersection(
+    c_a: Point3,
+    n_a: Vector3,
+    r_a: f64,
+    c_b: Point3,
+    n_b: Vector3,
+    r_b: f64,
+    near: Point3,
+) -> Option<Point3> {
+    if !circles_coplanar(c_a, n_a, c_b, n_b) {
         return None; // not coplanar → not a disc∩disc lens corner
     }
+    let n = normalize3(n_a.as_array());
+    let ca = c_a.as_array();
+    let cb = c_b.as_array();
+    let u = [cb[0] - ca[0], cb[1] - ca[1], cb[2] - ca[2]];
     let d = (u[0] * u[0] + u[1] * u[1] + u[2] * u[2]).sqrt();
     if d < cad_primitives::MIN_FEATURE_SIZE {
         return None; // concentric
