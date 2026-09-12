@@ -52,6 +52,7 @@ mod s453_line_overtake;
 mod s4_boundary_curve;
 mod s4_circle_pair_corner;
 mod s4_partner_hull_pair_plane;
+mod s4_torus_conic_corner;
 mod s6_outer_loop_by_extent;
 mod stage0_rim_projection;
 mod stage1_cdt_flap;

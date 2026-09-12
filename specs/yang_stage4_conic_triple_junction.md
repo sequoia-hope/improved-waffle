@@ -1,5 +1,48 @@
 # Spec: Stage-4 general conic triple-surface junction relocation
 
+> **Torus-edge candidates (2026-09-12, later — R0050): the same amendment
+> for the TORUS block's endpoint-mix STOP.** A torus intersection edge is
+> untyped (no conic map; the "(2t) KV6d Tier B" torus block relocates its
+> endpoints by implicit-pair Newton AFTER the conic arms), so a vertex where
+> a torus edge meets a conic edge counted ONE curve in `n_maps` and then hit
+> the torus block's unconditional "torus-edge endpoint that is also a CONIC
+> endpoint" STOP (`LocalRefinementRequired`) — although with exactly three
+> incident surfaces it is the plain {torus, s1, s2} corner both blocks
+> already solve. Measured on R0050 op 2 (`YANG_V_PROBE=122`,
+> `YANG_LRR_PROBE`, 2026-09-12; scale 11.5): a 345° revolved rectangle ring
+> (cylinder r 2.5406) minus a 115° torus segment (R 3.9509, r 2.6339) about
+> a PARALLEL axis; the segment's cap plane — parallel to both axes — meets
+> the cylinder in a ruling `LineSegment` (`line=true`) whose endpoint v122
+> is also on the torus∩cylinder pair curve (`torus=true`); `inc0` dedups to
+> exactly {Cylinder, Plane, Torus}. Wired: `torus_edge_verts` (endpoints of
+> every `inc0` edge bearing a `Surface::Torus`, built once) joins the
+> candidate chain, and the `n_maps < 2` skip is bypassed for a torus vertex
+> that is a conic ENDPOINT (any map that feeds `endpoints`; the procedural
+> surface-pair map does not, so a torus + pair-only vertex keeps the torus
+> block's own arms byte-identically); every vertex the block resolves —
+> moved or already exact — enters `triple_resolved`, and the torus block
+> skips those before its endpoint-mix guard (a resolved corner has nothing
+> left to relocate; re-running the pair Newton would move it onto two of
+> its three surfaces). Monotone by construction: the mix STOPped
+> unconditionally, so only a STOP can change. Result: v122 / v129 relocate
+> with ρ 2.6422e-1 against the curve-corridor gate 1.5953 (d_ε 3.2714e-1,
+> sin θ 0.41014 between the cylinder and cap-plane normals — one plane, so
+> no junction line), op 2 completes, and R0050 advances to op 3's
+> `RelocationCrossedCarrierVertex` v413 (a torus vertex overrunning A's
+> corner v209 by 3.7e-2 — the §4.5.1 corner-transit class, `[451-transit]
+> REFUSE NoRealCandidate`; R0085 / R0044 kin). Pins:
+> `tests_unit/s4_torus_conic_corner.rs` (the cap plane is parallel to both
+> axes; the Newton lands on all three surfaces within the measured
+> corridor) and kernel-v2 `kv6d_closed_torus::
+> partial_torus_cap_rulings_meet_the_tube_on_a_cylinder` (a 40° torus
+> segment cut from a cylinder about a parallel axis: RED at
+> `LocalRefinementRequired` v25 without the admission — mutation checked —
+> GREEN with it: 6 faces, genus 0, the four exact corners are output
+> vertices, half-to-all of the segment's Pappus volume removed; its
+> watertightness check is T-junction-aware because the windowed lateral's
+> chart refinement subdivides its boundary one-sidedly — kernel-v2's
+> PR-TH1 render contract, not a defect of the boolean).
+
 > **Junction-map candidates amendment (2026-09-12, C0067): the triple
 > block's candidate scan includes the circle∩circle JUNCTION map, and a
 > non-coplanar circle pair counts as the two curves its demotion already
@@ -228,7 +271,9 @@ For each vertex present in **≥ 2** of the six single-curve conic maps (the
 existing line+circle extraction at `lib.rs:9774` runs first and removes those)
 — **or (2026-09-12) in `vert_circle_junction` with a NON-coplanar pair**, which
 is two curves by construction (the KV16 same-type junction is the other
-one-slot two-curve admission):
+one-slot two-curve admission) — **or (2026-09-12, later) a TORUS-edge endpoint
+that is also a conic endpoint** (the torus edge is the second curve; resolved
+vertices enter `triple_resolved` and the torus block skips them):
 
 | # distinct incident surfaces (deduped from `inc0`) | Action |
 |---|---|

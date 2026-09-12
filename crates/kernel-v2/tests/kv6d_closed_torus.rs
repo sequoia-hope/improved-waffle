@@ -104,6 +104,76 @@ fn assert_watertight(mesh: &RenderMesh, what: &str) {
     assert_eq!(unpaired, 0, "{what}: {unpaired} unpaired directed edges");
 }
 
+/// T-junction-aware watertightness (the assay `watertight_mesh` rule): edges
+/// that pair exactly are closed; the residue is subdivided at every residue
+/// vertex lying ON a residue edge (within 1e-9), then must cancel.
+fn assert_watertight_tjunction_aware(mesh: &RenderMesh, what: &str) {
+    use std::collections::{BTreeMap, BTreeSet};
+    let q = |x: f64| (x / 1e-9).round() as i64;
+    let pos = |i: u32| {
+        let k = (i as usize) * 3;
+        [
+            mesh.positions[k],
+            mesh.positions[k + 1],
+            mesh.positions[k + 2],
+        ]
+    };
+    let key = |p: [f64; 3]| (q(p[0]), q(p[1]), q(p[2]));
+    let mut count: BTreeMap<_, i64> = BTreeMap::new();
+    let mut at: BTreeMap<_, [f64; 3]> = BTreeMap::new();
+    for t in mesh.indices.chunks_exact(3) {
+        for (a, b) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
+            let (pa, pb) = (pos(a), pos(b));
+            let (ka, kb) = (key(pa), key(pb));
+            if ka == kb {
+                continue;
+            }
+            at.entry(ka).or_insert(pa);
+            at.entry(kb).or_insert(pb);
+            *count.entry((ka, kb)).or_insert(0) += 1;
+            *count.entry((kb, ka)).or_insert(0) -= 1;
+        }
+    }
+    let residue: Vec<_> = count
+        .iter()
+        .filter(|(_, &c)| c != 0)
+        .map(|(e, &c)| (*e, c))
+        .collect();
+    let verts: BTreeSet<_> = residue.iter().flat_map(|((a, b), _)| [*a, *b]).collect();
+    let mut sub: BTreeMap<_, i64> = BTreeMap::new();
+    for ((ka, kb), c) in residue {
+        let (pa, pb) = (at[&ka], at[&kb]);
+        let d = [pb[0] - pa[0], pb[1] - pa[1], pb[2] - pa[2]];
+        let len2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
+        let mut on: Vec<(f64, _)> = vec![(0.0, ka), (1.0, kb)];
+        for &kv in &verts {
+            if kv == ka || kv == kb {
+                continue;
+            }
+            let p = at[&kv];
+            let w = [p[0] - pa[0], p[1] - pa[1], p[2] - pa[2]];
+            let t = (w[0] * d[0] + w[1] * d[1] + w[2] * d[2]) / len2;
+            if !(0.0..=1.0).contains(&t) {
+                continue;
+            }
+            let perp = [w[0] - t * d[0], w[1] - t * d[1], w[2] - t * d[2]];
+            if (perp[0] * perp[0] + perp[1] * perp[1] + perp[2] * perp[2]).sqrt() <= 1e-9 {
+                on.push((t, kv));
+            }
+        }
+        on.sort_by(|x, y| x.0.partial_cmp(&y.0).unwrap());
+        for w in on.windows(2) {
+            *sub.entry((w[0].1, w[1].1)).or_insert(0) += c;
+            *sub.entry((w[1].1, w[0].1)).or_insert(0) -= c;
+        }
+    }
+    let open = sub.values().filter(|&&c| c != 0).count();
+    assert_eq!(
+        open, 0,
+        "{what}: {open} unpaired directed edges after T-junction subdivision"
+    );
+}
+
 fn assert_mesh_sane(mesh: &RenderMesh, what: &str) {
     assert!(!mesh.indices.is_empty(), "{what}: empty mesh");
     for v in &mesh.positions {
@@ -424,5 +494,120 @@ fn closed_torus_near_tangent_shaft_stays_loud() {
     assert!(
         msg.contains("OffCurveBeyondChordBand") || msg.contains("LocalRefinementRequired"),
         "expected a Stage-4 typed stop, got {msg}"
+    );
+}
+
+// =========================================================================
+// 7. Boolean re-entry — the R0050 torus∩conic corner (2026-09-12)
+// =========================================================================
+
+/// R0050's op-2 shape: a PARTIAL torus (two meridian cap planes) cut out of
+/// a cylinder whose axis is parallel to the torus axis. Each cap plane ∥
+/// the cylinder axis meets the lateral in a ruling LINE (a conic-arm edge),
+/// and that line meets the torus∩cylinder pair curve at a {cylinder, cap
+/// plane, torus} corner. yang's torus block used to STOP on that vertex as
+/// a "torus-edge endpoint that is also a conic endpoint" — the general
+/// triple block never scanned torus edges (they populate no conic map) —
+/// while with exactly three incident surfaces it is the plain three-surface
+/// corner both blocks already solve (spec `yang_stage4_conic_triple_junction`,
+/// "Junction-map candidates").
+///
+/// Geometry: tube centre radius 3, tube radius 1 about the x-axis, swept
+/// 40° between the azimuths 160° and 200° (measured from +y toward +z); the
+/// cylinder r = 2 has its axis at (y, z) = (−4.4, 0), so the tube lies
+/// inside it except a sliver (its near wall at radial 2.4 at φ = 180°) and
+/// each cap plane — 1.505 from the cylinder axis — cuts the lateral in a
+/// ruling at radial s = 2.817 (the root of |s·û − C|² = 4 inside [2, 4]).
+#[test]
+fn partial_torus_cap_rulings_meet_the_tube_on_a_cylinder() {
+    let mut arena = BrepArena::new();
+    const PHI0: f64 = 160.0 * PI / 180.0;
+    const SWEEP: f64 = 40.0 * PI / 180.0;
+    const RC: f64 = 2.0;
+    const CY: f64 = -4.4;
+    // Torus segment: the profile circle sits in the meridian plane at
+    // azimuth φ₀ (u = x̂, v = the radial direction at φ₀), swept by +40°
+    // about +x (from φ₀ toward φ₀ + 40°).
+    let v0 = Vector3::new(0.0, PHI0.cos(), PHI0.sin());
+    let profile = Profile::circle(
+        Point3::new(0.0, 0.0, 0.0),
+        Vector3::new(1.0, 0.0, 0.0),
+        v0,
+        Point2::new(0.0, R_MAJ),
+        R_MIN,
+    )
+    .expect("tube profile at φ₀");
+    let seg = revolve(&mut arena, &profile, AXIS_O, AXIS_D, SWEEP).expect("40° torus segment");
+    let seg_report = validate_solid(&arena, seg.solid).expect("segment validates");
+    assert_eq!(seg_report.faces, 3, "tube + two caps");
+
+    // Cylinder r = 2, axis x through (y, z) = (CY, 0), x ∈ [−3, 3].
+    let cyl_profile = Profile::circle(
+        Point3::new(-3.0, 0.0, 0.0),
+        Vector3::new(0.0, 1.0, 0.0),
+        Vector3::new(0.0, 0.0, 1.0),
+        Point2::new(CY, 0.0),
+        RC,
+    )
+    .expect("cylinder profile");
+    let cyl =
+        extrude(&mut arena, &cyl_profile, Vector3::new(1.0, 0.0, 0.0), 6.0).expect("cylinder");
+    let cyl_mesh = tessellate(&arena, cyl.solid).expect("cylinder tessellates");
+    let cyl_vol = mesh_signed_volume(&cyl_mesh);
+
+    let out = boolean_op(&mut arena, cyl.solid, seg.solid, BoolOp::Subtract)
+        .unwrap_or_else(|e| panic!("cylinder − torus segment subtract failed: {e:?}"));
+
+    let report = validate_solid(&arena, out).expect("bitten cylinder validates");
+    assert_eq!(report.shells, 1, "one connected shell");
+    assert_eq!(report.genus, 0, "a pocket through the wall is genus 0");
+    assert_eq!(report.euler_lhs, report.euler_rhs);
+    assert_eq!(
+        report.faces, 6,
+        "lateral (windowed) + two rims + tube + two cap faces"
+    );
+
+    let mesh = tessellate(&arena, out).expect("bitten cylinder tessellates");
+    assert_mesh_sane(&mesh, "bitten cylinder");
+    // The windowed lateral's chart refinement subdivides its boundary edges
+    // (the ruling into 8, each pair-curve chord into 4) while the cap plane
+    // and the tube keep the raw polyline — kernel-v2's documented one-sided
+    // collinear subdivision (PR-TH1), so the pairing is T-junction-aware
+    // like the assay's `watertight_mesh` oracle: a residue edge is split at
+    // every residue vertex lying on it before directed edges must cancel.
+    assert_watertight_tjunction_aware(&mesh, "bitten cylinder");
+
+    // The four exact corners are output vertices: on each cap plane the
+    // ruling at radial s solves s² − 2s(û·C) + |C|² − RC² = 0 (the root in
+    // [2, 4]); the tube meets it at x = ±√(R_MIN² − (s − R_MAJ)²).
+    for phi in [PHI0, PHI0 + SWEEP] {
+        let u = [phi.cos(), phi.sin()];
+        let uc = u[0] * CY; // û·C with C = (CY, 0)
+        let disc = uc * uc - (CY * CY - RC * RC);
+        assert!(disc > 0.0, "the cap plane at {phi} must cut the lateral");
+        let s = uc - disc.sqrt();
+        assert!(
+            (R_MAJ - R_MIN..=R_MAJ + R_MIN).contains(&s),
+            "ruling s = {s}"
+        );
+        let x = (R_MIN * R_MIN - (s - R_MAJ).powi(2)).sqrt();
+        for sx in [1.0, -1.0] {
+            let c = [sx * x, s * u[0], s * u[1]];
+            let hit = mesh.positions.chunks_exact(3).any(|p| {
+                ((p[0] - c[0]).powi(2) + (p[1] - c[1]).powi(2) + (p[2] - c[2]).powi(2)).sqrt()
+                    <= 1e-9
+            });
+            assert!(hit, "exact corner {c:?} is not an output vertex");
+        }
+    }
+
+    // Volume: the bite removes the part of the segment inside the cylinder —
+    // between half and all of its Pappus volume (40/360 · 2π²Rr²).
+    let segment = SWEEP / (2.0 * PI) * 2.0 * PI * PI * R_MAJ * R_MIN * R_MIN;
+    let vol = mesh_signed_volume(&mesh);
+    let removed = cyl_vol - vol;
+    assert!(
+        removed >= 0.5 * segment && removed <= segment,
+        "removed {removed} vs segment Pappus {segment} (cylinder {cyl_vol}, out {vol})"
     );
 }

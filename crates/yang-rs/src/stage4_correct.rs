@@ -10419,6 +10419,26 @@ fn stage4_relocate_and_correct_inner(
     // ellipse + pair. Nothing about the mix needed new machinery; the mix was
     // never the difficulty.
     let mut triple_moved: Vec<u32> = Vec::new();
+    // R0050 (2026-09-12): every vertex this block RESOLVED (moved or already
+    // exact), so the torus block below neither STOPs on it as a torus×conic
+    // endpoint mix nor re-relocates it onto two of its three surfaces.
+    let mut triple_resolved: std::collections::BTreeSet<u32> = std::collections::BTreeSet::new();
+    // R0050: the endpoints of TORUS intersection edges. A torus edge is
+    // untyped (no conic map; the torus block relocates it by implicit-pair
+    // Newton), so a vertex where a torus edge meets a conic edge counted
+    // ONE curve here and then hit the torus block's endpoint-mix STOP —
+    // although with exactly three incident surfaces it is the plain
+    // {torus, s1, s2} corner both blocks already solve (spec
+    // `yang_stage4_conic_triple_junction`, "Junction-map candidates").
+    let torus_edge_verts: std::collections::BTreeSet<u32> = inc0
+        .iter()
+        .filter(|(_, entries)| {
+            entries
+                .iter()
+                .any(|(_i, surf)| matches!(surf, Surface::Torus { .. }))
+        })
+        .flat_map(|(&(s, e), _)| [s, e])
+        .collect();
     {
         let mut cand: std::collections::BTreeSet<u32> = std::collections::BTreeSet::new();
         for v in vert_circle
@@ -10430,6 +10450,7 @@ fn stage4_relocate_and_correct_inner(
             .chain(vert_line.keys())
             .chain(vert_surface_pair.keys())
             .chain(vert_circle_junction.keys())
+            .chain(torus_edge_verts.iter())
         {
             cand.insert(*v);
         }
@@ -10491,7 +10512,21 @@ fn stage4_relocate_and_correct_inner(
             let circle_pair_corner = vert_circle_junction.get(&v).is_some_and(|(ca, cb)| {
                 !crate::stage4_relocate::circles_coplanar(ca.0, ca.1, cb.0, cb.1)
             });
-            if n_maps < 2 && !same_type_junction.contains(&v) && !circle_pair_corner {
+            // R0050: a torus edge meeting a CONIC endpoint (any map that
+            // feeds `endpoints` — the procedural pair map does not, and a
+            // torus + pair-only vertex keeps the torus block's own arms
+            // byte-identically). Such a mix STOPped unconditionally at the
+            // torus block's `endpoint_set` guard, so admitting it here is
+            // monotone: only a STOP can change.
+            let torus_conic_mix = torus_edge_verts.contains(&v)
+                && (n_maps - usize::from(vert_surface_pair.contains_key(&v)) >= 1
+                    || circle_pair_corner
+                    || same_type_junction.contains(&v));
+            if n_maps < 2
+                && !same_type_junction.contains(&v)
+                && !circle_pair_corner
+                && !torus_conic_mix
+            {
                 continue;
             }
             let probe_v = std::env::var_os("YANG_SAMETYPE_PROBE").is_some();
@@ -11150,6 +11185,7 @@ fn stage4_relocate_and_correct_inner(
             // on the non-coplanarity) nor its no-skip audit.
             vert_circle_junction.remove(&v);
             endpoints.retain(|&u| u != v);
+            triple_resolved.insert(v);
             if rho > cad_primitives::TAU_WORK {
                 mesh.verts[v as usize] = proj;
                 triple_moved.push(v);
@@ -12438,8 +12474,16 @@ fn stage4_relocate_and_correct_inner(
             }
         }
         'torus_verts: for (&v, &t_surf) in &vert_torus {
+            // R0050 (2026-09-12): a torus∩conic corner with exactly three
+            // incident surfaces was resolved by the general triple block
+            // (position exact on all three) — nothing left to relocate.
+            if triple_resolved.contains(&v) {
+                continue 'torus_verts;
+            }
             // A torus-edge endpoint that is also a CONIC endpoint mixes the
-            // implicit-pair and closed-form relocations — out of v1 scope, STOP.
+            // implicit-pair and closed-form relocations — out of v1 scope, STOP
+            // (since 2026-09-12 only the ≠ 3-surface mixes reach here; the
+            // 3-surface corner is the triple block's, see `triple_resolved`).
             if endpoint_set.contains(&v) {
                 return Err(YangError::stage4_region_invalid(
                     v,

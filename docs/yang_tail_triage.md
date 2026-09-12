@@ -43,6 +43,54 @@ after the reconciliation run (release, 8 jobs, 360 s; wall 577 s, F0085
 regression since 2026-08-01 is outstanding (checked over every commit of
 `results.json`).
 
+## 2026-09-12 (later) — R0050 advances a wall: a TORUS-edge endpoint that is also a conic endpoint with exactly three incident surfaces was the torus block's unconditional endpoint-mix STOP; the triple block now admits it (op 2 completes; op 3 STOPs at §4-I9 `RelocationCrossedCarrierVertex` v413, the §4.5.1 corner-transit class); canonical 284C / 0W / 21E / 4EE / 0T (+3 U) category-identical
+
+R0050 (0.8 s; revolve(rectangle, boss) 345° + revolve(circle, cut) 115° +
+revolve(circle, boss) 330°, scale 11.5; the ledger row said v58 / v125 —
+STALE, live v122). Op 2 = the ring (cylinder r 2.5406 about A's axis)
+minus a torus segment (R 3.9509, r 2.6339) about a PARALLEL axis. Probe
+(`YANG_V_PROBE=122`, `YANG_LRR_SITE`): v122 has `line=true torus=true`
+only — the endpoint of a `LineSegment` (121,122) = the segment's cap plane
+(parallel to both axes) × A's cylinder RULING, and of the untyped
+torus∩cylinder pair chain; the STOP site was `stage4_correct.rs:12444`,
+the torus block's "torus-edge endpoint that is also a CONIC endpoint" guard
+(`endpoint_set.contains(&v)`), which fires unconditionally (`endpoints` is
+only ever pruned by the triple block). The vertex's `inc0` surfaces dedup to
+exactly {Cylinder, Plane, Torus} — the three-surface corner the triple
+block solves — but a torus edge populates no conic map, so `n_maps = 1`
+and the block skipped it: the C0067 class again with a torus edge as the
+uncounted second curve.
+
+Fix (spec `yang_stage4_conic_triple_junction.md`, "Torus-edge candidates"):
+`torus_edge_verts` joins the triple block's candidate chain; a torus vertex
+that is a conic endpoint bypasses the `n_maps < 2` skip; resolved vertices
+enter `triple_resolved` and the torus block skips them before its guard.
+Monotone by construction (the mix always STOPped). Measured: v122 / v129
+relocate with ρ 2.6422e-1 vs gate 1.5953 (d_ε 3.2714e-1, sin θ 0.41014,
+curve corridor — one plane, no junction line); op 2 completes. Tests:
+`tests_unit/s4_torus_conic_corner.rs` (2) and kernel-v2
+`kv6d_closed_torus::partial_torus_cap_rulings_meet_the_tube_on_a_cylinder`
+(a 40° torus segment cut from a cylinder about a parallel axis; RED at LRR
+v25 without the admission — mutation checked — GREEN with it; its
+watertightness pairing is T-junction-aware because the windowed lateral's
+chart refinement subdivides its boundary one-sidedly, kernel-v2's PR-TH1
+render contract).
+
+Op 3's wall (`YANG_S4_CARRIER_DOMAIN=census`): the union with the second
+torus relocates torus vertex v413 (patches {A:6, A:9, B:2}; pre exact on
+both A planes, 3.4e-2 off the torus) by 6.9e-2 and CROSSES A's own corner
+v209 (an A-only vertex on A:5/A:6/A:9) with overrun 3.7e-2 — the §4-I9
+postcondition STOPs typed, and the §4.5.1 transit planner declines
+(`[451-transit] REFUSE NoRealCandidate`, the standing STOP). Same class as
+R0085 op 1 (v386) and the R0044/R0011 census rows: the corner-transit
+epic's open increment (`specs/yang_451_corner_transit.md`), not a
+per-case fix.
+
+Corpus (release, 8 jobs, 600 s; wall 730 s; F0085 331.2 s, R0044 295.9 s):
+**284C / 0W / 21E / 4EE / 0T, 3 UNSUPPORTED(coplanar-boolean)** —
+category-identical, exactly one detail move (R0050 op-2 LRR v122 → op-3
+`RelocationCrossedCarrierVertex` v413).
+
 ## 2026-09-12 — C0067 CONVERTED: the polar notch's {sphere, wall, wall} corners are junctions of two NON-coplanar sphere-section circles; Stage 4 demoted each into the M8 disc∩disc (coplanar lens) junction map, whose closed form returned `None` → `LocalRefinementRequired`, and the triple block never scanned a junction map (the fourth "junction map counts zero toward `n_maps`" exclusion); NEW CANONICAL 284C / 0W / 21E / 4EE / 0T (+3 U)
 
 C0067 (0.2 s; revolve(circle, boss) + extrude(rectangle, cut) — the sphere
@@ -882,7 +930,7 @@ moved. The 30 ERROR rows are the ACTIVE rows below.
 | ~~R0035~~ | ~~Stage-4 LRR v194~~ | ~~v194 is `ellipse=true + surface_pair=true + endpoint` — Ellipse endpoint also on `SurfacePair{Cylinder×Cylinder}` → surface-pair endpoint-mix STOP, R0044 class~~ **FLIPPED CORRECT 2026-07-28 (triple-block wiring):** v194/v195 have exactly 3 incident surfaces `{cyl_A, cyl_B, plane_B}` — the increment-5 conic triple junction, which had simply never counted `vert_surface_pair` as a curve-bearing map | — | ~~P3-junction~~ DONE |
 | ~~R0047~~ | ~~Stage-4 LRR (u32::MAX)~~ reassembled output non-2-manifold (Stage 6) | **FLIPPED CORRECT 2026-08-19 (c10820b8); reconciled 2026-09-04 from the committed results.json history** ~~probe 2026-07-17: `site=split_max_passes` — same class as R0009~~ **RE-DIAGNOSED + LAYER PEELED 2026-08-19:** the R0009 absolute-floor class exactly (2.09e-4 scale; 5168 healthy-triangle unzips in 62 s before the cap). Post-fix zero unzip actions; advances to a Stage-6 reassembly non-2-manifold wall (unprobed) | CONFIRMED (2026-08-19) | Reassembly non-2-manifold family (was P3-§4.5.2) |
 | ~~R0049~~ | ~~non-2-manifold (reassembly)~~ ~~ring rejected by CDT (FaceId 575)~~ **FLIPPED CORRECT 2026-09-07 (night): the live wall was the I6 `NonManifoldInput` backstop on a ROUNDING PLEAT (two sub-band slivers, cone × gear-flank plane, apexes welded bit-identically) — never fragmentation; I6.6 band-scoped membrane cancellation** | (history: ~~probe 2026-07-17: `s6-planar-loop-nonplanar` face 134 vert 337 off-plane 1.449e-6 (band 1.0e-7) — the F0064 class (N51)~~ **DRIFTED 2026-07-29:** now fails as a ring-reject on a **developable** patch (FaceId 575, `tessellate_developable_patch` — not planar). 214 origin nodes, 0 arc samples, folds at idx 1/45/46 (144.2°, 180.0°, 176.6°). **NOT counted as seam-class:** the ring breaks into **~97 adjacency runs**, so ~45% of ring indices are seams and "fold near seam" carries no information. The **fragmentation itself** is the signal — a boundary shattered into ~97 micro-chains against different neighbour faces, which reads as the near-coincident-surface incidence family (R0050/R0053 kin) and is consistent with the old `s6-planar-loop-nonplanar` diagnosis. **CAVEAT: the run-splitting heuristic (twin-id delta > 12 or sign change) is crude and may over-fragment on irregular id allocation — verify the 97 before building on it** | PARTIAL (builder + fragmentation measured 2026-07-29; mint unconfirmed) | Stage-2/3 incidence (near-coincident surfaces) — was P3a-#146) | CONFIRMED (i6-coincident-tris probe) | DONE |
-| R0050 | Stage-4 LRR v58 | probe 2026-07-18: `YANG_TORUS_STOP site=gt2_partners` with **partners=[] (EMPTY)** — v58 (and v362 on the sibling torus) sit on torus intersection edges whose incidence records only ONE distinct surface (the base torus itself); the model has two near-identical revolve tori (R=3.95/r=2.63 vs R=3.78/r=2.52) — a Stage-2/3 **incidence gap between near-coincident revolve surfaces** (no partner to relocate onto). #131/N28 theory refuted | CONFIRMED (#171 pass 2) | P3a-#146 / Stage-2/3 incidence (near-coincident surfaces) |
+| R0050 | ~~Stage-4 LRR v58~~ ~~LRR v122 (op 2, torus∩conic endpoint mix)~~ op 3 `RelocationCrossedCarrierVertex` v413 (§4-I9) | **2026-09-12 (later): op 2's wall was the torus block's endpoint-mix STOP on a {cylinder, cap plane, torus} corner — the triple block now admits torus∩conic mixes (section above); op 3 is the §4.5.1 corner-transit class (v413 overruns A's corner v209 by 3.7e-2; `[451-transit] REFUSE NoRealCandidate`), R0085 kin.** probe 2026-07-18: `YANG_TORUS_STOP site=gt2_partners` with **partners=[] (EMPTY)** — v58 (and v362 on the sibling torus) sit on torus intersection edges whose incidence records only ONE distinct surface (the base torus itself); the model has two near-identical revolve tori (R=3.95/r=2.63 vs R=3.78/r=2.52) — a Stage-2/3 **incidence gap between near-coincident revolve surfaces** (no partner to relocate onto). #131/N28 theory refuted | CONFIRMED (#171 pass 2) | P3a-#146 / Stage-2/3 incidence (near-coincident surfaces) |
 | ~~R0063~~ | Stage-4 LRR (u32::MAX) | **FLIPPED CORRECT 2026-07-30 (1a9cee36); reconciled 2026-09-04 from the committed results.json history** probe 2026-07-17: `site=split_max_passes` — same class as R0009 (the #145 zigzag residual resolves into the split-budget class) | CONFIRMED (#171 sweep) | P3-§4.5.2 |
 | ~~R0077~~ | ~~Stage-4 LRR v3~~ OffCurve v154 (since 2026-07-28) | probe 2026-07-18: `YANG_TORUS_STOP site=pair_newton_none` — torus×plane implicit-pair Newton non-convergence at extreme scale (torus R=2051/r=1367, coords ~2700; the op's other two torus verts converge with rho ≈ 2e-13). Same class as R0025 | CONFIRMED (#171 pass 2) | ~~P3b-#137 (torus∩plane relocation family)~~ **FLIPPED CORRECT 2026-09-11: the pair-Newton wall was closed 2026-07-28 (ulp floor); the live wall was the torus block's `[s1, s2]` arm gating a box-edge × torus pierce (v154 / v161, 17° grazing, moves 259 / 371 along the edge) at the surface-pair corridor (251 / 243) instead of the KV11 LINE corridor (688 / 650) — `junction_line_divergence`, spec `yang_stage4_conic_triple_junction` "Junction-line amendment"; see the 2026-09-11 section** DONE |
 | ~~R0091~~ | Stage-4 LRR (u32::MAX) | **FLIPPED CORRECT 2026-07-21 (92188eaa); reconciled 2026-09-04 from the committed results.json history** probe 2026-07-17: `site=split_max_passes` — same class as R0009; STILL the historical silent-wrong trap: any fix must be re-CDT/refinement, never a merge | CONFIRMED (#171 sweep) | P3-§4.5.2 |

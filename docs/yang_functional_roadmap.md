@@ -9,6 +9,18 @@
 
 ## 0. Honest status (refreshed 2026-06-26; addendum 2026-09-04 below)
 
+> **2026-09-12 (later) refresh.** Canonical corpus **284C / 0W / 21E / 4EE / 0T + 3 UNSUPPORTED(coplanar-boolean)** (release, 8 jobs, 600 s; wall 730 s; F0085 331.2 s, R0044 295.9 s) — category-identical.
+> **R0050 advances op 2 → op 3** (spec `yang_stage4_conic_triple_junction.md`,
+> "Torus-edge candidates"): a torus∩cylinder pair-chain endpoint that is
+> also a cap-plane ruling endpoint ({cylinder, plane, torus}, exactly three
+> surfaces) hit the torus block's unconditional endpoint-mix STOP because
+> a torus edge populates no conic map (`n_maps = 1`) — the C0067 class with
+> a torus edge as the uncounted curve. The triple block now admits torus
+> vertices that are conic endpoints (`torus_edge_verts`, `triple_resolved`
+> skip in the torus block; monotone — the mix always STOPped). Op 3 STOPs
+> at §4-I9 `RelocationCrossedCarrierVertex` v413, the §4.5.1 corner-transit
+> class (R0085 kin). Exactly one detail move.
+>
 > **2026-09-12 refresh.** Canonical corpus **284C / 0W / 21E / 4EE / 0T + 3 UNSUPPORTED(coplanar-boolean)** (release, 8 jobs, 600 s; wall 712 s; F0085 317.6 s, R0044 293.2 s).
 > **C0067 FLIPPED CORRECT** — junction-map triple candidates (spec
 > `yang_stage4_conic_triple_junction.md`, 2026-09-12 amendment): the polar
