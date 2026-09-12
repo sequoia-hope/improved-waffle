@@ -383,10 +383,15 @@ fn output_improper_count(brep: &BRep) -> usize {
 /// three vertices within 9e-19 at model scale 4e-3, band 1e-12). Such a
 /// pair has no f64 image and is a zero-volume fin: dropping BOTH preserves
 /// every directed-edge pairing (spec `yang_collapse_membrane_cancellation`
-/// I1). The test is the KV10 rounding band `TAU_WORK·(1 + scale)` on all
-/// three pairwise separations — six orders below `MIN_FEATURE_SIZE`, so no
-/// model feature can qualify; the a4 adversary (macroscopic coincident faces)
-/// and same-winding or ≥3-copy groups stay LOUD (P9).
+/// I1). The test is "no f64 AREA": the triangle's height above its longest
+/// edge within the KV10 rounding band `TAU_WORK·(1 + scale)` — six orders
+/// below `MIN_FEATURE_SIZE`, so no model feature can qualify. It admits the
+/// bunched pleat (R0049, all three separations sub-band) and the NEEDLE
+/// (R0019 op 2, 2026-09-12: a B strip diagonal between two rim-junction
+/// mints lying in A's cap plane within 1e-18, sliced by A's cap triangles'
+/// slightly different exact planes into slivers 3.9e-4 long and 1.3e-18
+/// high); the a4 adversary (macroscopic coincident faces — macroscopic
+/// height) and same-winding or ≥3-copy groups stay LOUD (P9).
 ///
 /// `tris` and `orig_tri` are filtered in lockstep (the 2026-09-07 membrane
 /// lesson); vertices left unreferenced by a cancellation are compacted out
@@ -405,14 +410,53 @@ pub(crate) fn cancel_subresolution_pleats(
         let k = (0..3).min_by_key(|&i| tri[i]).expect("3 verts");
         [tri[k], tri[(k + 1) % 3], tri[(k + 2) % 3]]
     };
+    // The pair has no f64 image iff its triple has no f64 AREA: the height of
+    // the triangle above its longest edge is within the KV10 rounding band.
+    // A bunched pleat (R0049: all three separations sub-band) satisfies it
+    // trivially; so does a NEEDLE (R0019, 2026-09-12: two rim-junction mints
+    // on adjacent rims of B's cone band, both placed on A's cap plane, joined
+    // by a strip diagonal that lies in the cap plane within 1e-18 — A's cap
+    // triangles' exact planes differ at that order, so each crosses the
+    // diagonal at its own point and the arrangement emits slivers of exact
+    // area ~1e-22 that are 3.9e-4 long and 1.3e-18 high). A macroscopic
+    // coincident pair (the a4 adversary) has a macroscopic height and stays
+    // loud.
     let sub_band = |sorted: [u32; 3]| -> bool {
         let pts = sorted.map(|v| verts[v as usize].as_array());
-        (0..3).all(|i| {
-            let (p, q) = (pts[i], pts[(i + 1) % 3]);
-            let band = cad_primitives::TAU_WORK
-                * (1.0 + p.iter().chain(q.iter()).fold(0.0f64, |m, c| m.max(c.abs())));
-            (0..3).all(|k| (p[k] - q[k]).abs() <= band)
-        })
+        let band = cad_primitives::TAU_WORK
+            * (1.0
+                + pts
+                    .iter()
+                    .flat_map(|p| p.iter())
+                    .fold(0.0f64, |m, c| m.max(c.abs())));
+        let sub = |a: [f64; 3], b: [f64; 3]| [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+        let cross = |u: [f64; 3], w: [f64; 3]| {
+            [
+                u[1] * w[2] - u[2] * w[1],
+                u[2] * w[0] - u[0] * w[2],
+                u[0] * w[1] - u[1] * w[0],
+            ]
+        };
+        let norm = |v: [f64; 3]| (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+        // Longest edge (i → j), apex k.
+        let (mut longest, mut ij) = (-1.0f64, (0usize, 1usize));
+        for (i, j) in [(0, 1), (1, 2), (0, 2)] {
+            let len = norm(sub(pts[i], pts[j]));
+            if len > longest {
+                longest = len;
+                ij = (i, j);
+            }
+        }
+        let k = 3 - ij.0 - ij.1;
+        let u = sub(pts[ij.0], pts[ij.1]);
+        let twice_area = norm(cross(u, sub(pts[ij.0], pts[k])));
+        // All three coincident within the band ⇒ degenerate; otherwise the
+        // height above the longest edge.
+        if longest <= band {
+            return true;
+        }
+        let height = twice_area / longest;
+        height.partial_cmp(&band) != Some(std::cmp::Ordering::Greater)
     };
     let mut seen: HashMap<[u32; 3], usize> = HashMap::with_capacity(tris.len());
     let mut cancel: BTreeSet<usize> = BTreeSet::new();
@@ -428,7 +472,7 @@ pub(crate) fn cancel_subresolution_pleats(
                 if std::env::var_os("NONMANIFOLD_SITE_PROBE").is_some() {
                     eprintln!(
                         "NONMANIFOLD_SITE_PROBE i6.6-subres-pleat: CANCEL compact {prev_ci} {:?} \
-                         + compact {ci} {:?} (opposite winding, all separations within the \
+                         + compact {ci} {:?} (opposite winding, no f64 area within the \
                          rounding band)",
                         tris[prev_ci], t
                     );

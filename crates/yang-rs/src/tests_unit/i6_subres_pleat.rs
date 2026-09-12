@@ -138,3 +138,70 @@ pub(crate) fn clean_kept_set_is_untouched() {
     );
     assert_eq!((verts, tris), before);
 }
+
+/// The measured R0019 op-2 triple (compact 148/149/150, `NONMANIFOLD_SITE_PROBE`
+/// 2026-09-12): three points 3.9e-4 apart along one line with the middle
+/// one 1.3e-18 off it — a NEEDLE of exact area ~2.5e-22 that an A-cap
+/// sliver and a B-cone sliver share with opposite windings. No separation
+/// is sub-band (the I6.6 bunched-pleat form kept it loud); its HEIGHT is.
+fn needle_triple() -> Vec<Point3> {
+    vec![
+        p(
+            0.020770820342858737,
+            0.02276736121078749,
+            0.0052329567293667115,
+        ),
+        p(
+            0.021088177210912246,
+            0.02292342820939053,
+            0.005391590860417964,
+        ),
+        p(
+            0.021026624608225263,
+            0.022893158406135653,
+            0.005360823151809414,
+        ),
+    ]
+}
+
+/// A NEEDLE pleat (macroscopic length, sub-band height, opposite windings)
+/// cancels exactly like the bunched pleat: both triangles dropped, the tetra
+/// intact in lockstep, the three needle vertices compacted out.
+#[test]
+pub(crate) fn needle_pleat_cancels_and_compacts() {
+    let (mut verts, mut tris) = tetra();
+    verts.extend(needle_triple()); // 4, 5, 6
+    tris.insert(0, [4, 5, 6]);
+    tris.insert(1, [4, 6, 5]);
+    let mut orig_tri: Vec<usize> = vec![289, 63638, 10, 11, 12, 13];
+    let mut remap: Vec<Option<u32>> = (0..7u32).map(Some).collect();
+    let n = cancel_subresolution_pleats(&mut verts, &mut tris, &mut orig_tri, &mut remap)
+        .expect("a needle opposite-winding pair cancels");
+    assert_eq!(n, 2);
+    assert_eq!(tris, vec![[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]]);
+    assert_eq!(orig_tri, vec![10, 11, 12, 13]);
+    assert_eq!(verts.len(), 4, "the needle's vertices are compacted out");
+    assert_eq!(remap[4], None);
+    assert_eq!(remap[5], None);
+    assert_eq!(remap[6], None);
+}
+
+/// The same needle with a macroscopic height (the middle point lifted
+/// 1e-6 off the line — a MIN_FEATURE_SIZE sliver, six orders above the
+/// band) is a real coincident pair: loud.
+#[test]
+pub(crate) fn needle_with_feature_height_stays_loud() {
+    let (mut verts, mut tris) = tetra();
+    let mut needle = needle_triple();
+    let lifted = needle[2].as_array();
+    needle[2] = p(lifted[0], lifted[1], lifted[2] + 1e-6);
+    verts.extend(needle);
+    tris.insert(0, [4, 5, 6]);
+    tris.insert(1, [4, 6, 5]);
+    let mut orig_tri: Vec<usize> = vec![289, 63638, 10, 11, 12, 13];
+    let mut remap: Vec<Option<u32>> = (0..7u32).map(Some).collect();
+    assert_eq!(
+        cancel_subresolution_pleats(&mut verts, &mut tris, &mut orig_tri, &mut remap),
+        Err((0, 1))
+    );
+}

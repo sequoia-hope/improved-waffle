@@ -217,3 +217,40 @@ at f64 resolution), exactly as those three siblings do at their sites.
 Pins (`tests_unit/i6_subres_pleat.rs`): cancel + lockstep + compaction +
 remap re-key; macroscopic opposite pair loud; sub-band same-winding loud;
 third copy loud; clean set byte-identical.
+
+### 7.1 The f64-AREA form — needle pleats (2026-09-12, R0019 op 2)
+
+**Measured (R0019, `extrude(circle)` r 5e-3 − `revolve(gear)` 243°, model
+scale 2.3e-2; `NONMANIFOLD_SITE_PROBE`).** Three `i6-wedge-dedup:
+REJECT(winding)` sites, the first: compact triple `[148, 149, 150]` carried
+by `orig_t 289` raw `[161, 162, 163]` (A face 0, the cylinder's cap Plane,
+input tri 6) and `orig_t 63638` raw `[161, 32136, 163]` (B face 128, a
+Cone of half-angle 1.274, input tri 60342 = `[30923, 30924, 30691]`) with
+OPPOSITE windings; the weld cluster `149 = {162, 170, 171, 32136}`. The
+three compact points are all ON A's cap plane (|n·p + d| ≤ 8.7e-19) and
+COLLINEAR: 163 sits at t = 0.806 along 161 → 162 (length 3.876e-4),
+1.288e-18 off the line — a NEEDLE of area 2.5e-22. B's input triangle has
+161 and 162 as two of its vertices (bit-exact): the strip diagonal between
+two rim-junction mints on adjacent rims of the cone band, both minted ON A's
+cap, so the diagonal lies in the cap plane within rounding while the
+triangle's apex (30924) is 1.5e-4 below it. A's cap is planar only in f64 —
+its triangles' exact planes differ at the 1e-18 order — so each A triangle
+crosses that diagonal at its own exact point and the arrangement emits
+slivers of exact area ~1e-22 along it, one per operand, welded onto one
+triple. The I6.6 test (all three separations within the band) is a
+BUNCHED-pleat test; the needle's separations are macroscopic, so it fell
+through to the backstop: `input B-Rep is not 2-manifold` at 164 s.
+
+**Rule (generalized, same function).** "No f64 image" is "no f64 AREA":
+the pair cancels iff its triple's height above its longest edge is within
+the KV10 rounding band `TAU_WORK·(1 + scale)` (all three coincident within
+the band counts as degenerate). The bunched pleat satisfies it trivially
+(height ≤ longest edge ≤ band); the needle by its height; the a4 adversary
+(macroscopic coincident faces) has a macroscopic height and stays loud, as
+do same-winding pairs and ≥3-copy groups. Everything else in §7 (lockstep,
+compaction, remap) is unchanged.
+
+Pins added: `needle_pleat_cancels_and_compacts` (the measured triple; both
+dropped, tetra intact, vertices compacted) and
+`needle_with_feature_height_stays_loud` (the middle point lifted 1e-6 —
+a MIN_FEATURE_SIZE sliver — is a real pair: `Err`).
